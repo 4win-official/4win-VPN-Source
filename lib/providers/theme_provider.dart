@@ -1,26 +1,70 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum AppTheme {
+  system,  // دیفالت - دارک/لایت عادی
+  snow,    // تم برفی
+  pixel,   // تم پیکسلی
+  pink,    // تم صورتی کیوت (فقط لایت مود)
+  rain,    // تم بارانی
+}
+
 class ThemeProvider with ChangeNotifier {
-  static const String _themeKey = 'is_dark_mode';
+  static const String _darkModeKey = 'is_dark_mode';
+  static const String _themeKey = 'selected_theme';
+  
   bool _isDarkMode = false;
+  AppTheme _selectedTheme = AppTheme.system;
 
   bool get isDarkMode => _isDarkMode;
+  AppTheme get selectedTheme => _selectedTheme;
+  bool get isThemeActive => _selectedTheme != AppTheme.system;
 
   ThemeProvider() {
-    _loadTheme();
+    _loadSettings();
   }
 
-  Future<void> _loadTheme() async {
+  Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    _isDarkMode = prefs.getBool(_themeKey) ?? false;
+    _isDarkMode = prefs.getBool(_darkModeKey) ?? false;
+    final themeIndex = prefs.getInt(_themeKey) ?? 0;
+    _selectedTheme = AppTheme.values[themeIndex];
     notifyListeners();
   }
 
   Future<void> toggleTheme() async {
+    // تم برفی، صورتی و بارانی قفل هستند
+    if (_selectedTheme == AppTheme.snow || _selectedTheme == AppTheme.pink || _selectedTheme == AppTheme.rain) return;
+    
     _isDarkMode = !_isDarkMode;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_themeKey, _isDarkMode);
+    await prefs.setBool(_darkModeKey, _isDarkMode);
+    notifyListeners();
+  }
+
+  Future<void> setTheme(AppTheme theme) async {
+    _selectedTheme = theme;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_themeKey, theme.index);
+    
+    // تم برفی: دارک مود فعال
+    if (theme == AppTheme.snow) {
+      _isDarkMode = true;
+      await prefs.setBool(_darkModeKey, true);
+    }
+    
+    // تم صورتی: فقط لایت مود
+    if (theme == AppTheme.pink) {
+      _isDarkMode = false;
+      await prefs.setBool(_darkModeKey, false);
+    }
+    
+    // تم بارانی: دارک مود فعال
+    if (theme == AppTheme.rain) {
+      _isDarkMode = true;
+      await prefs.setBool(_darkModeKey, true);
+    }
+    
     notifyListeners();
   }
 

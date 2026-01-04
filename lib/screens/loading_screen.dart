@@ -42,7 +42,7 @@ class _LoadingScreenState extends State<LoadingScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
+      backgroundColor: isDark ? const Color(0xFF000000) : Colors.white, // Pure black
       body: SafeArea(
         child: Center(
           child: Consumer<VpnProvider>(

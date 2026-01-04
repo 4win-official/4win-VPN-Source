@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Trust user-added CAs for debugging -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    
+    <!-- VPN domain trust -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">4win.com</domain>
+        <domain includeSubdomains="true">forwin.com</domain>
+    </domain-config>
+</network-security-config>

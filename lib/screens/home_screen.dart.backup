@@ -1,0 +1,688 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/vpn_provider.dart';
+import '../providers/theme_provider.dart';
+import '../widgets/snow_animation.dart';
+import '../widgets/pixel_effect.dart';
+import '../widgets/protocol_selector_dialog.dart';
+import 'donate_screen.dart';
+import 'theme_selection_screen.dart';
+import 'settings_screen.dart';
+import 'dns_servers_screen.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+  late AnimationController _neonController;
+  late Animation<Color?> _neonAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    
+    // Neon animation controller
+    _neonController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+    
+    _neonAnimation = ColorTween(
+      begin: const Color(0xFF00FFFF), // Cyan
+      end: const Color(0xFFFF00FF),   // Magenta
+    ).animate(_neonController);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _neonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    // Reset app when user exits (only if VPN is NOT connected)
+    if (state == AppLifecycleState.paused) {
+      final provider = context.read<VpnProvider>();
+      if (!provider.isConnected) {
+        provider.resetState();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    final themeProvider = context.watch<ThemeProvider>();
+    final isSnowTheme = themeProvider.selectedTheme == AppTheme.snow;
+    final isPixelTheme = themeProvider.selectedTheme == AppTheme.pixel;
+    final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
+    final isNeonTheme = themeProvider.selectedTheme == AppTheme.neon;
+    
+    // Pink theme colors (light mode only, cute pink & white)
+    final bgColor = isPinkTheme 
+        ? const Color(0xFFFFF0F5) // لاوندر صورتی خیلی روشن
+        : (isDark ? const Color(0xFF000000) : Colors.white);
+    final iconColor = isPinkTheme
+        ? const Color(0xFFFF69B4) // صورتی داغ
+        : (isDark ? Colors.white70 : Colors.black54);
+    final textColor = isPinkTheme
+        ? const Color(0xFFFF1493) // صورتی تیره
+        : (isDark ? Colors.white : Colors.black87);
+    
+    return Scaffold(
+      backgroundColor: bgColor,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent, // شفاف - یکپارچه
+        elevation: 0,
+        title: Text(
+          '4win VPN',
+          style: TextStyle(
+            color: textColor,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        actions: [
+          // Theme Selection Button
+          IconButton(
+            icon: Icon(
+              Icons.palette_outlined,
+              color: iconColor,
+            ),
+            tooltip: 'VPN Themes',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ThemeSelectionScreen(),
+                ),
+              );
+            },
+          ),
+          
+          // Dark Mode Toggle (فقط اگر تم برفی نباشد - تم پیکسلی می‌تونه دارک/لایت داشته باشه)
+          if (themeProvider.selectedTheme != AppTheme.snow)
+            IconButton(
+              icon: Icon(
+                themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                color: iconColor,
+              ),
+              tooltip: 'Toggle Theme',
+              onPressed: () => themeProvider.toggleTheme(),
+            ),
+          
+          // Donate Button
+          IconButton(
+            icon: Icon(Icons.favorite_border, color: iconColor),
+            tooltip: 'Support Us',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const DonateScreen(),
+                ),
+              );
+            },
+          ),
+          
+          // Refresh Button
+          Consumer<VpnProvider>(
+            builder: (context, provider, _) {
+              return IconButton(
+                icon: provider.isLoadingServers
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(iconColor),
+                        ),
+                      )
+                    : Icon(Icons.refresh, color: iconColor),
+                onPressed: provider.isLoadingServers
+                    ? null
+                    : () => provider.refreshServers(),
+              );
+            },
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false, // اجازه به محتوا برای رفتن زیر AppBar
+        child: Consumer<VpnProvider>(
+          builder: (context, provider, _) {
+            return Stack(
+              children: [
+                // انیمیشن برف (فقط در تم برفی)
+                if (isSnowTheme)
+                  const Positioned.fill(
+                    child: SnowAnimation(),
+                  ),
+                
+                // افکت پیکسلی (فقط در تم پیکسلی)
+                if (isPixelTheme)
+                  const Positioned.fill(
+                    child: PixelEffect(),
+                  ),
+                
+                // نور ملایم از پایین صفحه - با انیمیشن نرم
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 800), // انیمیشن آهسته و نرم
+                    curve: Curves.easeInOut,
+                    height: 200,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          _getGlowColor(provider.status, isDark).withValues(alpha: isDark ? 0.4 : 0.2),
+                          _getGlowColor(provider.status, isDark).withValues(alpha: isDark ? 0.2 : 0.1),
+                          _getGlowColor(provider.status, isDark).withValues(alpha: 0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                
+                // محتوای اصلی
+                Column(
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: Consumer<VpnProvider>(
+                          builder: (context, provider, _) {
+                    // REMOVED: No loading screen - always show main UI
+                    // Show Connecting status immediately when user taps Connect
+                    
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Protocol Selector Button
+                        Consumer<VpnProvider>(
+                          builder: (context, vpnProvider, _) {
+                            return GestureDetector(
+                              onTap: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => const ProtocolSelectorDialog(),
+                                );
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(horizontal: 32),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: isDark 
+                                      ? const Color(0xFF1A1A1A).withValues(alpha: 0.5)
+                                      : Colors.white.withValues(alpha: 0.9),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: isDark 
+                                        ? Colors.white.withValues(alpha: 0.2)
+                                        : Colors.black.withValues(alpha: 0.1),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          vpnProvider.selectedProtocol == 'sstp'
+                                              ? Icons.vpn_key
+                                              : Icons.dns,
+                                          color: vpnProvider.selectedProtocol == 'sstp'
+                                              ? Colors.green
+                                              : Colors.blue,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Text(
+                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : "Direct DNS"}',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: isDark ? Colors.white : Colors.black87,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Icon(
+                                      Icons.arrow_forward_ios,
+                                      size: 16,
+                                      color: isDark ? Colors.white54 : Colors.black54,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        
+                        const SizedBox(height: 24),
+                        
+                        // Connection Status Text
+                        Text(
+                          _getStatusText(provider.status),
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isDark ? Colors.white70 : Colors.black54,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 40),
+                        
+                        // Connect Button
+                        AnimatedBuilder(
+                          animation: _neonAnimation,
+                          builder: (context, child) {
+                            return GestureDetector(
+                              onTap: () => _handleConnectTap(context, provider),
+                              onLongPress: () => _handleLongPress(context),
+                              child: Container(
+                                width: 200,
+                                height: 200,
+                                decoration: BoxDecoration(
+                                  // تم پیکسلی: مربع با گوشه‌های تیز
+                                  // تم عادی: دایره
+                                  shape: isPixelTheme ? BoxShape.rectangle : BoxShape.circle,
+                                  borderRadius: isPixelTheme ? BorderRadius.zero : null,
+                                  color: isNeonTheme 
+                                      ? _neonAnimation.value 
+                                      : _getButtonColor(provider.status, isDark, isPinkTheme),
+                                  border: isPixelTheme 
+                                      ? Border.all(
+                                          color: Colors.black.withValues(alpha: 0.3),
+                                          width: 4,
+                                        )
+                                      : null,
+                                  boxShadow: isPixelTheme
+                                      ? [
+                                          // سایه پیکسلی (بدون blur)
+                                          BoxShadow(
+                                            offset: const Offset(8, 8),
+                                            blurRadius: 0,
+                                            color: Colors.black.withValues(alpha: 0.5),
+                                          ),
+                                        ]
+                                      : isNeonTheme
+                                          ? [
+                                              // Neon glow effect
+                                              BoxShadow(
+                                                color: _neonAnimation.value!.withValues(alpha: 0.8),
+                                                blurRadius: 60,
+                                                spreadRadius: 15,
+                                              ),
+                                              BoxShadow(
+                                                color: _neonAnimation.value!.withValues(alpha: 0.6),
+                                                blurRadius: 100,
+                                                spreadRadius: 30,
+                                              ),
+                                            ]
+                                          : isDark ? [
+                                              // نئون گلو در dark mode
+                                              BoxShadow(
+                                                color: _getButtonColor(provider.status, isDark, isPinkTheme).withValues(alpha: 0.6),
+                                                blurRadius: 40,
+                                                spreadRadius: 10,
+                                              ),
+                                              BoxShadow(
+                                                color: _getButtonColor(provider.status, isDark, isPinkTheme).withValues(alpha: 0.4),
+                                                blurRadius: 80,
+                                                spreadRadius: 20,
+                                              ),
+                                            ] : [
+                                              BoxShadow(
+                                                color: _getButtonColor(provider.status, isDark, isPinkTheme).withValues(alpha: 0.3),
+                                                blurRadius: 20,
+                                                spreadRadius: 5,
+                                              ),
+                                            ],
+                                ),
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: Center(
+                            child: provider.isConnecting
+                                  ? CircularProgressIndicator(
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        isDark ? Colors.black87 : Colors.white
+                                      ),
+                                      strokeWidth: 3,
+                                    )
+                                  : Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        // Main icon
+                                        Icon(
+                                          _getButtonIcon(provider.status),
+                                          size: 80,
+                                          color: isDark ? Colors.black87 : Colors.white,
+                                        ),
+                                        // Snow overlay (only in Snow theme)
+                                        if (isSnowTheme)
+                                          Positioned.fill(
+                                            child: Image.asset(
+                                              'assets/images/snow_button_overlay.png',
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ),
+                        
+                        const SizedBox(height: 40),
+                        
+                        // Data Usage Info (only for SSTP)
+                        if (provider.isConnected && provider.selectedProtocol == 'sstp')
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: Text(
+                              provider.dataUsage,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark ? Colors.white70 : Colors.black87,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        
+                        // Connection Duration
+                        if (provider.isConnected && provider.connectionDuration.inSeconds > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Column(
+                              children: [
+                                Text(
+                                  _formatDuration(provider.connectionDuration),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: isDark ? Colors.white54 : Colors.black54,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                // Show ping (همیشه نمایش داده شود)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.network_ping,
+                                        size: 16,
+                                        color: provider.currentPing != null 
+                                            ? _getPingColor(provider.currentPing!)
+                                            : (isDark ? Colors.white38 : Colors.black38),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        provider.currentPing != null 
+                                            ? '${provider.currentPing}ms'
+                                            : 'Testing...',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: provider.currentPing != null
+                                              ? _getPingColor(provider.currentPing!)
+                                              : (isDark ? Colors.white38 : Colors.black38),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        
+                        // Error Message
+                        if (provider.errorMessage != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16, left: 32, right: 32),
+                            child: Text(
+                              provider.errorMessage!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark ? Colors.red[300]! : Colors.red,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+            
+            // Server Action Button (Next Server for SSTP, Server List for DNS)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Consumer<VpnProvider>(
+                builder: (context, provider, _) {
+                  // DNS: Always show "Server List" button
+                  if (provider.selectedProtocol == 'direct_dns') {
+                    return SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const DnsServersScreen(),
+                            ),
+                          );
+                        },
+                        icon: Icon(
+                          Icons.dns,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                        label: Text(
+                          'Server List',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  
+                  // SSTP: Show "Next Server" only when connected
+                  if (!provider.isConnected) {
+                    return const SizedBox.shrink();
+                  }
+                  
+                  return SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: provider.isConnecting ? null : () => provider.connectToNextServer(),
+                      icon: Icon(
+                        Icons.skip_next,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                      label: Text(
+                        'Next Server',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+  String _getStatusText(VpnConnectionStatus status) {
+    switch (status) {
+      case VpnConnectionStatus.connected:
+        return 'Connected';
+      case VpnConnectionStatus.connecting:
+        return 'Connecting...';
+      case VpnConnectionStatus.disconnecting:
+        return 'Disconnecting...';
+      case VpnConnectionStatus.disconnected:
+        return 'Disconnected';
+      case VpnConnectionStatus.error:
+        return 'Error';
+    }
+  }
+
+  Color _getButtonColor(VpnConnectionStatus status, bool isDark, bool isPinkTheme) {
+    // Pink theme colors
+    if (isPinkTheme) {
+      switch (status) {
+        case VpnConnectionStatus.connected:
+          return const Color(0xFFFF69B4); // Hot pink
+        case VpnConnectionStatus.connecting:
+        case VpnConnectionStatus.disconnecting:
+          return const Color(0xFFFFB6C1); // Light pink
+        case VpnConnectionStatus.disconnected:
+          return const Color(0xFFFFDAE9); // Very light pink
+        case VpnConnectionStatus.error:
+          return const Color(0xFFFF1493); // Deep pink
+      }
+    }
+    
+    // Default colors for other themes
+    switch (status) {
+      case VpnConnectionStatus.connected:
+        return isDark ? const Color(0xFF00FF88) : const Color(0xFF4CAF50); // نئون سبز
+      case VpnConnectionStatus.connecting:
+      case VpnConnectionStatus.disconnecting:
+        return isDark ? const Color(0xFFFF9944) : Colors.orange; // نئون نارنجی
+      case VpnConnectionStatus.disconnected:
+        return isDark ? Colors.white : Colors.black87; // سفید در dark mode
+      case VpnConnectionStatus.error:
+        return isDark ? const Color(0xFFFF4466) : Colors.red; // نئون قرمز
+    }
+  }
+
+  Color _getPingColor(int ping) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    if (ping < 100) {
+      return isDark ? const Color(0xFF00FF88) : Colors.green; // نئون سبز
+    }
+    if (ping < 200) {
+      return isDark ? const Color(0xFF88FF44) : Colors.lightGreen; // نئون سبز روشن
+    }
+    if (ping < 400) {
+      return isDark ? const Color(0xFFFF9944) : Colors.orange; // نئون نارنجی
+    }
+    return isDark ? const Color(0xFFFF4466) : Colors.red; // نئون قرمز
+  }
+
+  // رنگ نور ملایم از پایین صفحه
+  Color _getGlowColor(VpnConnectionStatus status, bool isDark) {
+    switch (status) {
+      case VpnConnectionStatus.connected:
+        return isDark ? const Color(0xFF00FF88) : const Color(0xFF4CAF50); // نئون سبز
+      case VpnConnectionStatus.connecting:
+      case VpnConnectionStatus.disconnecting:
+        return isDark ? const Color(0xFFFF9944) : Colors.orange; // نئون نارنجی
+      case VpnConnectionStatus.disconnected:
+        return isDark ? Colors.grey : Colors.grey.shade400; // خاکستری وقتی وصل نیست
+      case VpnConnectionStatus.error:
+        return isDark ? const Color(0xFFFF4466) : Colors.red; // نئون قرمز فقط برای ارور
+    }
+  }
+
+  IconData _getButtonIcon(VpnConnectionStatus status) {
+    switch (status) {
+      case VpnConnectionStatus.connected:
+        return Icons.power_settings_new;
+      case VpnConnectionStatus.connecting:
+      case VpnConnectionStatus.disconnecting:
+        return Icons.sync;
+      case VpnConnectionStatus.disconnected:
+        return Icons.power_settings_new;
+      case VpnConnectionStatus.error:
+        return Icons.error_outline;
+    }
+  }
+
+  void _handleConnectTap(BuildContext context, VpnProvider provider) {
+    if (provider.isConnecting) {
+      // وقتی در حال اتصال است، اگر کاربر تپ کند، قطع شود
+      provider.disconnect();
+      return;
+    }
+
+    if (provider.isConnected) {
+      provider.disconnect();
+    } else {
+      // Check if DNS mode and no server selected
+      if (provider.selectedProtocol == 'direct_dns' && provider.selectedDnsServer == null) {
+        // Show message: Please select DNS server first
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select a DNS server from Server List first'),
+            duration: Duration(seconds: 3),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+      
+      provider.connect();
+    }
+  }
+
+  void _handleLongPress(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SettingsScreen(),
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours.toString().padLeft(2, '0');
+    final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
+    final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
+    return '$hours:$minutes:$seconds';
+  }
+}

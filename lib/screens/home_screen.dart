@@ -2,7 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../providers/theme_provider.dart';
+import '../widgets/snow_animation.dart';
+import '../widgets/pixel_effect.dart';
+import '../widgets/rain_animation.dart';
+import '../widgets/protocol_selector_dialog.dart';
 import 'donate_screen.dart';
+import 'theme_selection_screen.dart';
+import 'settings_screen.dart';
+import 'dns_servers_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -41,14 +48,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF121212) : Colors.white;
-    final iconColor = isDark ? Colors.white70 : Colors.black54;
-    final textColor = isDark ? Colors.white : Colors.black87;
+    
+    final themeProvider = context.watch<ThemeProvider>();
+    final isSnowTheme = themeProvider.selectedTheme == AppTheme.snow;
+    final isPixelTheme = themeProvider.selectedTheme == AppTheme.pixel;
+    final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
+    final isRainTheme = themeProvider.selectedTheme == AppTheme.rain;
+    
+    // Theme-specific colors
+    final bgColor = isPinkTheme 
+        ? const Color(0xFFFFF0F5) // لاوندر صورتی روشن
+        : (isDark ? const Color(0xFF000000) : Colors.white); // سیاه کامل در دارک مود
+    
+    final iconColor = isPinkTheme
+        ? const Color(0xFFFF69B4) // صورتی داغ
+        : (isDark ? Colors.white70 : Colors.black54);
+    
+    final textColor = isPinkTheme
+        ? const Color(0xFFFF1493) // صورتی تیره
+        : (isDark ? Colors.white : Colors.black87);
+    
+    // تم پیکسلی می‌تونه دارک یا لایت باشه (بر خلاف تم برفی که فقط دارک است)
     
     return Scaffold(
       backgroundColor: bgColor,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        backgroundColor: Colors.transparent, // شفاف - یکپارچه
         elevation: 0,
         title: Text(
           '4win VPN',
@@ -59,19 +85,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
         actions: [
-          // Dark Mode Toggle
-          Consumer<ThemeProvider>(
-            builder: (context, themeProvider, _) {
-              return IconButton(
-                icon: Icon(
-                  themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                  color: iconColor,
+          // Theme Selection Button
+          IconButton(
+            icon: Icon(
+              Icons.palette_outlined,
+              color: iconColor,
+            ),
+            tooltip: 'VPN Themes',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ThemeSelectionScreen(),
                 ),
-                tooltip: 'Toggle Theme',
-                onPressed: () => themeProvider.toggleTheme(),
               );
             },
           ),
+          
+          // Dark Mode Toggle (فقط اگر تم برفی نباشد - تم پیکسلی می‌تونه دارک/لایت داشته باشه)
+          if (themeProvider.selectedTheme != AppTheme.snow)
+            IconButton(
+              icon: Icon(
+                themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                color: iconColor,
+              ),
+              tooltip: 'Toggle Theme',
+              onPressed: () => themeProvider.toggleTheme(),
+            ),
           
           // Donate Button
           IconButton(
@@ -110,16 +150,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
       body: SafeArea(
+        top: false, // اجازه به محتوا برای رفتن زیر AppBar
         child: Consumer<VpnProvider>(
           builder: (context, provider, _) {
             return Stack(
               children: [
-                // نور ملایم از پایین صفحه
+                // انیمیشن برف (فقط در تم برفی)
+                if (isSnowTheme)
+                  const Positioned.fill(
+                    child: SnowAnimation(),
+                  ),
+                
+                // افکت پیکسلی (فقط در تم پیکسلی)
+                if (isPixelTheme)
+                  const Positioned.fill(
+                    child: PixelEffect(),
+                  ),
+                
+                // انیمیشن باران (فقط در تم بارانی)
+                if (isRainTheme)
+                  const Positioned.fill(
+                    child: RainAnimation(),
+                  ),
+                
+                // نور ملایم از پایین صفحه - با انیمیشن نرم
                 Positioned(
                   bottom: 0,
                   left: 0,
                   right: 0,
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 800), // انیمیشن آهسته و نرم
+                    curve: Curves.easeInOut,
                     height: 200,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -167,6 +228,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     return Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
+                        // Protocol Selector Button
+                        Consumer<VpnProvider>(
+                          builder: (context, vpnProvider, _) {
+                            return GestureDetector(
+                              onTap: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => const ProtocolSelectorDialog(),
+                                );
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(horizontal: 32),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: isDark 
+                                      ? const Color(0xFF1A1A1A).withValues(alpha: 0.5)
+                                      : Colors.white.withValues(alpha: 0.9),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: isDark 
+                                        ? Colors.white.withValues(alpha: 0.2)
+                                        : Colors.black.withValues(alpha: 0.1),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          vpnProvider.selectedProtocol == 'sstp'
+                                              ? Icons.vpn_key
+                                              : Icons.dns,
+                                          color: vpnProvider.selectedProtocol == 'sstp'
+                                              ? Colors.green
+                                              : Colors.blue,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Text(
+                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : "Direct DNS"}',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: isDark ? Colors.white : Colors.black87,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Icon(
+                                      Icons.arrow_forward_ios,
+                                      size: 16,
+                                      color: isDark ? Colors.white54 : Colors.black54,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        
+                        const SizedBox(height: 24),
+                        
                         // Connection Status Text
                         Text(
                           _getStatusText(provider.status),
@@ -181,31 +306,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         // Connect Button
                         GestureDetector(
                           onTap: () => _handleConnectTap(context, provider),
+                          onLongPress: () => _handleLongPress(context),
                           child: Container(
                             width: 200,
                             height: 200,
                             decoration: BoxDecoration(
-                              shape: BoxShape.circle,
+                              // تم پیکسلی: مربع با گوشه‌های تیز
+                              // تم عادی: دایره
+                              shape: isPixelTheme ? BoxShape.rectangle : BoxShape.circle,
+                              borderRadius: isPixelTheme ? BorderRadius.zero : null,
                               color: _getButtonColor(provider.status, isDark),
-                              boxShadow: isDark ? [
-                                // نئون گلو در dark mode
-                                BoxShadow(
-                                  color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.6),
-                                  blurRadius: 40,
-                                  spreadRadius: 10,
-                                ),
-                                BoxShadow(
-                                  color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.4),
-                                  blurRadius: 80,
-                                  spreadRadius: 20,
-                                ),
-                              ] : [
-                                BoxShadow(
-                                  color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.3),
-                                  blurRadius: 20,
-                                  spreadRadius: 5,
-                                ),
-                              ],
+                              border: isPixelTheme 
+                                  ? Border.all(
+                                      color: Colors.black.withValues(alpha: 0.3),
+                                      width: 4,
+                                    )
+                                  : null,
+                              boxShadow: isPixelTheme
+                                  ? [
+                                      // سایه پیکسلی (بدون blur)
+                                      BoxShadow(
+                                        offset: const Offset(8, 8),
+                                        blurRadius: 0,
+                                        color: Colors.black.withValues(alpha: 0.5),
+                                      ),
+                                    ]
+                                  : isDark ? [
+                                      // نئون گلو در dark mode
+                                      BoxShadow(
+                                        color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.6),
+                                        blurRadius: 40,
+                                        spreadRadius: 10,
+                                      ),
+                                      BoxShadow(
+                                        color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.4),
+                                        blurRadius: 80,
+                                        spreadRadius: 20,
+                                      ),
+                                    ] : [
+                                      BoxShadow(
+                                        color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.3),
+                                        blurRadius: 20,
+                                        spreadRadius: 5,
+                                      ),
+                                    ],
                             ),
                             child: Center(
                               child: provider.isConnecting
@@ -308,11 +452,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             
-            // Next Server Button (only show when connected)
+            // Server Action Button (Next Server for SSTP, Server List for DNS)
             Padding(
               padding: const EdgeInsets.all(24),
               child: Consumer<VpnProvider>(
                 builder: (context, provider, _) {
+                  // DNS: Always show "Server List" button
+                  if (provider.selectedProtocol == 'direct_dns') {
+                    return SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const DnsServersScreen(),
+                            ),
+                          );
+                        },
+                        icon: Icon(
+                          Icons.dns,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                        label: Text(
+                          'Server List',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  
+                  // SSTP: Show "Next Server" only when connected
                   if (!provider.isConnected) {
                     return const SizedBox.shrink();
                   }
@@ -371,6 +552,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Color _getButtonColor(VpnConnectionStatus status, bool isDark) {
+    final themeProvider = context.watch<ThemeProvider>();
+    final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
+    
+    // Pink theme: همه چی صورتی
+    if (isPinkTheme) {
+      switch (status) {
+        case VpnConnectionStatus.connected:
+          return const Color(0xFFFF1493); // Deep pink
+        case VpnConnectionStatus.connecting:
+        case VpnConnectionStatus.disconnecting:
+          return const Color(0xFFFF69B4); // Hot pink
+        case VpnConnectionStatus.disconnected:
+          return const Color(0xFFFFB6C1); // Light pink
+        case VpnConnectionStatus.error:
+          return const Color(0xFFDC143C); // Crimson
+      }
+    }
+    
+    // Default theme colors
     switch (status) {
       case VpnConnectionStatus.connected:
         return isDark ? const Color(0xFF00FF88) : const Color(0xFF4CAF50); // نئون سبز
@@ -408,8 +608,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case VpnConnectionStatus.disconnecting:
         return isDark ? const Color(0xFFFF9944) : Colors.orange; // نئون نارنجی
       case VpnConnectionStatus.disconnected:
+        return isDark ? Colors.grey : Colors.grey.shade400; // خاکستری وقتی وصل نیست
       case VpnConnectionStatus.error:
-        return isDark ? const Color(0xFFFF4466) : Colors.red; // نئون قرمز
+        return isDark ? const Color(0xFFFF4466) : Colors.red; // نئون قرمز فقط برای ارور
     }
   }
 
@@ -429,7 +630,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _handleConnectTap(BuildContext context, VpnProvider provider) {
     if (provider.isConnecting) {
-      return; // Do nothing while connecting
+      // وقتی در حال اتصال است، اگر کاربر تپ کند، قطع شود
+      provider.disconnect();
+      return;
     }
 
     if (provider.isConnected) {
@@ -437,6 +640,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } else {
       provider.connect();
     }
+  }
+
+  void _handleLongPress(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SettingsScreen(),
+      ),
+    );
   }
 
   String _formatDuration(Duration duration) {

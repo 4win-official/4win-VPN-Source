@@ -7,11 +7,16 @@ import 'package:flutter/foundation.dart';
 import '../models/vpn_server.dart';
 
 class ServerService {
-  static const String serverUrl = 'https://v-1.storage.c2.liara.space/1/gate.txt';
+  // لینک سرور - محرمانه (هرگز به کاربر نمایش داده نمی‌شود)
+  static const String _serverUrl = 'https://v-1.storage.c2.liara.space/1/gate.txt';
   static const String cacheKey = 'cached_servers';
   static const String lastUpdateKey = 'last_server_update';
   static const Duration cacheExpiration = Duration(hours: 6);
-  static const int concurrentTests = 100; // تعداد تست همزمان - افزایش به 100
+  // تعداد تست همزمان - قابل تنظیم از Settings
+  static Future<int> getConcurrentTests() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('concurrent_tests') ?? 100; // پیش‌فرض 100
+  }
 
   /// Fetch servers from URL
   Future<List<VpnServer>> fetchServers({bool forceRefresh = false}) async {
@@ -24,9 +29,9 @@ class ServerService {
         }
       }
 
-      // Fetch from network
+      // Fetch from network (URL محرمانه - از _serverUrl استفاده می‌شود)
       final response = await http.get(
-        Uri.parse(serverUrl),
+        Uri.parse(_serverUrl),
         headers: {
           'User-Agent': '4win-VPN/1.0',
         },
@@ -120,41 +125,62 @@ class ServerService {
     try {
       final stopwatch = Stopwatch()..start();
       
-      // تست اتصال واقعی به پورت SSTP
+      // تست اتصال واقعی به پورت SSTP با تایم‌اوت بیشتر (5 ثانیه)
       final socket = await Socket.connect(
         server.address,
         server.port,
-        timeout: const Duration(seconds: 2),
+        timeout: const Duration(seconds: 5), // تایم‌اوت بزرگتر
       );
       
       stopwatch.stop();
       
-      // تست خواندن/نوشتن چندگانه برای اطمینان از قابلیت اتصال کامل
+      // تست دقیق‌تر: چک کردن اینکه سرور واقعاً پاسخ میده
       try {
-        // ارسال داده‌های تست
-        socket.write('SSTP_TEST\n');
+        // ارسال داده تست واقعی
+        socket.write('CONNECT\r\n');
         await socket.flush();
         
         // صبر کمی برای پاسخ
         await Future.delayed(const Duration(milliseconds: 100));
         
-        // بررسی اینکه سوکت هنوز فعال است
+        // چک کردن اینکه سوکت هنوز زنده است
         if (socket.remoteAddress.address.isEmpty) {
           await socket.close();
-          return null;
+          return null; // سرور فیک - پینگ نداد
+        }
+        
+        // تلاش برای خواندن هر داده‌ای - اگه هیچی نیومد هم OK
+        // مهم اینه که سوکت باز بمونه
+        bool socketAlive = true;
+        try {
+          socket.listen(
+            (data) {}, 
+            onDone: () => socketAlive = false,
+            onError: (e) => socketAlive = false,
+            cancelOnError: true,
+          );
+          
+          await Future.delayed(const Duration(milliseconds: 200));
+          
+          if (!socketAlive) {
+            await socket.close();
+            return null; // سرور قطع کرد - فیک است
+          }
+        } catch (e) {
+          // خطا در خواندن - ولی سوکت زنده بود
         }
       } catch (e) {
         await socket.close();
-        return null;
+        return null; // خطا - سرور قابل اتصال نیست
       }
       
       await socket.close();
       
       final ping = stopwatch.elapsedMilliseconds;
       
-      // خیلی سختگیرانه: فقط < 600ms
-      // این تضمین می‌کند سرور واقعاً قابل اتصال است
-      return ping < 600 ? ping : null;
+      // سختگیرانه: فقط < 800ms (کمی بیشتر از قبل برای اطمینان از سرور سالم)
+      // این تضمین می‌کند سرور واقعاً قابل اتصال و پایدار است
+      return ping < 800 ? ping : null;
     } catch (e) {
       return null; // Server unreachable
     }
@@ -169,14 +195,17 @@ class ServerService {
     final totalServers = servers.length;
     int testedCount = 0;
 
+    // دریافت تعداد تست همزمان از تنظیمات
+    final int batchSize = await getConcurrentTests();
+    
     if (kDebugMode) {
-      debugPrint('🔍 Testing $totalServers servers in batches of $concurrentTests...');
+      debugPrint('🔍 Testing $totalServers servers in batches of $batchSize...');
     }
 
-    // تقسیم سرورها به batch های 50 تایی
-    for (int i = 0; i < servers.length; i += concurrentTests) {
-      final end = (i + concurrentTests < servers.length) 
-          ? i + concurrentTests 
+    // تقسیم سرورها به batch ها
+    for (int i = 0; i < servers.length; i += batchSize) {
+      final int end = (i + batchSize < servers.length) 
+          ? i + batchSize 
           : servers.length;
       
       final batch = servers.sublist(i, end);

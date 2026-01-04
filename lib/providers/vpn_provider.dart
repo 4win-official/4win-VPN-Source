@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vpn_server.dart';
+import '../models/dns_server.dart';
 import '../services/server_service.dart';
 import '../services/vpn_service.dart';
+import '../services/dns_service.dart';
+import '../services/dns_vpn_connection.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -10,9 +14,20 @@ export '../services/vpn_service.dart' show VpnConnectionStatus;
 class VpnProvider with ChangeNotifier {
   final ServerService _serverService = ServerService();
   final VpnService _vpnService = VpnService();
+  final DnsService _dnsService = DnsService();
   
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
+  
+  // Protocol selection: 'sstp' or 'direct_dns'
+  String _selectedProtocol = 'sstp';
+  String get selectedProtocol => _selectedProtocol;
+  
+  // DNS servers
+  List<DnsServer> _dnsServers = [];
+  DnsServer? _selectedDnsServer;
+  List<DnsServer> get dnsServers => _dnsServers;
+  DnsServer? get selectedDnsServer => _selectedDnsServer;
 
   List<VpnServer> _servers = [];
   VpnServer? _selectedServer;
@@ -32,6 +47,7 @@ class VpnProvider with ChangeNotifier {
   
   // Ping tracking
   int? _currentPing;
+  bool _pingFailed = false; // تایم‌اوت 3 ثانیه برای پینگ
   Timer? _pingTimer;
 
   // Getters
@@ -45,6 +61,7 @@ class VpnProvider with ChangeNotifier {
   bool get isConnected => _status == VpnConnectionStatus.connected;
   bool get isConnecting => _status == VpnConnectionStatus.connecting;
   int? get currentPing => _currentPing;
+  bool get pingFailed => _pingFailed; // نمایش Failed در UI
   
   String get dataUsage {
     final download = _formatBytes(_totalDownloadBytes);
@@ -54,11 +71,8 @@ class VpnProvider with ChangeNotifier {
 
   VpnProvider() {
     _init();
-  }
-
-  void _updateStatus(VpnConnectionStatus status) {
-    _status = status;
-    notifyListeners();
+    // بارگیری پروتکل انتخابی
+    loadSelectedProtocol();
   }
 
   void _init() {
@@ -93,12 +107,9 @@ class VpnProvider with ChangeNotifier {
   }
   
   Future<void> _loadAndTestServers() async {
+    // فقط دانلود - تست نشود
+    // تست هنگام کلیک دکمه اتصال انجام می‌شود
     await loadServers(forceRefresh: true);
-    
-    // تست خودکار سرورها بعد از لود
-    if (_servers.isNotEmpty) {
-      await testAllServers();
-    }
   }
 
   void _startDurationTimer() {
@@ -125,7 +136,12 @@ class VpnProvider with ChangeNotifier {
         return;
       }
       
-      // Get current traffic from VPN service
+      // DNS mode: No data usage tracking (only ping)
+      if (_selectedProtocol == 'direct_dns') {
+        return; // Skip data usage for DNS
+      }
+      
+      // SSTP mode: Get current traffic from VPN service
       final currentDownload = _vpnService.downloadSpeed;
       final currentUpload = _vpnService.uploadSpeed;
       
@@ -163,10 +179,46 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> _updateCurrentPing() async {
+    // DNS mode: ping DNS server
+    if (_selectedProtocol == 'direct_dns' && _selectedDnsServer != null) {
+      try {
+        _pingFailed = false;
+        final ping = await _dnsService.testDnsConnectivity(_selectedDnsServer!)
+            .timeout(
+              const Duration(seconds: 3),
+              onTimeout: () => null,
+            );
+        _currentPing = ping;
+      } catch (e) {
+        _currentPing = null;
+        _pingFailed = true;
+      }
+      notifyListeners();
+      return;
+    }
+    
+    // SSTP mode: ping VPN server
     if (_connectedServer == null) return;
     
-    final ping = await _serverService.testServerConnectivity(_connectedServer!);
-    _currentPing = ping;
+    try {
+      _pingFailed = false; // Reset قبل از تست جدید
+      // تایم‌اوت 3 ثانیه برای پینگ
+      final ping = await _serverService.testServerConnectivity(_connectedServer!)
+          .timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {
+              _pingFailed = true; // تایم‌اوت - نمایش Failed
+              return null;
+            },
+          );
+      _currentPing = ping;
+      if (ping == null && !_pingFailed) {
+        _pingFailed = true; // خطا در پینگ
+      }
+    } catch (e) {
+      _currentPing = null; // خطا - پینگ موفق نبود
+      _pingFailed = true; // نمایش Failed در UI
+    }
     notifyListeners();
   }
 
@@ -188,13 +240,16 @@ class VpnProvider with ChangeNotifier {
     try {
       _servers = await _serverService.fetchServers(forceRefresh: forceRefresh);
       
+      // حذف خطا - فقط Connecting نمایش داده شود
       if (_servers.isEmpty) {
-        _errorMessage = 'No servers found';
+        // بدون نمایش خطا - حلقه بی‌نهایت دوباره دانلود می‌کند
+        _errorMessage = null;
       }
     } catch (e) {
-      _errorMessage = 'Failed to load servers: $e';
+      // حذف خطا - فقط Connecting نمایش داده شود
+      _errorMessage = null;
       if (kDebugMode) {
-        debugPrint('Error loading servers: $e');
+        debugPrint('⚠️ خطا در بارگیری سرورها - دوباره تلاش می‌شود');
       }
     } finally {
       _isLoadingServers = false;
@@ -202,20 +257,34 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  /// Test all servers in parallel
+  /// Test all servers in parallel با تایم‌اوت
   Future<void> testAllServers() async {
     if (_servers.isEmpty) return;
 
     _isLoadingServers = true;
-    _errorMessage = 'Testing servers...';
+    // حذف پیغام Testing - فقط Connecting نمایش داده شود
+    _errorMessage = null;
     notifyListeners();
 
     try {
+      // تایم‌اوت کلی 120 ثانیه (2 دقیقه) برای تست - اگه گیر کرد، skip میشه
       final testedServers = await _serverService.testServersInParallel(
         _servers,
         onProgress: (tested, total) {
-          _errorMessage = 'Testing $tested/$total servers...';
-          notifyListeners();
+          // حذف پیغام Testing - فقط Connecting در UI
+          // پیشرفت تست فقط در debug log
+          if (kDebugMode) {
+            debugPrint('Testing $tested/$total servers...');
+          }
+        },
+      ).timeout(
+        const Duration(seconds: 120), // 2 دقیقه
+        onTimeout: () {
+          // اگه تایم‌اوت شد، لیست خام سرورها رو برگردون (بدون تست)
+          if (kDebugMode) {
+            debugPrint('⚠️ Testing timeout - using servers without ping test');
+          }
+          return _servers;
         },
       );
 
@@ -225,12 +294,18 @@ class VpnProvider with ChangeNotifier {
         _selectedServer = _servers.first; // بهترین سرور (کمترین ping)
         _errorMessage = null;
       } else {
-        _errorMessage = 'No reachable servers found';
+        // حذف خطا - حلقه بی‌نهایت دوباره تست می‌کند
+        _errorMessage = null;
       }
     } catch (e) {
-      _errorMessage = 'Failed to test servers: $e';
+      // حذف خطا - فقط Connecting نمایش داده شود
+      _errorMessage = null;
       if (kDebugMode) {
-        debugPrint('Error testing servers: $e');
+        debugPrint('⚠️ خطا در تست سرورها - دوباره تلاش می‌شود');
+      }
+      // حتی با خطا، اگه سرور داریم ادامه بده
+      if (_servers.isNotEmpty) {
+        _selectedServer = _servers.first;
       }
     } finally {
       _isLoadingServers = false;
@@ -245,149 +320,208 @@ class VpnProvider with ChangeNotifier {
   
   /// Handle connection error and try next server (بدون نمایش شمارش)
   void _handleConnectionError() async {
-    if (_servers.isEmpty) return;
-    
-    // پیدا کردن سرور بعدی
-    final currentIndex = _servers.indexWhere(
-      (s) => s.fullAddress == _selectedServer?.fullAddress
-    );
-    
-    if (currentIndex == -1 || currentIndex >= _servers.length - 1) {
-      _errorMessage = 'All servers failed';
-      _updateStatus(VpnConnectionStatus.error);
-      return;
-    }
-    
-    // سرور بعدی
-    final nextServer = _servers[currentIndex + 1];
-    
-    // تلاش خودکار بدون نمایش پیام 3 ثانیه
-    // فقط وضعیت connecting نمایش داده می‌شود
-    _selectedServer = nextServer;
-    
     // کمی تاخیر برای اطمینان از disconnect کامل
     await Future.delayed(const Duration(milliseconds: 500));
     
+    // دوباره اتصال - connect خودش حلقه بی‌نهایت داره
     await connect();
   }
 
-  /// Connect to best server using parallel race (5 at a time)
+  /// Connect to selected or best server (one by one - RESTORED WORKING VERSION)
   Future<void> connect() async {
     if (_status == VpnConnectionStatus.connecting || _status == VpnConnectionStatus.connected) {
       return;
     }
 
-    // If no servers available, try to load
-    if (_servers.isEmpty) {
-      await findBestServer();
-    }
+    // ⚡ CRITICAL: Set to connecting immediately so user sees feedback
+    _status = VpnConnectionStatus.connecting;
+    notifyListeners();
 
-    if (_servers.isEmpty) {
-      _errorMessage = 'No server available';
-      notifyListeners();
+    // 🔀 PROTOCOL DETECTION: Direct DNS vs SSTP
+    if (_selectedProtocol == 'direct_dns') {
+      // ✅ Direct DNS: Use selected DNS server
+      await _connectDirectDns();
       return;
     }
 
-    _errorMessage = null;
-    _updateStatus(VpnConnectionStatus.connecting);
+    // ✅ SSTP: Original SSTP connection logic
     
-    try {
-      // Request VPN permission first
-      final permissionGranted = await _vpnService.requestPermission();
+    // 🔧 CHECK CUSTOM SERVER FIRST
+    final prefs = await SharedPreferences.getInstance();
+    final useCustomServer = prefs.getBool('use_custom_server') ?? false;
+    
+    if (useCustomServer) {
+      // ✅ Use custom server only
+      final customServerStr = prefs.getString('custom_server') ?? '';
+      final customUsername = prefs.getString('custom_username') ?? '';
+      final customPassword = prefs.getString('custom_password') ?? '';
       
-      if (!permissionGranted) {
-        _errorMessage = 'VPN permission denied';
-        _updateStatus(VpnConnectionStatus.disconnected);
-        return;
-      }
-      
-      // Try to connect using parallel race method (5 servers at a time)
-      final connectedServer = await _connectToFirstResponsive();
-      
-      if (connectedServer != null) {
-        _selectedServer = connectedServer;
-        final success = await _vpnService.connect(connectedServer);
-        
-        if (!success) {
-          _errorMessage = 'Failed to connect';
-          _updateStatus(VpnConnectionStatus.error);
+      if (customServerStr.isNotEmpty) {
+        // Parse custom server
+        final parts = customServerStr.split(':');
+        if (parts.length == 2) {
+          final customServer = VpnServer(
+            address: parts[0],
+            port: int.tryParse(parts[1]) ?? 443,
+            username: customUsername.isNotEmpty ? customUsername : 'vpn',
+            password: customPassword.isNotEmpty ? customPassword : 'vpn',
+          );
+          
+          _selectedServer = customServer;
+          notifyListeners();
+          
+          try {
+            // Request VPN permission
+            final permissionGranted = await _vpnService.requestPermission();
+            
+            if (!permissionGranted) {
+              _status = VpnConnectionStatus.error;
+              _errorMessage = 'VPN permission denied';
+              notifyListeners();
+              return;
+            }
+            
+            // Connect to custom server
+            final success = await _vpnService.connect(customServer);
+            
+            if (success) {
+              // Success!
+              return;
+            } else {
+              _status = VpnConnectionStatus.error;
+              _errorMessage = 'Failed to connect to custom server';
+              notifyListeners();
+              return;
+            }
+          } catch (e) {
+            _status = VpnConnectionStatus.error;
+            _errorMessage = 'Custom server error: $e';
+            notifyListeners();
+            return;
+          }
+        } else {
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'Invalid custom server format. Use: hostname:port';
+          notifyListeners();
+          return;
         }
       } else {
-        _errorMessage = 'All servers failed to respond';
-        _updateStatus(VpnConnectionStatus.error);
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Custom server is empty';
+        notifyListeners();
+        return;
       }
-    } catch (e) {
-      _errorMessage = 'Connection error: ${e.toString()}';
-      if (kDebugMode) {
-        debugPrint('VPN connection error: $e');
-      }
-      _updateStatus(VpnConnectionStatus.error);
     }
-  }
-
-  /// اتصال موازی به 5 سرور - اولین پاسخ برنده
-  Future<VpnServer?> _connectToFirstResponsive() async {
-    const batchSize = 5;
     
-    for (int i = 0; i < _servers.length; i += batchSize) {
-      final end = (i + batchSize < _servers.length) 
-          ? i + batchSize 
-          : _servers.length;
-      
-      final batch = _servers.sublist(i, end);
-      
-      if (kDebugMode) {
-        debugPrint('🔄 Testing batch ${i ~/ batchSize + 1}: servers $i to ${end - 1}');
+    // ✅ If not using custom server, use server list
+    // 1️⃣ If no servers → infinite loop: download → test → connect
+    while (_servers.isEmpty) {
+      await loadServers(forceRefresh: true);
+      if (_servers.isEmpty) {
+        await Future.delayed(const Duration(seconds: 2));
+        continue;
       }
+    }
+
+    // 2️⃣ Test servers (batch by batch)
+    await testAllServers();
+
+    // 3️⃣ If still no servers after test → re-download and test
+    while (_servers.isEmpty) {
+      await loadServers(forceRefresh: true);
+      if (_servers.isEmpty) {
+        await Future.delayed(const Duration(seconds: 2));
+        continue;
+      }
+      await testAllServers();
+    }
+
+    // 4️⃣ Try connecting one by one (best ping first)
+    for (var server in _servers) {
+      _selectedServer = server;
+      notifyListeners();
       
-      // تست موازی - اولین سرور که پاسخ داد برنده است
       try {
-        final firstResponsive = await _raceServers(batch);
+        // Request VPN permission first
+        final permissionGranted = await _vpnService.requestPermission();
         
-        if (firstResponsive != null) {
-          if (kDebugMode) {
-            debugPrint('✅ Winner: ${firstResponsive.fullAddress} (${firstResponsive.ping}ms)');
-          }
-          return firstResponsive;
+        if (!permissionGranted) {
+          // No error message - just keep trying
+          return;
+        }
+        
+        final success = await _vpnService.connect(server);
+        
+        if (success) {
+          // Success - exit loop
+          return;
         }
       } catch (e) {
         if (kDebugMode) {
-          debugPrint('❌ Batch failed: $e');
+          debugPrint('⚠️ Failed to connect to ${server.fullAddress}: $e');
         }
+        // Continue to next server
+        continue;
       }
     }
-    
-    return null;
-  }
 
-  /// Race بین چندین سرور - اولین پاسخ برنده
-  Future<VpnServer?> _raceServers(List<VpnServer> servers) async {
-    final futures = servers.map((server) => _tryConnectToServer(server));
-    
-    try {
-      // اولین future که complete شود برنده است
-      final winner = await Future.any(futures);
-      return winner;
-    } catch (e) {
-      return null;
+    // 5️⃣ If all failed → restart from beginning (infinite loop)
+    if (_status != VpnConnectionStatus.connected) {
+      // Re-download, test, and try again
+      await connect();
     }
   }
-
-  /// تست اتصال به یک سرور
-  Future<VpnServer?> _tryConnectToServer(VpnServer server) async {
-    try {
-      final ping = await _serverService.testServerConnectivity(server);
+  
+  /// Connect via Direct DNS (separate from SSTP)
+  Future<void> _connectDirectDns() async {
+    // Check if DNS server is selected
+    if (_selectedDnsServer == null) {
+      // ✅ نمایش پیام به کاربر
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Please select a DNS server from Server List first';
+      notifyListeners();
       
-      if (ping != null && ping < 600) {
-        // این سرور پاسخ داد - برنده شد!
-        return server.copyWith(ping: ping);
+      if (kDebugMode) {
+        debugPrint('⚠️ No DNS server selected - please choose from Server List');
       }
+      return;
+    }
+
+    try {
+      // Set status to connecting
+      _status = VpnConnectionStatus.connecting;
+      notifyListeners();
+
+      // Request VPN permission
+      final permissionGranted = await DnsVpnConnection.requestPermission();
       
-      // این سرور شکست خورد - future هرگز complete نمی‌شود
-      return await Future.delayed(const Duration(hours: 1));
+      if (!permissionGranted) {
+        _status = VpnConnectionStatus.disconnected;
+        notifyListeners();
+        return;
+      }
+
+      // Connect using selected DNS server
+      await DnsVpnConnection.connect(
+        primaryDns: _selectedDnsServer!.primaryDns,
+        secondaryDns: _selectedDnsServer!.secondaryDns ?? '8.8.4.4',
+      );
+
+      // Update status to connected
+      _status = VpnConnectionStatus.connected;
+      _connectedServer = null; // DNS mode has no VPN server
+      _startDurationTimer();
+      notifyListeners();
+
+      if (kDebugMode) {
+        debugPrint('✅ Connected to DNS: ${_selectedDnsServer!.primaryDns}');
+      }
     } catch (e) {
-      // خطا - future هرگز complete نمی‌شود
-      return await Future.delayed(const Duration(hours: 1));
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to connect DNS: $e');
+      }
+      _status = VpnConnectionStatus.disconnected;
+      notifyListeners();
     }
   }
 
@@ -397,7 +531,26 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
-    await _vpnService.disconnect();
+    _status = VpnConnectionStatus.disconnecting;
+    notifyListeners();
+
+    try {
+      // Disconnect based on protocol
+      if (_selectedProtocol == 'direct_dns') {
+        await DnsVpnConnection.disconnect();
+      } else {
+        await _vpnService.disconnect();
+      }
+      
+      _status = VpnConnectionStatus.disconnected;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Disconnect error: $e');
+      }
+      _status = VpnConnectionStatus.disconnected;
+    }
+    
+    notifyListeners();
   }
 
   /// Select a specific server
@@ -428,7 +581,11 @@ class VpnProvider with ChangeNotifier {
     );
     
     if (currentIndex == -1 || currentIndex >= _servers.length - 1) {
-      _errorMessage = 'No more servers available';
+      // حذف ارور - همیشه Connecting باقی بماند
+      // دوباره به اولین سرور برگرد و تلاش کن
+      if (_servers.isNotEmpty) {
+        _selectedServer = _servers.first;
+      }
       notifyListeners();
       return;
     }
@@ -463,6 +620,95 @@ class VpnProvider with ChangeNotifier {
       // Reload and test servers
       _loadAndTestServers();
     }
+  }
+
+  // ==================== Direct DNS Protocol Methods ====================
+  
+  /// بارگیری پروتکل انتخابی از SharedPreferences
+  Future<void> loadSelectedProtocol() async {
+    _selectedProtocol = await _dnsService.getSelectedProtocol();
+    notifyListeners();
+  }
+  
+  /// تغییر پروتکل (SSTP یا Direct DNS)
+  Future<void> switchProtocol(String protocol) async {
+    if (_selectedProtocol == protocol) return;
+    
+    // اگر متصل است، ابتدا قطع کن
+    if (isConnected || isConnecting) {
+      await disconnect();
+    }
+    
+    _selectedProtocol = protocol;
+    await _dnsService.setSelectedProtocol(protocol);
+    notifyListeners();
+  }
+  
+  /// گرفتن تمام DNS servers
+  Future<List<DnsServer>> getAllDnsServers() async {
+    return await _dnsService.getAllDnsServers();
+  }
+  
+  /// انتخاب DNS server و اتصال خودکار
+  Future<void> selectDnsServerAndConnect(DnsServer server) async {
+    _selectedDnsServer = server;
+    notifyListeners();
+    
+    // اگه قبلاً متصل بود، قطع کن و دوباره وصل کن
+    if (isConnected || isConnecting) {
+      await disconnect();
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+    
+    // اتصال خودکار
+    await connect();
+  }
+  
+  /// تست همه DNS servers
+  Future<List<DnsServer>> testAllDnsServers(List<DnsServer> servers) async {
+    return await _dnsService.testDnsServersInParallel(
+      servers,
+      onProgress: (tested, total) {
+        if (kDebugMode) {
+          debugPrint('Testing DNS $tested/$total...');
+        }
+      },
+    );
+  }
+  
+  /// افزودن DNS سفارشی
+  Future<void> addCustomDns(DnsServer server) async {
+    await _dnsService.addCustomDns(server);
+    _dnsServers = await _dnsService.getAllDnsServers();
+    notifyListeners();
+  }
+  
+  /// حذف DNS سفارشی
+  Future<void> removeCustomDns(String primaryDns) async {
+    await _dnsService.removeCustomDns(primaryDns);
+    _dnsServers = await _dnsService.getAllDnsServers();
+    notifyListeners();
+  }
+  
+  /// انتخاب DNS و اتصال
+  Future<void> selectDnsAndConnect(DnsServer server) async {
+    _selectedDnsServer = server;
+    
+    // Save selected DNS
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_dns_primary', server.primaryDns);
+    if (server.secondaryDns != null) {
+      await prefs.setString('selected_dns_secondary', server.secondaryDns!);
+    }
+    
+    notifyListeners();
+    
+    if (kDebugMode) {
+      debugPrint('✅ DNS Server Selected: ${server.name} (${server.primaryDns})');
+    }
+    
+    // Automatically connect
+    await connect();
   }
 
   @override
