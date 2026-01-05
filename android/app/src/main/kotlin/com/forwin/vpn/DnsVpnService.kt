@@ -56,11 +56,39 @@ class DnsVpnService : VpnService() {
         try {
             // Create notification for foreground service
             createNotificationChannel()
+            
+            // Create disconnect intent
+            val disconnectIntent = Intent(this, DnsVpnService::class.java).apply {
+                action = ACTION_DISCONNECT
+            }
+            val disconnectPendingIntent = PendingIntent.getService(
+                this,
+                0,
+                disconnectIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            
+            // Create main activity intent (when user taps notification)
+            val mainIntent = packageManager.getLaunchIntentForPackage(packageName)
+            val mainPendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                mainIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("DNS VPN Active")
-                .setContentText("Using DNS: $primaryDns")
+                .setContentTitle("🔒 VPN Connected")
+                .setContentText("DNS: $primaryDns • Tap to disconnect")
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true) // Cannot be dismissed
+                .setContentIntent(mainPendingIntent) // Open app when tapped
+                .addAction(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Disconnect",
+                    disconnectPendingIntent
+                )
                 .build()
             
             startForeground(NOTIFICATION_ID, notification)
