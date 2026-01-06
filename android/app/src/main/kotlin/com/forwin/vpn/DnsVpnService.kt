@@ -80,7 +80,7 @@ class DnsVpnService : VpnService() {
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("🔒 VPN Connected")
                 .setContentText("DNS: $primaryDns • Tap to disconnect")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.mipmap.ic_launcher) // لوگو اپ
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true) // Cannot be dismissed
                 .setContentIntent(mainPendingIntent) // Open app when tapped

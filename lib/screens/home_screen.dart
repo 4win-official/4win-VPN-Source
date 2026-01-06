@@ -370,8 +370,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         
                         const SizedBox(height: 40),
                         
-                        // Data Usage Info
-                        if (provider.isConnected)
+                        // Data Usage Info (فقط برای SSTP)
+                        if (provider.isConnected && provider.selectedProtocol == 'sstp')
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 32),
                             child: Text(
