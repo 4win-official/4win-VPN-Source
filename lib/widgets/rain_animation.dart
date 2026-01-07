@@ -21,11 +21,11 @@ class _RainAnimationState extends State<RainAnimation> with SingleTickerProvider
       duration: const Duration(seconds: 1),
     )..repeat();
 
-    // ایجاد قطرات باران (50 قطره)
+    // ایجاد قطرات باران (50 قطره) - توزیع در تمام ارتفاع صفحه
     for (int i = 0; i < 50; i++) {
       _rainDrops.add(RainDrop(
         x: _random.nextDouble(),
-        y: _random.nextDouble(),
+        y: _random.nextDouble() * 2.0, // توزیع در 2 برابر ارتفاع برای لوپ نرم
         speed: 0.5 + _random.nextDouble() * 0.5,
         length: 20 + _random.nextDouble() * 30,
         thickness: 1 + _random.nextDouble(),
@@ -87,19 +87,27 @@ class RainPainter extends CustomPainter {
     for (var drop in rainDrops) {
       paint.strokeWidth = drop.thickness;
       
-      // محاسبه موقعیت فعلی قطره
-      final currentY = (drop.y + animation * drop.speed) % 1.0;
+      // محاسبه موقعیت فعلی قطره با لوپ نرم (از -1 تا 2 برای لوپ بدون جهش)
+      var currentY = (drop.y + animation * drop.speed);
       
-      // موقعیت شروع و پایان قطره
-      final startY = currentY * size.height;
+      // لوپ نرم: وقتی از پایین خارج میشه، از بالا برمی‌گرده
+      while (currentY > 2.0) {
+        currentY -= 2.0;
+      }
+      
+      // تبدیل به pixel
+      final startY = (currentY * size.height) - size.height; // شروع از بالای صفحه
       final endY = startY + drop.length;
       final x = drop.x * size.width;
 
-      canvas.drawLine(
-        Offset(x, startY),
-        Offset(x, endY),
-        paint,
-      );
+      // فقط قطراتی که در صفحه هستند رسم شوند
+      if (endY > 0 && startY < size.height) {
+        canvas.drawLine(
+          Offset(x, startY),
+          Offset(x, endY),
+          paint,
+        );
+      }
     }
   }
 

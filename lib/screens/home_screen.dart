@@ -453,29 +453,64 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             
             // Server Action Button (Next Server for SSTP, Server List for DNS)
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Consumer<VpnProvider>(
-                builder: (context, provider, _) {
-                  // DNS: Always show "Server List" button
-                  if (provider.selectedProtocol == 'direct_dns') {
+            // Fixed height to prevent layout shift
+            SizedBox(
+              height: 72, // Fixed height (16 padding + 48 button + 8 padding)
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Consumer<VpnProvider>(
+                  builder: (context, provider, _) {
+                    // DNS: Always show "Server List" button
+                    if (provider.selectedProtocol == 'direct_dns') {
+                      return SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const DnsServersScreen(),
+                              ),
+                            );
+                          },
+                          icon: Icon(
+                            Icons.dns,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                          ),
+                          label: Text(
+                            'Server List',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: isDark ? Colors.white70 : Colors.black87,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    
+                    // SSTP: Show "Next Server" only when connected
+                    if (!provider.isConnected) {
+                      return const SizedBox.shrink(); // Empty space but maintains height
+                    }
+                    
                     return SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const DnsServersScreen(),
-                            ),
-                          );
-                        },
+                        onPressed: provider.isConnecting ? null : () => provider.connectToNextServer(),
                         icon: Icon(
-                          Icons.dns,
+                          Icons.skip_next,
                           color: isDark ? Colors.white70 : Colors.black87,
                         ),
                         label: Text(
-                          'Server List',
+                          'Next Server',
                           style: TextStyle(
                             fontSize: 16,
                             color: isDark ? Colors.white70 : Colors.black87,
@@ -491,39 +526,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     );
-                  }
-                  
-                  // SSTP: Show "Next Server" only when connected
-                  if (!provider.isConnected) {
-                    return const SizedBox.shrink();
-                  }
-                  
-                  return SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: provider.isConnecting ? null : () => provider.connectToNextServer(),
-                      icon: Icon(
-                        Icons.skip_next,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
-                      label: Text(
-                        'Next Server',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: isDark ? Colors.white70 : Colors.black87,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-                  );
-                },
+                  },
+                ),
               ),
             ),
                   ],
