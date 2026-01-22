@@ -370,58 +370,64 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         
                         const SizedBox(height: 40),
                         
-                        // Data Usage Info (فقط برای SSTP)
-                        if (provider.isConnected && provider.selectedProtocol == 'sstp')
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 32),
-                            child: Text(
-                              provider.dataUsage,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: isDark ? Colors.white70 : Colors.black87,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        
-                        // Connection Duration
-                        if (provider.isConnected && provider.connectionDuration.inSeconds > 0)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 16),
-                            child: Column(
-                              children: [
-                                Text(
-                                  _formatDuration(provider.connectionDuration),
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: isDark ? Colors.white54 : Colors.black54,
-                                    fontWeight: FontWeight.w500,
+                        // Data Usage Info + Connection Duration (ارتفاع ثابت برای جلوگیری از layout shift)
+                        SizedBox(
+                          height: 100, // ارتفاع ثابت
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            children: [
+                              // Data Usage Info (فقط برای SSTP)
+                              if (provider.isConnected && provider.selectedProtocol == 'sstp')
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                                  child: Text(
+                                    provider.dataUsage,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: isDark ? Colors.white70 : Colors.black87,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    textAlign: TextAlign.center,
                                   ),
                                 ),
-                                // Show ping (همیشه نمایش داده شود)
+                              
+                              // Connection Duration
+                              if (provider.isConnected && provider.connectionDuration.inSeconds > 0)
                                 Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                                  padding: const EdgeInsets.only(top: 16),
+                                  child: Column(
                                     children: [
-                                      Icon(
-                                        Icons.network_ping,
-                                        size: 16,
-                                        color: provider.currentPing != null 
-                                            ? _getPingColor(provider.currentPing!)
-                                            : (isDark ? Colors.white38 : Colors.black38),
-                                      ),
-                                      const SizedBox(width: 4),
                                       Text(
-                                        provider.currentPing != null 
-                                            ? '${provider.currentPing}ms'
-                                            : 'Testing...',
+                                        _formatDuration(provider.connectionDuration),
                                         style: TextStyle(
-                                          fontSize: 13,
-                                          color: provider.currentPing != null
-                                              ? _getPingColor(provider.currentPing!)
-                                              : (isDark ? Colors.white38 : Colors.black38),
+                                          fontSize: 14,
+                                          color: isDark ? Colors.white54 : Colors.black54,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      // Show ping (همیشه نمایش داده شود)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 8),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              Icons.network_ping,
+                                              size: 16,
+                                              color: provider.currentPing != null 
+                                                  ? _getPingColor(provider.currentPing!)
+                                                  : (isDark ? Colors.white38 : Colors.black38),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              provider.currentPing != null 
+                                                  ? '${provider.currentPing}ms'
+                                                  : 'Testing...',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                color: provider.currentPing != null
+                                                    ? _getPingColor(provider.currentPing!)
+                                                    : (isDark ? Colors.white38 : Colors.black38),
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
@@ -431,6 +437,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               ],
                             ),
                           ),
+                            ],
+                          ),
+                        ),
                         
                         // Error Message
                         if (provider.errorMessage != null)
