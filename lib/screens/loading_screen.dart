@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../providers/vpn_provider.dart';
 import 'home_screen.dart';
 
@@ -20,6 +21,9 @@ class _LoadingScreenState extends State<LoadingScreen> {
   Future<void> _loadServersAndNavigate() async {
     final provider = context.read<VpnProvider>();
     
+    // درخواست اجازه نوتیفیکیشن
+    await _requestNotificationPermission();
+    
     // Wait for servers to load and test
     await Future.delayed(const Duration(milliseconds: 500));
     
@@ -34,6 +38,13 @@ class _LoadingScreenState extends State<LoadingScreen> {
         context,
         MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
+    }
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    // فقط برای Android 13+ نیاز به درخواست دارد
+    if (await Permission.notification.isDenied) {
+      await Permission.notification.request();
     }
   }
 

@@ -18,17 +18,17 @@ class _RainAnimationState extends State<RainAnimation> with SingleTickerProvider
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2), // کاهش سرعت برای لوپ نرم‌تر
+      duration: const Duration(milliseconds: 800), // سرعت بهتر
     )..repeat();
 
-    // ایجاد قطرات باران (100 قطره) - توزیع کامل در صفحه
-    for (int i = 0; i < 100; i++) {
+    // ایجاد قطرات باران (80 قطره) - توزیع کامل
+    for (int i = 0; i < 80; i++) {
       _rainDrops.add(RainDrop(
         x: _random.nextDouble(),
-        y: _random.nextDouble(), // شروع از موقعیت‌های تصادفی
-        speed: 0.3 + _random.nextDouble() * 0.4, // سرعت متنوع
-        length: 15 + _random.nextDouble() * 25,
-        thickness: 0.8 + _random.nextDouble() * 0.5,
+        y: _random.nextDouble(), // توزیع در تمام ارتفاع
+        speed: 0.8 + _random.nextDouble() * 0.6, // سرعت مناسب
+        length: 20 + _random.nextDouble() * 35,
+        thickness: 1 + _random.nextDouble() * 0.8,
       ));
     }
   }
@@ -81,31 +81,42 @@ class RainPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.blue.withValues(alpha: 0.3)
+      ..color = Colors.blue.withValues(alpha: 0.35)
       ..strokeCap = StrokeCap.round;
 
     for (var drop in rainDrops) {
       paint.strokeWidth = drop.thickness;
       
-      // محاسبه موقعیت فعلی قطره - لوپ بی‌نهایت
-      var currentY = drop.y + (animation * drop.speed);
+      // محاسبه موقعیت - لوپ بی‌نهایت بدون غیب شدن
+      var progress = (drop.y + (animation * drop.speed)) % 1.0;
       
-      // وقتی از پایین خارج شد، از بالا برگرد (لوپ نرم)
-      if (currentY > 1.0) {
-        currentY = currentY % 1.0; // reset به بالای صفحه
-      }
-      
-      // تبدیل به pixel
-      final startY = currentY * size.height;
+      // اگر در مرز بالا یا پایین است، از طرف دیگر ظاهر شود
+      final startY = progress * size.height;
       final endY = startY + drop.length;
       final x = drop.x * size.width;
 
-      // رسم قطره
-      canvas.drawLine(
-        Offset(x, startY),
-        Offset(x, endY),
-        paint,
-      );
+      // رسم قطره - همیشه در صفحه
+      if (endY > size.height) {
+        // قطره از پایین خارج میشه - بخشی از بالا ظاهر شود
+        canvas.drawLine(
+          Offset(x, startY),
+          Offset(x, size.height),
+          paint,
+        );
+        // قسمت باقی‌مانده از بالا
+        canvas.drawLine(
+          Offset(x, 0),
+          Offset(x, endY - size.height),
+          paint,
+        );
+      } else {
+        // قطره کاملاً در صفحه است
+        canvas.drawLine(
+          Offset(x, startY),
+          Offset(x, endY),
+          paint,
+        );
+      }
     }
   }
 
