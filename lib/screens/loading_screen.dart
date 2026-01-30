@@ -71,10 +71,14 @@ class _LoadingScreenState extends State<LoadingScreen> {
                           : Colors.black.withValues(alpha: 0.05),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
-                      Icons.vpn_lock,
-                      size: 60,
-                      color: isDark ? Colors.white : Colors.black87,
+                    child: ClipOval(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Image.asset(
+                          'assets/icons/app_icon.png',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
                     ),
                   ),
                   

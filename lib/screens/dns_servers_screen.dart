@@ -282,39 +282,42 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                             ),
                           ],
                         ),
-                        trailing: server.ping != null
-                            ? Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    '${server.ping}ms',
-                                    style: TextStyle(
-                                      color: _getPingColor(server.ping!),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  if (server.isCustom)
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.delete,
-                                        color: Colors.red[300],
-                                        size: 18,
-                                      ),
-                                      onPressed: () async {
-                                        final provider = Provider.of<VpnProvider>(context, listen: false);
-                                        await provider.removeCustomDns(server.primaryDns);
-                                        _loadDnsServers();
-                                      },
-                                    ),
-                                ],
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // نمایش ping
+                            if (server.ping != null)
+                              Text(
+                                '${server.ping}ms',
+                                style: TextStyle(
+                                  color: _getPingColor(server.ping!),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
                               )
-                            : Text(
+                            else
+                              Text(
                                 'N/A',
                                 style: TextStyle(
                                   color: isDark ? Colors.white38 : Colors.black38,
                                 ),
                               ),
+                            // دکمه حذف (همیشه برای custom servers)
+                            if (server.isCustom)
+                              IconButton(
+                                icon: Icon(
+                                  Icons.delete,
+                                  color: Colors.red[300],
+                                  size: 18,
+                                ),
+                                onPressed: () async {
+                                  final provider = Provider.of<VpnProvider>(context, listen: false);
+                                  await provider.removeCustomDns(server.primaryDns);
+                                  _loadDnsServers();
+                                },
+                              ),
+                          ],
+                        ),
                         onTap: () async {
                           final provider = Provider.of<VpnProvider>(context, listen: false);
                           

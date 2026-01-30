@@ -102,8 +102,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
           ),
           
-          // Dark Mode Toggle (فقط اگر تم برفی نباشد - تم پیکسلی می‌تونه دارک/لایت داشته باشه)
-          if (themeProvider.selectedTheme != AppTheme.snow)
+          // Dark Mode Toggle (فقط برای System و Pixel)
+          if (themeProvider.selectedTheme != AppTheme.snow && 
+              themeProvider.selectedTheme != AppTheme.pink &&
+              themeProvider.selectedTheme != AppTheme.rain)
             IconButton(
               icon: Icon(
                 themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
