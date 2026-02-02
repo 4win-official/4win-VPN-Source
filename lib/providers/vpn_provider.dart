@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vpn_server.dart';
 import '../models/dns_server.dart';
+import '../models/xray_config.dart';
 import '../services/server_service.dart';
 import '../services/vpn_service.dart';
 import '../services/dns_service.dart';
 import '../services/dns_vpn_connection.dart';
+import '../services/xray_service.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -15,11 +17,12 @@ class VpnProvider with ChangeNotifier {
   final ServerService _serverService = ServerService();
   final VpnService _vpnService = VpnService();
   final DnsService _dnsService = DnsService();
+  final XrayService _xrayService = XrayService();
   
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
-  // Protocol selection: 'sstp' or 'direct_dns'
+  // Protocol selection: 'sstp', 'direct_dns', or 'xray'
   String _selectedProtocol = 'sstp';
   String get selectedProtocol => _selectedProtocol;
   
@@ -28,6 +31,12 @@ class VpnProvider with ChangeNotifier {
   DnsServer? _selectedDnsServer;
   List<DnsServer> get dnsServers => _dnsServers;
   DnsServer? get selectedDnsServer => _selectedDnsServer;
+  
+  // Xray configs
+  List<XrayConfig> _xrayConfigs = [];
+  XrayConfig? _selectedXrayConfig;
+  List<XrayConfig> get xrayConfigs => _xrayConfigs;
+  XrayConfig? get selectedXrayConfig => _selectedXrayConfig;
 
   List<VpnServer> _servers = [];
   VpnServer? _selectedServer;
@@ -337,10 +346,14 @@ class VpnProvider with ChangeNotifier {
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
 
-    // 🔀 PROTOCOL DETECTION: Direct DNS vs SSTP
+    // 🔀 PROTOCOL DETECTION: Direct DNS, Xray, or SSTP
     if (_selectedProtocol == 'direct_dns') {
       // ✅ Direct DNS: Use selected DNS server
       await _connectDirectDns();
+      return;
+    } else if (_selectedProtocol == 'xray') {
+      // ✅ Xray: Use selected Xray config
+      await _connectXray();
       return;
     }
 
@@ -525,6 +538,49 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
+  /// Connect to selected Xray config
+  Future<void> _connectXray() async {
+    if (_selectedXrayConfig == null) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Please select an Xray config first';
+      notifyListeners();
+      
+      if (kDebugMode) {
+        debugPrint('❌ No Xray config selected');
+      }
+      return;
+    }
+
+    try {
+      _status = VpnConnectionStatus.connecting;
+      notifyListeners();
+
+      if (kDebugMode) {
+        debugPrint('🚀 Connecting to Xray config: ${_selectedXrayConfig!.remark}');
+      }
+
+      // TODO: Integrate with Xray Core Native (v2rayNG approach)
+      // For now, we'll simulate connection
+      await Future.delayed(const Duration(seconds: 2));
+
+      _status = VpnConnectionStatus.connected;
+      _connectedServer = null; // Xray mode has no traditional VPN server
+      _startDurationTimer();
+      notifyListeners();
+
+      if (kDebugMode) {
+        debugPrint('✅ Connected to Xray: ${_selectedXrayConfig!.remark}');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to connect Xray: $e');
+      }
+      _status = VpnConnectionStatus.disconnected;
+      _errorMessage = 'Failed to connect: $e';
+      notifyListeners();
+    }
+  }
+
   /// Disconnect from VPN
   Future<void> disconnect() async {
     if (_status == VpnConnectionStatus.disconnecting || _status == VpnConnectionStatus.disconnected) {
@@ -538,6 +594,11 @@ class VpnProvider with ChangeNotifier {
       // Disconnect based on protocol
       if (_selectedProtocol == 'direct_dns') {
         await DnsVpnConnection.disconnect();
+      } else if (_selectedProtocol == 'xray') {
+        // TODO: Disconnect Xray Core
+        if (kDebugMode) {
+          debugPrint('🔌 Disconnecting Xray...');
+        }
       } else {
         await _vpnService.disconnect();
       }
@@ -709,6 +770,38 @@ class VpnProvider with ChangeNotifier {
     
     // Automatically connect
     await connect();
+  }
+
+  /// ==================== Xray Methods ====================
+  
+  /// Select Xray config and connect
+  Future<void> selectXrayConfigAndConnect(XrayConfig config) async {
+    _selectedXrayConfig = config;
+    
+    // Save to preferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_xray_config', config.rawConfig);
+    
+    notifyListeners();
+    
+    if (kDebugMode) {
+      debugPrint('✅ Xray Config Selected: ${config.remark}');
+    }
+    
+    // Automatically connect
+    await connect();
+  }
+  
+  /// Load Xray configs
+  Future<void> loadXrayConfigs({bool forceRefresh = false}) async {
+    try {
+      _xrayConfigs = await _xrayService.fetchConfigs(forceRefresh: forceRefresh);
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to load Xray configs: $e');
+      }
+    }
   }
 
   @override

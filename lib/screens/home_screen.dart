@@ -10,6 +10,7 @@ import 'donate_screen.dart';
 import 'theme_selection_screen.dart';
 import 'settings_screen.dart';
 import 'dns_servers_screen.dart';
+import 'xray_configs_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -271,7 +272,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         ),
                                         const SizedBox(width: 12),
                                         Text(
-                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : "Direct DNS"}',
+                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "xray" ? "Xray" : "Direct DNS"}',
                                           style: TextStyle(
                                             fontSize: 14,
                                             color: isDark ? Colors.white : Colors.black87,
@@ -490,6 +491,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                           label: Text(
                             'Server List',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: isDark ? Colors.white70 : Colors.black87,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    
+                    // Xray: Always show "Config List" button
+                    if (provider.selectedProtocol == 'xray') {
+                      return SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const XrayConfigsScreen(),
+                              ),
+                            );
+                          },
+                          icon: Icon(
+                            Icons.dashboard_customize,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                          ),
+                          label: Text(
+                            'Config List',
                             style: TextStyle(
                               fontSize: 16,
                               color: isDark ? Colors.white70 : Colors.black87,
