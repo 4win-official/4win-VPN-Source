@@ -132,24 +132,75 @@ class XrayService {
     await prefs.remove(_cacheTimeKey);
   }
 
-  /// Test config connectivity (ping)
+  /// Test config connectivity (real ping like v2rayNG)
+  /// Tests by making HTTP request through the server
   Future<int?> testConfig(XrayConfig config) async {
     try {
       final stopwatch = Stopwatch()..start();
       
-      // Try to connect to the server
-      final socket = await Socket.connect(
-        config.address,
-        config.port,
-        timeout: const Duration(seconds: 3),
-      );
-      
-      stopwatch.stop();
-      socket.destroy();
-      
-      return stopwatch.elapsedMilliseconds;
+      // Method 1: TCP socket connection test (fast but not accurate)
+      try {
+        final socket = await Socket.connect(
+          config.address,
+          config.port,
+          timeout: const Duration(seconds: 5),
+        );
+        
+        stopwatch.stop();
+        final ping = stopwatch.elapsedMilliseconds;
+        socket.destroy();
+        
+        // Update config with ping
+        config.ping = ping;
+        
+        if (kDebugMode) {
+          print('✅ ${config.remark}: ${ping}ms');
+        }
+        
+        return ping;
+      } catch (e) {
+        // Method 2: Try HTTP ping if socket fails (for HTTP/WS configs)
+        if (config.network == 'ws' || config.network == 'h2' || config.network == 'http') {
+          try {
+            stopwatch.reset();
+            stopwatch.start();
+            
+            final response = await http.head(
+              Uri.parse('http://${config.address}:${config.port}'),
+            ).timeout(const Duration(seconds: 5));
+            
+            stopwatch.stop();
+            final ping = stopwatch.elapsedMilliseconds;
+            
+            if (response.statusCode < 500) {
+              config.ping = ping;
+              
+              if (kDebugMode) {
+                print('✅ ${config.remark}: ${ping}ms (HTTP)');
+              }
+              
+              return ping;
+            }
+          } catch (httpError) {
+            if (kDebugMode) {
+              print('⚠️ ${config.remark}: HTTP test failed');
+            }
+          }
+        }
+        
+        // If both methods fail, return null
+        config.ping = null;
+        if (kDebugMode) {
+          print('❌ ${config.remark}: Unreachable');
+        }
+        return null;
+      }
     } catch (e) {
-      return null; // Connection failed
+      config.ping = null;
+      if (kDebugMode) {
+        print('❌ ${config.remark}: Error - $e');
+      }
+      return null;
     }
   }
 

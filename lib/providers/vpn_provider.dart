@@ -9,6 +9,7 @@ import '../services/vpn_service.dart';
 import '../services/dns_service.dart';
 import '../services/dns_vpn_connection.dart';
 import '../services/xray_service.dart';
+import '../services/xray_vpn_connection.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -559,17 +560,50 @@ class VpnProvider with ChangeNotifier {
         debugPrint('🚀 Connecting to Xray config: ${_selectedXrayConfig!.remark}');
       }
 
-      // TODO: Integrate with Xray Core Native (v2rayNG approach)
-      // For now, we'll simulate connection
-      await Future.delayed(const Duration(seconds: 2));
+      // Request VPN permission
+      final hasPermission = await XrayVpnConnection.requestPermission();
+      if (!hasPermission) {
+        _status = VpnConnectionStatus.disconnected;
+        _errorMessage = 'VPN permission denied';
+        notifyListeners();
+        return;
+      }
 
-      _status = VpnConnectionStatus.connected;
-      _connectedServer = null; // Xray mode has no traditional VPN server
-      _startDurationTimer();
-      notifyListeners();
+      // Generate config JSON
+      final configJson = XrayVpnConnection.generateConfigJson(
+        protocol: _selectedXrayConfig!.protocol,
+        address: _selectedXrayConfig!.address,
+        port: _selectedXrayConfig!.port,
+        id: _selectedXrayConfig!.id,
+        flow: _selectedXrayConfig!.flow,
+        encryption: _selectedXrayConfig!.encryption,
+        security: _selectedXrayConfig!.security,
+        network: _selectedXrayConfig!.network,
+        path: _selectedXrayConfig!.path,
+        host: _selectedXrayConfig!.host,
+        sni: _selectedXrayConfig!.sni,
+        fingerprint: _selectedXrayConfig!.fingerprint,
+        publicKey: _selectedXrayConfig!.publicKey,
+        shortId: _selectedXrayConfig!.shortId,
+        alpn: _selectedXrayConfig!.alpn != null ? _selectedXrayConfig!.alpn!.split(',') : null,
+      );
 
-      if (kDebugMode) {
-        debugPrint('✅ Connected to Xray: ${_selectedXrayConfig!.remark}');
+      // Connect via native Xray service
+      final connected = await XrayVpnConnection.connect(configJson: configJson);
+      
+      if (connected) {
+        _status = VpnConnectionStatus.connected;
+        _connectedServer = null; // Xray mode has no traditional VPN server
+        _startDurationTimer();
+        notifyListeners();
+
+        if (kDebugMode) {
+          debugPrint('✅ Connected to Xray: ${_selectedXrayConfig!.remark}');
+        }
+      } else {
+        _status = VpnConnectionStatus.disconnected;
+        _errorMessage = 'Failed to establish Xray connection';
+        notifyListeners();
       }
     } catch (e) {
       if (kDebugMode) {
@@ -595,7 +629,7 @@ class VpnProvider with ChangeNotifier {
       if (_selectedProtocol == 'direct_dns') {
         await DnsVpnConnection.disconnect();
       } else if (_selectedProtocol == 'xray') {
-        // TODO: Disconnect Xray Core
+        await XrayVpnConnection.disconnect();
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting Xray...');
         }
