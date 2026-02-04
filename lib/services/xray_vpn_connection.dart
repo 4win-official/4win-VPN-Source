@@ -1,67 +1,125 @@
 import 'dart:async';
-import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_v2ray/flutter_v2ray.dart';
 
-/// Xray VPN Connection Handler
-/// Manages native Xray VPN service through MethodChannel
+/// Xray VPN Connection Handler using flutter_v2ray
+/// This provides real Xray/V2Ray core integration with traffic forwarding
 class XrayVpnConnection {
-  static const MethodChannel _channel = MethodChannel('com.forwin.vpn/xray');
+  static late FlutterV2ray _v2ray;
+  static bool _initialized = false;
   
-  /// Request VPN permission from Android
+  /// Initialize V2Ray with status callback
+  static void initialize({void Function(V2RayStatus)? onStatusChanged}) {
+    if (!_initialized) {
+      _v2ray = FlutterV2ray(
+        onStatusChanged: (V2RayStatus status) {
+          if (onStatusChanged != null) {
+            onStatusChanged(status);
+          } else if (kDebugMode) {
+            debugPrint('V2Ray Status: ${status.state}');
+          }
+        },
+      );
+      _initialized = true;
+    }
+  }
+  
+  /// Check if V2Ray core is running
+  static Future<bool> isRunning() async {
+    try {
+      initialize();
+      final version = await _v2ray.getCoreVersion();
+      return version != null && version.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  /// Request VPN permission
   static Future<bool> requestPermission() async {
     try {
-      final bool? result = await _channel.invokeMethod('requestXrayPermission');
-      return result ?? false;
+      initialize();
+      final hasPermission = await _v2ray.requestPermission();
+      return hasPermission ?? false;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('❌ Failed to request Xray permission: $e');
+        debugPrint('❌ Failed to request permission: $e');
       }
       return false;
     }
   }
   
-  /// Connect to Xray server with config JSON
+  /// Connect to V2Ray/Xray server with config
   static Future<bool> connect({
-    required String configJson,
+    required String configContent,
+    String? remark,
   }) async {
     try {
-      final bool? result = await _channel.invokeMethod('connectXray', {
-        'configJson': configJson,
-      });
+      initialize();
       
-      if (kDebugMode) {
-        debugPrint('✅ Xray connection initiated: $result');
+      // Request permission first
+      final hasPermission = await requestPermission();
+      if (!hasPermission) {
+        if (kDebugMode) {
+          debugPrint('❌ VPN permission denied');
+        }
+        return false;
       }
       
-      return result ?? false;
+      // Start V2Ray core in VPN mode
+      await _v2ray.startV2Ray(
+        remark: remark ?? 'Xray Connection',
+        config: configContent,
+        proxyOnly: false, // VPN mode (not proxy only)
+        notificationDisconnectButtonName: 'Disconnect',
+      );
+      
+      if (kDebugMode) {
+        debugPrint('✅ V2Ray started successfully');
+      }
+      
+      return true;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('❌ Failed to connect Xray: $e');
+        debugPrint('❌ Failed to start V2Ray: $e');
       }
       return false;
     }
   }
   
-  /// Disconnect from Xray server
+  /// Disconnect from V2Ray/Xray
   static Future<bool> disconnect() async {
     try {
-      final bool? result = await _channel.invokeMethod('disconnectXray');
+      if (!_initialized) return true;
+      
+      await _v2ray.stopV2Ray();
       
       if (kDebugMode) {
-        debugPrint('✅ Xray disconnection initiated: $result');
+        debugPrint('✅ V2Ray stopped successfully');
       }
       
-      return result ?? false;
+      return true;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('❌ Failed to disconnect Xray: $e');
+        debugPrint('❌ Failed to stop V2Ray: $e');
       }
       return false;
     }
   }
   
-  /// Convert XrayConfig to V2Ray compatible JSON format
-  static String generateConfigJson({
+  /// Check if connected
+  static Future<String?> getCoreVersion() async {
+    try {
+      initialize();
+      final version = await _v2ray.getCoreVersion();
+      return version;
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /// Convert XrayConfig to V2Ray JSON format
+  static String generateV2RayConfig({
     required String protocol,
     required String address,
     required int port,
@@ -77,14 +135,41 @@ class XrayVpnConnection {
     String? publicKey,
     String? shortId,
     List<String>? alpn,
+    String? headerType,
   }) {
-    // Simplified V2Ray/Xray config format
+    // Build outbound configuration based on protocol
+    final Map<String, dynamic> outbound = {
+      "protocol": protocol.toLowerCase(),
+      "settings": _buildOutboundSettings(
+        protocol: protocol,
+        address: address,
+        port: port,
+        id: id,
+        encryption: encryption,
+      ),
+      "streamSettings": _buildStreamSettings(
+        network: network ?? "tcp",
+        security: security ?? "none",
+        path: path,
+        host: host,
+        sni: sni,
+        fingerprint: fingerprint,
+        publicKey: publicKey,
+        shortId: shortId,
+        alpn: alpn,
+        headerType: headerType,
+        flow: flow,
+      ),
+    };
+    
+    // Complete V2Ray config
     final config = {
       "log": {
-        "loglevel": "warning"
+        "loglevel": "warning",
       },
       "inbounds": [
         {
+          "tag": "socks-in",
           "port": 10808,
           "protocol": "socks",
           "settings": {
@@ -94,42 +179,57 @@ class XrayVpnConnection {
           },
           "sniffing": {
             "enabled": true,
-            "destOverride": ["http", "tls"]
+            "destOverride": ["http", "tls", "quic"]
+          }
+        },
+        {
+          "tag": "http-in",
+          "port": 10809,
+          "protocol": "http",
+          "settings": {
+            "userLevel": 8
           }
         }
       ],
       "outbounds": [
+        outbound,
         {
-          "protocol": protocol.toLowerCase(),
-          "settings": _generateOutboundSettings(
-            protocol: protocol,
-            address: address,
-            port: port,
-            id: id,
-          ),
-          "streamSettings": _generateStreamSettings(
-            network: network ?? "tcp",
-            security: security ?? "none",
-            path: path,
-            host: host,
-            sni: sni,
-            fingerprint: fingerprint,
-            publicKey: publicKey,
-            shortId: shortId,
-            alpn: alpn,
-          )
+          "protocol": "freedom",
+          "tag": "direct"
+        },
+        {
+          "protocol": "blackhole",
+          "tag": "block"
         }
-      ]
+      ],
+      "routing": {
+        "domainStrategy": "IPIfNonMatch",
+        "rules": [
+          {
+            "type": "field",
+            "ip": ["geoip:private"],
+            "outboundTag": "direct"
+          }
+        ]
+      },
+      "dns": {
+        "servers": [
+          "8.8.8.8",
+          "8.8.4.4"
+        ]
+      }
     };
     
-    return config.toString();
+    // Convert to JSON string - flutter_v2ray expects JSON string
+    return _prettyJson(config);
   }
   
-  static Map<String, dynamic> _generateOutboundSettings({
+  static Map<String, dynamic> _buildOutboundSettings({
     required String protocol,
     required String address,
     required int port,
     required String id,
+    String? encryption,
   }) {
     switch (protocol.toLowerCase()) {
       case 'vless':
@@ -141,7 +241,7 @@ class XrayVpnConnection {
               "users": [
                 {
                   "id": id,
-                  "encryption": "none",
+                  "encryption": encryption ?? "none",
                   "level": 8
                 }
               ]
@@ -179,12 +279,25 @@ class XrayVpnConnection {
           ]
         };
       
+      case 'shadowsocks':
+        return {
+          "servers": [
+            {
+              "address": address,
+              "port": port,
+              "method": encryption ?? "aes-256-gcm",
+              "password": id,
+              "level": 8
+            }
+          ]
+        };
+      
       default:
         return {};
     }
   }
   
-  static Map<String, dynamic> _generateStreamSettings({
+  static Map<String, dynamic> _buildStreamSettings({
     required String network,
     required String security,
     String? path,
@@ -194,43 +307,79 @@ class XrayVpnConnection {
     String? publicKey,
     String? shortId,
     List<String>? alpn,
+    String? headerType,
+    String? flow,
   }) {
-    final streamSettings = <String, dynamic>{
+    final Map<String, dynamic> streamSettings = {
       "network": network,
     };
     
-    // Add network-specific settings
-    if (network == "ws" && path != null) {
-      streamSettings["wsSettings"] = {
-        "path": path,
-        if (host != null) "headers": {"Host": host}
-      };
-    } else if (network == "grpc" && path != null) {
-      streamSettings["grpcSettings"] = {
-        "serviceName": path,
-      };
+    // Network-specific settings
+    switch (network) {
+      case "ws":
+        streamSettings["wsSettings"] = {
+          "path": path ?? "/",
+          if (host != null)
+            "headers": {
+              "Host": host
+            }
+        };
+        break;
+      
+      case "grpc":
+        streamSettings["grpcSettings"] = {
+          "serviceName": path ?? "",
+          "multiMode": false,
+        };
+        break;
+      
+      case "h2":
+      case "http":
+        streamSettings["httpSettings"] = {
+          "path": path ?? "/",
+          if (host != null) "host": [host]
+        };
+        break;
+      
+      case "tcp":
+        if (headerType != null && headerType != "none") {
+          streamSettings["tcpSettings"] = {
+            "header": {
+              "type": headerType
+            }
+          };
+        }
+        break;
     }
     
-    // Add security settings
-    if (security == "tls" || security == "reality") {
-      streamSettings["security"] = security;
-      
-      if (security == "tls") {
-        streamSettings["tlsSettings"] = {
-          if (sni != null) "serverName": sni,
-          if (alpn != null) "alpn": alpn,
-          if (fingerprint != null) "fingerprint": fingerprint,
-        };
-      } else if (security == "reality") {
-        streamSettings["realitySettings"] = {
-          if (sni != null) "serverName": sni,
-          if (fingerprint != null) "fingerprint": fingerprint,
-          if (publicKey != null) "publicKey": publicKey,
-          if (shortId != null) "shortId": shortId,
-        };
-      }
+    // Security settings
+    if (security == "tls") {
+      streamSettings["security"] = "tls";
+      streamSettings["tlsSettings"] = {
+        if (sni != null) "serverName": sni,
+        if (alpn != null && alpn.isNotEmpty) "alpn": alpn,
+        if (fingerprint != null) "fingerprint": fingerprint,
+        "allowInsecure": false,
+      };
+    } else if (security == "reality") {
+      streamSettings["security"] = "reality";
+      streamSettings["realitySettings"] = {
+        if (sni != null) "serverName": sni,
+        if (fingerprint != null) "fingerprint": fingerprint,
+        if (publicKey != null) "publicKey": publicKey,
+        if (shortId != null) "shortId": shortId,
+        if (flow != null) "flow": flow,
+      };
     }
     
     return streamSettings;
+  }
+  
+  static String _prettyJson(Map<String, dynamic> json) {
+    // Use built-in JSON encoder
+    return json.toString()
+        .replaceAll('{', '{\n  ')
+        .replaceAll('}', '\n}')
+        .replaceAll(',', ',\n  ');
   }
 }

@@ -569,8 +569,8 @@ class VpnProvider with ChangeNotifier {
         return;
       }
 
-      // Generate config JSON
-      final configJson = XrayVpnConnection.generateConfigJson(
+      // Generate V2Ray config JSON
+      final configJson = XrayVpnConnection.generateV2RayConfig(
         protocol: _selectedXrayConfig!.protocol,
         address: _selectedXrayConfig!.address,
         port: _selectedXrayConfig!.port,
@@ -586,10 +586,14 @@ class VpnProvider with ChangeNotifier {
         publicKey: _selectedXrayConfig!.publicKey,
         shortId: _selectedXrayConfig!.shortId,
         alpn: _selectedXrayConfig!.alpn != null ? _selectedXrayConfig!.alpn!.split(',') : null,
+        headerType: _selectedXrayConfig!.headerType,
       );
 
-      // Connect via native Xray service
-      final connected = await XrayVpnConnection.connect(configJson: configJson);
+      // Connect via flutter_v2ray (real V2Ray core)
+      final connected = await XrayVpnConnection.connect(
+        configContent: configJson,
+        remark: _selectedXrayConfig!.remark,
+      );
       
       if (connected) {
         _status = VpnConnectionStatus.connected;
