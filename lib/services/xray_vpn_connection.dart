@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
 
@@ -57,6 +58,11 @@ class XrayVpnConnection {
     try {
       initialize();
       
+      if (kDebugMode) {
+        debugPrint('🔧 Xray Config JSON:');
+        debugPrint(configContent);
+      }
+      
       // Request permission first
       final hasPermission = await requestPermission();
       if (!hasPermission) {
@@ -64,6 +70,11 @@ class XrayVpnConnection {
           debugPrint('❌ VPN permission denied');
         }
         return false;
+      }
+      
+      if (kDebugMode) {
+        debugPrint('✅ VPN permission granted');
+        debugPrint('🚀 Starting V2Ray core...');
       }
       
       // Start V2Ray core in VPN mode
@@ -78,10 +89,14 @@ class XrayVpnConnection {
         debugPrint('✅ V2Ray started successfully');
       }
       
+      // Wait a bit to ensure connection is established
+      await Future.delayed(const Duration(milliseconds: 500));
+      
       return true;
-    } catch (e) {
+    } catch (e, stackTrace) {
       if (kDebugMode) {
         debugPrint('❌ Failed to start V2Ray: $e');
+        debugPrint('Stack trace: $stackTrace');
       }
       return false;
     }
@@ -376,10 +391,8 @@ class XrayVpnConnection {
   }
   
   static String _prettyJson(Map<String, dynamic> json) {
-    // Use built-in JSON encoder
-    return json.toString()
-        .replaceAll('{', '{\n  ')
-        .replaceAll('}', '\n}')
-        .replaceAll(',', ',\n  ');
+    // Use proper JSON encoder with indentation
+    const encoder = JsonEncoder.withIndent('  ');
+    return encoder.convert(json);
   }
 }

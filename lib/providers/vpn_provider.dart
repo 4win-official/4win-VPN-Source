@@ -117,9 +117,15 @@ class VpnProvider with ChangeNotifier {
   }
   
   Future<void> _loadAndTestServers() async {
-    // فقط دانلود - تست نشود
-    // تست هنگام کلیک دکمه اتصال انجام می‌شود
+    // Load SSTP servers (no test - only download)
     await loadServers(forceRefresh: true);
+    
+    // Load Xray configs (no test - only download)
+    await loadXrayConfigs(forceRefresh: true);
+    
+    if (kDebugMode) {
+      debugPrint('✅ Servers loaded: SSTP=${_servers.length}, Xray=${_xrayConfigs.length}');
+    }
   }
 
   void _startDurationTimer() {
