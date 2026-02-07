@@ -10,7 +10,7 @@ class XrayVpnConnection {
   static bool _initialized = false;
   
   /// Initialize V2Ray with status callback
-  static void initialize({void Function(V2RayStatus)? onStatusChanged}) {
+  static Future<void> initialize({void Function(V2RayStatus)? onStatusChanged}) async {
     if (!_initialized) {
       _v2ray = FlutterV2ray(
         onStatusChanged: (V2RayStatus status) {
@@ -21,14 +21,25 @@ class XrayVpnConnection {
           }
         },
       );
+      
+      // CRITICAL: Initialize V2Ray before use
+      await _v2ray.initializeV2Ray(
+        notificationIconResourceType: 'mipmap',
+        notificationIconResourceName: 'ic_launcher',
+      );
+      
       _initialized = true;
+      
+      if (kDebugMode) {
+        debugPrint('✅ V2Ray initialized successfully');
+      }
     }
   }
   
   /// Check if V2Ray core is running
   static Future<bool> isRunning() async {
     try {
-      initialize();
+      await initialize();
       final version = await _v2ray.getCoreVersion();
       return version != null && version.isNotEmpty;
     } catch (e) {
@@ -39,7 +50,7 @@ class XrayVpnConnection {
   /// Request VPN permission
   static Future<bool> requestPermission() async {
     try {
-      initialize();
+      await initialize();
       final hasPermission = await _v2ray.requestPermission();
       return hasPermission ?? false;
     } catch (e) {
@@ -56,7 +67,7 @@ class XrayVpnConnection {
     String? remark,
   }) async {
     try {
-      initialize();
+      await initialize();
       
       if (kDebugMode) {
         debugPrint('🔧 Xray Config JSON:');
@@ -74,23 +85,35 @@ class XrayVpnConnection {
       
       if (kDebugMode) {
         debugPrint('✅ VPN permission granted');
-        debugPrint('🚀 Starting V2Ray core...');
+        debugPrint('🚀 Starting V2Ray core in VPN MODE (not proxy only)...');
       }
       
-      // Start V2Ray core in VPN mode
+      // CRITICAL: Validate JSON format first
+      try {
+        jsonDecode(configContent);
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('❌ Invalid JSON config: $e');
+        }
+        return false;
+      }
+      
+      // Start V2Ray core in VPN mode (NOT proxy only)
       await _v2ray.startV2Ray(
         remark: remark ?? 'Xray Connection',
         config: configContent,
-        proxyOnly: false, // VPN mode (not proxy only)
+        blockedApps: [], // Empty = all apps use VPN
+        bypassSubnets: ['0.0.0.0/0'], // ✅ CRITICAL: Route ALL traffic through VPN
+        proxyOnly: false, // ✅ VPN mode - creates tunnel with key icon
         notificationDisconnectButtonName: 'Disconnect',
       );
       
       if (kDebugMode) {
-        debugPrint('✅ V2Ray started successfully');
+        debugPrint('✅ V2Ray started successfully with VPN tunnel');
       }
       
       // Wait a bit to ensure connection is established
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 1000));
       
       return true;
     } catch (e, stackTrace) {
@@ -125,7 +148,7 @@ class XrayVpnConnection {
   /// Check if connected
   static Future<String?> getCoreVersion() async {
     try {
-      initialize();
+      await initialize();
       final version = await _v2ray.getCoreVersion();
       return version;
     } catch (e) {

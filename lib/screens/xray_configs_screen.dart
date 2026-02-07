@@ -82,6 +82,134 @@ class _XrayConfigsScreenState extends State<XrayConfigsScreen> {
     }
   }
 
+  Future<void> _showAddCustomConfigDialog() async {
+    final TextEditingController configController = TextEditingController();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+          title: Text(
+            'Add Custom Config',
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Paste your Xray config link:',
+                  style: TextStyle(
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: configController,
+                  maxLines: 4,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                    fontSize: 13,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'vless://...\nvmess://...\ntrojan://...\nss://...',
+                    hintStyle: TextStyle(
+                      color: isDark ? Colors.grey[600] : Colors.grey[400],
+                      fontSize: 12,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: isDark ? Colors.purple[300]! : Colors.purple,
+                        width: 2,
+                      ),
+                    ),
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final configText = configController.text.trim();
+                if (configText.isEmpty) {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter a config')),
+                  );
+                  return;
+                }
+
+                try {
+                  // Parse custom config using auto-detect
+                  final customConfig = XrayConfig.fromString(configText);
+                  
+                  // Add custom config via VpnProvider
+                  final vpnProvider = Provider.of<VpnProvider>(context, listen: false);
+                  await vpnProvider.addCustomXrayConfig(customConfig);
+                  
+                  Navigator.of(context).pop();
+                  
+                  // Reload configs
+                  await _loadConfigs(forceRefresh: true);
+                  
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Custom config added successfully!'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  Navigator.of(context).pop();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to add config: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Add'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Color _getPingColor(int ping) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     if (ping < 100) {
@@ -106,6 +234,11 @@ class _XrayConfigsScreenState extends State<XrayConfigsScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () => _showAddCustomConfigDialog(),
+            tooltip: 'Add Custom Config',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _isLoading || _isTesting ? null : () => _loadConfigs(forceRefresh: true),

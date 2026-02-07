@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vpn_server.dart';
@@ -840,10 +841,84 @@ class VpnProvider with ChangeNotifier {
   Future<void> loadXrayConfigs({bool forceRefresh = false}) async {
     try {
       _xrayConfigs = await _xrayService.fetchConfigs(forceRefresh: forceRefresh);
+      
+      // Load custom configs from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final customConfigsJson = prefs.getStringList('custom_xray_configs') ?? [];
+      
+      for (final configJson in customConfigsJson) {
+        try {
+          final config = XrayConfig.fromJson(jsonDecode(configJson));
+          // Add if not already in list
+          if (!_xrayConfigs.any((c) => c.rawConfig == config.rawConfig)) {
+            _xrayConfigs.add(config);
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Failed to parse custom config: $e');
+          }
+        }
+      }
+      
       notifyListeners();
     } catch (e) {
       if (kDebugMode) {
         debugPrint('⚠️ Failed to load Xray configs: $e');
+      }
+    }
+  }
+  
+  /// Add custom Xray config
+  Future<void> addCustomXrayConfig(XrayConfig config) async {
+    try {
+      // Add to list
+      _xrayConfigs.add(config);
+      
+      // Save to SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final customConfigsJson = prefs.getStringList('custom_xray_configs') ?? [];
+      customConfigsJson.add(jsonEncode(config.toJson()));
+      await prefs.setStringList('custom_xray_configs', customConfigsJson);
+      
+      notifyListeners();
+      
+      if (kDebugMode) {
+        debugPrint('✅ Custom config added: ${config.remark}');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to add custom config: $e');
+      }
+      rethrow;
+    }
+  }
+  
+  /// Remove custom Xray config
+  Future<void> removeCustomXrayConfig(XrayConfig config) async {
+    try {
+      _xrayConfigs.remove(config);
+      
+      // Remove from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final customConfigsJson = prefs.getStringList('custom_xray_configs') ?? [];
+      customConfigsJson.removeWhere((json) {
+        try {
+          final c = XrayConfig.fromJson(jsonDecode(json));
+          return c.rawConfig == config.rawConfig;
+        } catch (e) {
+          return false;
+        }
+      });
+      await prefs.setStringList('custom_xray_configs', customConfigsJson);
+      
+      notifyListeners();
+      
+      if (kDebugMode) {
+        debugPrint('✅ Custom config removed: ${config.remark}');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to remove custom config: $e');
       }
     }
   }

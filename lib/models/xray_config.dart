@@ -130,12 +130,87 @@ class XrayConfig {
     }
   }
 
+  /// Parse Trojan config from trojan:// URI
+  factory XrayConfig.fromTrojan(String config) {
+    try {
+      // Remove 'trojan://' prefix
+      final uri = Uri.parse(config.replaceFirst('trojan://', 'https://'));
+      
+      // Extract password from user info
+      final password = uri.userInfo;
+      
+      // Extract address and port
+      final address = uri.host;
+      final port = uri.port != 0 ? uri.port : 443;
+      
+      // Parse query parameters
+      final params = uri.queryParameters;
+      
+      return XrayConfig(
+        protocol: 'trojan',
+        address: address,
+        port: port,
+        id: password, // Password is used as ID in Trojan
+        security: params['security'] ?? 'tls',
+        network: params['type'] ?? 'tcp',
+        sni: params['sni'] ?? address,
+        alpn: params['alpn'],
+        host: params['host'],
+        path: params['path'],
+        fingerprint: params['fp'],
+        remark: params['#'] ?? Uri.decodeComponent(uri.fragment.isNotEmpty ? uri.fragment : 'Trojan Server'),
+        rawConfig: config,
+      );
+    } catch (e) {
+      throw FormatException('Invalid Trojan config: $e');
+    }
+  }
+  
+  /// Parse Shadowsocks config from ss:// URI
+  factory XrayConfig.fromShadowsocks(String config) {
+    try {
+      // Remove 'ss://' prefix
+      final uri = Uri.parse(config.replaceFirst('ss://', 'https://'));
+      
+      // Decode user info (method:password)
+      final userInfo = utf8.decode(base64.decode(uri.userInfo));
+      final parts = userInfo.split(':');
+      
+      if (parts.length != 2) {
+        throw FormatException('Invalid Shadowsocks user info format');
+      }
+      
+      final method = parts[0];
+      final password = parts[1];
+      
+      // Extract address and port
+      final address = uri.host;
+      final port = uri.port;
+      
+      return XrayConfig(
+        protocol: 'shadowsocks',
+        address: address,
+        port: port,
+        id: password,
+        encryption: method,
+        remark: Uri.decodeComponent(uri.fragment.isNotEmpty ? uri.fragment : 'Shadowsocks Server'),
+        rawConfig: config,
+      );
+    } catch (e) {
+      throw FormatException('Invalid Shadowsocks config: $e');
+    }
+  }
+
   /// Auto-detect and parse config
   factory XrayConfig.fromString(String config) {
     if (config.startsWith('vless://')) {
       return XrayConfig.fromVless(config);
     } else if (config.startsWith('vmess://')) {
       return XrayConfig.fromVmess(config);
+    } else if (config.startsWith('trojan://')) {
+      return XrayConfig.fromTrojan(config);
+    } else if (config.startsWith('ss://')) {
+      return XrayConfig.fromShadowsocks(config);
     } else {
       throw FormatException('Unsupported protocol');
     }
