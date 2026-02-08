@@ -596,6 +596,17 @@ class VpnProvider with ChangeNotifier {
         headerType: _selectedXrayConfig!.headerType,
       );
 
+      if (kDebugMode) {
+        debugPrint('🔧 Generated Xray Config JSON (first 500 chars):');
+        debugPrint(configJson.substring(0, configJson.length > 500 ? 500 : configJson.length));
+        debugPrint('📝 Config Details:');
+        debugPrint('  Protocol: ${_selectedXrayConfig!.protocol}');
+        debugPrint('  Address: ${_selectedXrayConfig!.address}:${_selectedXrayConfig!.port}');
+        debugPrint('  Security: ${_selectedXrayConfig!.security}');
+        debugPrint('  Network: ${_selectedXrayConfig!.network}');
+        debugPrint('  SNI: ${_selectedXrayConfig!.sni}');
+      }
+
       // Connect via flutter_v2ray (real V2Ray core)
       final connected = await XrayVpnConnection.connect(
         configContent: configJson,
@@ -610,6 +621,7 @@ class VpnProvider with ChangeNotifier {
 
         if (kDebugMode) {
           debugPrint('✅ Connected to Xray: ${_selectedXrayConfig!.remark}');
+          debugPrint('🔍 Check logcat to verify V2Ray core is running and routing traffic');
         }
       } else {
         _status = VpnConnectionStatus.disconnected;
