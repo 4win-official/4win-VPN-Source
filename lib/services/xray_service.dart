@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_vless/flutter_vless.dart';
 import '../models/xray_config.dart';
 
 class XrayService {
@@ -54,6 +55,7 @@ class XrayService {
   }
 
   /// Parse config text to list of XrayConfig
+  /// Uses flutter_vless parser for better compatibility
   List<XrayConfig> _parseConfigs(String text) {
     final configs = <XrayConfig>[];
     final lines = text.split('\n');
@@ -63,19 +65,145 @@ class XrayService {
       if (trimmed.isEmpty) continue;
 
       try {
+        // Use flutter_vless parser for VLESS/VMESS
         if (trimmed.startsWith('vless://') || trimmed.startsWith('vmess://')) {
+          try {
+            // Try flutter_vless parser first
+            final parsed = FlutterVless.parseFromURL(trimmed);
+            final config = _convertFlutterVlessToXrayConfig(parsed, trimmed);
+            configs.add(config);
+          } catch (e) {
+            // Fallback to manual parsing
+            if (kDebugMode) {
+              debugPrint('⚠️ Flutter vless parser failed, trying manual parse: $e');
+            }
+            final config = XrayConfig.fromString(trimmed);
+            configs.add(config);
+          }
+        } else if (trimmed.startsWith('trojan://') || trimmed.startsWith('ss://')) {
+          // Manual parsing for Trojan and Shadowsocks
           final config = XrayConfig.fromString(trimmed);
           configs.add(config);
         }
       } catch (e) {
         // Skip invalid configs
         if (kDebugMode) {
-          print('⚠️ Skipped invalid config: ${trimmed.substring(0, min(50, trimmed.length))}... Error: $e');
+          debugPrint('⚠️ Skipped invalid config: ${trimmed.substring(0, min(50, trimmed.length))}... Error: $e');
         }
       }
     }
 
     return configs;
+  }
+  
+  /// Convert FlutterVlessURL to XrayConfig
+  XrayConfig _convertFlutterVlessToXrayConfig(FlutterVlessURL parsed, String rawConfig) {
+    // Parse the full config JSON
+    final fullConfig = jsonDecode(parsed.getFullConfiguration()) as Map<String, dynamic>;
+    final outbound = fullConfig['outbounds'][0] as Map<String, dynamic>;
+    final settings = outbound['settings'] as Map<String, dynamic>;
+    final streamSettings = outbound['streamSettings'] as Map<String, dynamic>;
+    
+    // Get protocol
+    final protocol = outbound['protocol'] as String;
+    
+    // Get address and port
+    String address;
+    int port;
+    String id;
+    
+    if (protocol == 'vless' || protocol == 'vmess') {
+      final vnext = settings['vnext'][0] as Map<String, dynamic>;
+      address = vnext['address'] as String;
+      port = vnext['port'] as int;
+      id = vnext['users'][0]['id'] as String;
+    } else if (protocol == 'trojan') {
+      final servers = settings['servers'][0] as Map<String, dynamic>;
+      address = servers['address'] as String;
+      port = servers['port'] as int;
+      id = servers['password'] as String;
+    } else {
+      throw Exception('Unsupported protocol: $protocol');
+    }
+    
+    // Get stream settings
+    final network = streamSettings['network'] as String? ?? 'tcp';
+    final security = streamSettings['security'] as String? ?? 'none';
+    
+    String? sni;
+    String? fingerprint;
+    String? alpn;
+    List<String>? alpnList;
+    String? publicKey;
+    String? shortId;
+    
+    if (security == 'tls' && streamSettings.containsKey('tlsSettings')) {
+      final tlsSettings = streamSettings['tlsSettings'] as Map<String, dynamic>;
+      sni = tlsSettings['serverName'] as String?;
+      fingerprint = tlsSettings['fingerprint'] as String?;
+      alpnList = (tlsSettings['alpn'] as List?)?.cast<String>();
+      if (alpnList != null) {
+        alpn = alpnList.join(',');
+      }
+    } else if (security == 'reality' && streamSettings.containsKey('realitySettings')) {
+      final realitySettings = streamSettings['realitySettings'] as Map<String, dynamic>;
+      sni = realitySettings['serverName'] as String?;
+      fingerprint = realitySettings['fingerprint'] as String?;
+      publicKey = realitySettings['publicKey'] as String?;
+      shortId = realitySettings['shortId'] as String?;
+      alpnList = (realitySettings['alpn'] as List?)?.cast<String>();
+      if (alpnList != null) {
+        alpn = alpnList.join(',');
+      }
+    }
+    
+    String? path;
+    String? host;
+    
+    if (network == 'ws' && streamSettings.containsKey('wsSettings')) {
+      final wsSettings = streamSettings['wsSettings'] as Map<String, dynamic>;
+      path = wsSettings['path'] as String?;
+      final headers = wsSettings['headers'] as Map<String, dynamic>?;
+      host = headers?['Host'] as String?;
+    } else if (network == 'grpc' && streamSettings.containsKey('grpcSettings')) {
+      final grpcSettings = streamSettings['grpcSettings'] as Map<String, dynamic>;
+      path = grpcSettings['serviceName'] as String?;
+    }
+    
+    // Get flow for VLESS
+    String? flow;
+    String? encryption;
+    
+    if (protocol == 'vless') {
+      final vnext = settings['vnext'][0] as Map<String, dynamic>;
+      final user = vnext['users'][0] as Map<String, dynamic>;
+      flow = user['flow'] as String?;
+      encryption = user['encryption'] as String? ?? 'none';
+    } else if (protocol == 'vmess') {
+      final vnext = settings['vnext'][0] as Map<String, dynamic>;
+      final user = vnext['users'][0] as Map<String, dynamic>;
+      encryption = user['security'] as String? ?? 'auto';
+    }
+    
+    return XrayConfig(
+      protocol: protocol,
+      address: address,
+      port: port,
+      id: id,
+      flow: flow,
+      encryption: encryption,
+      security: security,
+      network: network,
+      path: path,
+      host: host,
+      sni: sni,
+      fingerprint: fingerprint,
+      publicKey: publicKey,
+      shortId: shortId,
+      alpn: alpn,
+      remark: parsed.remark.isNotEmpty ? parsed.remark : '$protocol://$address:$port',
+      rawConfig: rawConfig,
+    );
   }
 
   /// Cache configs to local storage

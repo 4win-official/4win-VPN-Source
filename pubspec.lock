@@ -114,23 +114,39 @@ packages:
     dependency: "direct dev"
     description:
       name: flutter_lints
-      sha256: "5398f14efa795ffb7a33e9b6a08798b26a180edac4ad7db3f231e40f82ce11e1"
+      sha256: "3105dc8492f6183fb076ccf1f351ac3d60564bff92e20bfc4af9cc1651f4e7e1"
       url: "https://pub.dev"
     source: hosted
-    version: "5.0.0"
+    version: "6.0.0"
   flutter_test:
     dependency: "direct dev"
     description: flutter
     source: sdk
     version: "0.0.0"
-  flutter_v2ray:
+  flutter_vless:
     dependency: "direct main"
     description:
-      name: flutter_v2ray
-      sha256: "09dce3b4b58ea6a4220409d948a4d92a6eb3416184e6512ec0f5773fd48e5ab0"
+      name: flutter_vless
+      sha256: b17c096ed90e01e65269a8467e910ed84613ae05d4ae3dc4f0f35341c4a581b5
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.10"
+    version: "1.0.4"
+  flutter_vless_android:
+    dependency: transitive
+    description:
+      name: flutter_vless_android
+      sha256: "19ba2b4896fee994deb178b4d89e2648064f78c9b20af12583c57790c1118e0b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.1"
+  flutter_vless_platform_interface:
+    dependency: transitive
+    description:
+      name: flutter_vless_platform_interface
+      sha256: "1035d723d4ef58efd3174d97b97d01db2eacf3cd9278c9fdf68d3e6ecb82fe16"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
   flutter_web_plugins:
     dependency: transitive
     description: flutter
@@ -180,10 +196,10 @@ packages:
     dependency: transitive
     description:
       name: lints
-      sha256: c35bb79562d980e9a453fc715854e1ed39e24e7d0297a880ef54e17f9874a9d7
+      sha256: "12f842a479589fea194fe5c5a3095abc7be0c1f2ddfa9a0e76aed1dbd26a87df"
       url: "https://pub.dev"
     source: hosted
-    version: "5.1.1"
+    version: "6.1.0"
   matcher:
     dependency: transitive
     description:

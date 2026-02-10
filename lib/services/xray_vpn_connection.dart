@@ -1,29 +1,33 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_v2ray/flutter_v2ray.dart';
+import 'package:flutter_vless/flutter_vless.dart';
 
-/// Xray VPN Connection Handler using flutter_v2ray
-/// This provides real Xray/V2Ray core integration with traffic forwarding
+/// Xray VPN Connection Handler using flutter_vless
+/// Supports VLESS, VMESS, Trojan, Shadowsocks with real VPN tunnel
 class XrayVpnConnection {
-  static late FlutterV2ray _v2ray;
+  static late FlutterVless _vless;
   static bool _initialized = false;
   
-  /// Initialize V2Ray with status callback
-  static Future<void> initialize({void Function(V2RayStatus)? onStatusChanged}) async {
+  /// Initialize flutter_vless with status callback
+  static Future<void> initialize({void Function(VlessStatus)? onStatusChanged}) async {
     if (!_initialized) {
-      _v2ray = FlutterV2ray(
-        onStatusChanged: (V2RayStatus status) {
+      _vless = FlutterVless(
+        onStatusChanged: (VlessStatus status) {
           if (onStatusChanged != null) {
             onStatusChanged(status);
-          } else if (kDebugMode) {
-            debugPrint('V2Ray Status: ${status.state}');
+          }
+          if (kDebugMode) {
+            debugPrint('📊 Vless Status: ${status.state}');
+            debugPrint('   Duration: ${status.duration}s');
+            debugPrint('   Upload: ${status.upload} bytes');
+            debugPrint('   Download: ${status.download} bytes');
           }
         },
       );
       
-      // CRITICAL: Initialize V2Ray before use
-      await _v2ray.initializeV2Ray(
+      // Initialize Vless
+      await _vless.initializeVless(
         notificationIconResourceType: 'mipmap',
         notificationIconResourceName: 'ic_launcher',
       );
@@ -31,19 +35,10 @@ class XrayVpnConnection {
       _initialized = true;
       
       if (kDebugMode) {
-        debugPrint('✅ V2Ray initialized successfully');
+        final version = await _vless.getCoreVersion();
+        debugPrint('✅ Flutter Vless initialized successfully');
+        debugPrint('   Core version: $version');
       }
-    }
-  }
-  
-  /// Check if V2Ray core is running
-  static Future<bool> isRunning() async {
-    try {
-      await initialize();
-      final version = await _v2ray.getCoreVersion();
-      return version != null && version.isNotEmpty;
-    } catch (e) {
-      return false;
     }
   }
   
@@ -51,8 +46,15 @@ class XrayVpnConnection {
   static Future<bool> requestPermission() async {
     try {
       await initialize();
-      final hasPermission = await _v2ray.requestPermission();
-      return hasPermission ?? false;
+      final hasPermission = await _vless.requestPermission();
+      
+      if (kDebugMode) {
+        debugPrint(hasPermission 
+            ? '✅ VPN permission granted' 
+            : '❌ VPN permission denied');
+      }
+      
+      return hasPermission;
     } catch (e) {
       if (kDebugMode) {
         debugPrint('❌ Failed to request permission: $e');
@@ -61,7 +63,7 @@ class XrayVpnConnection {
     }
   }
   
-  /// Connect to V2Ray/Xray server with config
+  /// Connect to VLESS/VMESS server with config
   static Future<bool> connect({
     required String configContent,
     String? remark,
@@ -70,8 +72,8 @@ class XrayVpnConnection {
       await initialize();
       
       if (kDebugMode) {
-        debugPrint('🔧 Xray Config JSON:');
-        debugPrint(configContent);
+        debugPrint('🔧 Xray Config JSON (first 300 chars):');
+        debugPrint(configContent.substring(0, configContent.length > 300 ? 300 : configContent.length));
       }
       
       // Request permission first
@@ -84,79 +86,74 @@ class XrayVpnConnection {
       }
       
       if (kDebugMode) {
-        debugPrint('✅ VPN permission granted');
-        debugPrint('🚀 Starting V2Ray core in VPN MODE (not proxy only)...');
+        debugPrint('🚀 Starting Vless core in VPN MODE...');
+        debugPrint('   Remark: ${remark ?? 'Xray Connection'}');
       }
       
-      // CRITICAL: Validate JSON format first
-      try {
-        jsonDecode(configContent);
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('❌ Invalid JSON config: $e');
-        }
-        return false;
-      }
-      
-      // Start V2Ray core in VPN mode (NOT proxy only)
-      await _v2ray.startV2Ray(
+      // Start Vless core in VPN mode (NOT proxy only)
+      await _vless.startVless(
         remark: remark ?? 'Xray Connection',
         config: configContent,
+        proxyOnly: false, // ✅ VPN mode - creates tunnel
+        bypassSubnets: [], // Empty = route all traffic
         blockedApps: [], // Empty = all apps use VPN
-        bypassSubnets: ['0.0.0.0/0'], // ✅ CRITICAL: Route ALL traffic through VPN
-        proxyOnly: false, // ✅ VPN mode - creates tunnel with key icon
         notificationDisconnectButtonName: 'Disconnect',
       );
       
       if (kDebugMode) {
-        debugPrint('✅ V2Ray started successfully with VPN tunnel');
+        debugPrint('✅ Vless started successfully in VPN mode');
+        debugPrint('🔍 Traffic should now be routing through VPN tunnel');
       }
-      
-      // Wait a bit to ensure connection is established
-      await Future.delayed(const Duration(milliseconds: 1000));
       
       return true;
     } catch (e, stackTrace) {
       if (kDebugMode) {
-        debugPrint('❌ Failed to start V2Ray: $e');
+        debugPrint('❌ Failed to start Vless: $e');
         debugPrint('Stack trace: $stackTrace');
       }
       return false;
     }
   }
   
-  /// Disconnect from V2Ray/Xray
+  /// Disconnect from VPN
   static Future<bool> disconnect() async {
     try {
-      if (!_initialized) return true;
-      
-      await _v2ray.stopV2Ray();
+      if (!_initialized) {
+        return true;
+      }
       
       if (kDebugMode) {
-        debugPrint('✅ V2Ray stopped successfully');
+        debugPrint('🛑 Stopping Vless VPN...');
+      }
+      
+      await _vless.stopVless();
+      
+      if (kDebugMode) {
+        debugPrint('✅ Vless stopped successfully');
       }
       
       return true;
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('❌ Failed to stop V2Ray: $e');
+        debugPrint('❌ Failed to stop Vless: $e');
       }
       return false;
     }
   }
   
-  /// Check if connected
+  /// Get core version
   static Future<String?> getCoreVersion() async {
     try {
       await initialize();
-      final version = await _v2ray.getCoreVersion();
+      final version = await _vless.getCoreVersion();
       return version;
     } catch (e) {
       return null;
     }
   }
   
-  /// Convert XrayConfig to V2Ray JSON format
+  /// Convert XrayConfig to V2Ray/Xray JSON format
+  /// Supports VLESS, VMESS, Trojan, Shadowsocks
   static String generateV2RayConfig({
     required String protocol,
     required String address,
@@ -200,6 +197,11 @@ class XrayVpnConnection {
       ),
     };
     
+    // Add flow to outbound if present (for VLESS)
+    if (flow != null && flow.isNotEmpty) {
+      outbound["settings"]["vnext"][0]["users"][0]["flow"] = flow;
+    }
+    
     // Complete V2Ray config
     final config = {
       "log": {
@@ -209,6 +211,7 @@ class XrayVpnConnection {
         {
           "tag": "socks-in",
           "port": 10808,
+          "listen": "127.0.0.1",
           "protocol": "socks",
           "settings": {
             "auth": "noauth",
@@ -217,15 +220,8 @@ class XrayVpnConnection {
           },
           "sniffing": {
             "enabled": true,
-            "destOverride": ["http", "tls", "quic"]
-          }
-        },
-        {
-          "tag": "http-in",
-          "port": 10809,
-          "protocol": "http",
-          "settings": {
-            "userLevel": 8
+            "destOverride": ["http", "tls", "quic", "fakedns"],
+            "routeOnly": false
           }
         }
       ],
@@ -241,7 +237,7 @@ class XrayVpnConnection {
         }
       ],
       "routing": {
-        "domainStrategy": "IPIfNonMatch",
+        "domainStrategy": "AsIs",
         "rules": [
           {
             "type": "field",
@@ -252,14 +248,15 @@ class XrayVpnConnection {
       },
       "dns": {
         "servers": [
-          "8.8.8.8",
-          "8.8.4.4"
+          "1.1.1.1",
+          "8.8.8.8"
         ]
       }
     };
     
-    // Convert to JSON string - flutter_v2ray expects JSON string
-    return _prettyJson(config);
+    // Convert to JSON string
+    const encoder = JsonEncoder.withIndent('  ');
+    return encoder.convert(config);
   }
   
   static Map<String, dynamic> _buildOutboundSettings({
@@ -297,7 +294,7 @@ class XrayVpnConnection {
                 {
                   "id": id,
                   "alterId": 0,
-                  "security": "auto",
+                  "security": encryption ?? "auto",
                   "level": 8
                 }
               ]
@@ -331,7 +328,7 @@ class XrayVpnConnection {
         };
       
       default:
-        return {};
+        throw Exception('Unsupported protocol: $protocol');
     }
   }
   
@@ -348,74 +345,71 @@ class XrayVpnConnection {
     String? headerType,
     String? flow,
   }) {
-    final Map<String, dynamic> streamSettings = {
+    final streamSettings = <String, dynamic>{
       "network": network,
+      "security": security,
     };
     
-    // Network-specific settings
-    switch (network) {
-      case "ws":
-        streamSettings["wsSettings"] = {
-          "path": path ?? "/",
-          if (host != null)
-            "headers": {
-              "Host": host
-            }
-        };
-        break;
-      
-      case "grpc":
-        streamSettings["grpcSettings"] = {
-          "serviceName": path ?? "",
-          "multiMode": false,
-        };
-        break;
-      
-      case "h2":
-      case "http":
-        streamSettings["httpSettings"] = {
-          "path": path ?? "/",
-          if (host != null) "host": [host]
-        };
-        break;
-      
-      case "tcp":
-        if (headerType != null && headerType != "none") {
+    // Add network-specific settings
+    switch (network.toLowerCase()) {
+      case 'tcp':
+        if (headerType != null && headerType.isNotEmpty) {
           streamSettings["tcpSettings"] = {
             "header": {
-              "type": headerType
+              "type": headerType,
             }
           };
         }
         break;
+      
+      case 'ws':
+        streamSettings["wsSettings"] = {
+          "path": path ?? "/",
+          "headers": host != null ? {"Host": host} : {}
+        };
+        break;
+      
+      case 'grpc':
+        streamSettings["grpcSettings"] = {
+          "serviceName": path ?? "",
+          "multiMode": false
+        };
+        break;
+      
+      case 'h2':
+      case 'http':
+        streamSettings["httpSettings"] = {
+          "path": path ?? "/",
+          "host": host != null ? [host] : []
+        };
+        break;
     }
     
-    // Security settings
-    if (security == "tls") {
-      streamSettings["security"] = "tls";
+    // Add security settings
+    if (security == 'tls') {
       streamSettings["tlsSettings"] = {
-        if (sni != null) "serverName": sni,
-        if (alpn != null && alpn.isNotEmpty) "alpn": alpn,
-        if (fingerprint != null) "fingerprint": fingerprint,
+        "serverName": sni ?? host,
         "allowInsecure": false,
+        "fingerprint": fingerprint ?? "chrome",
       };
-    } else if (security == "reality") {
-      streamSettings["security"] = "reality";
+      
+      if (alpn != null && alpn.isNotEmpty) {
+        streamSettings["tlsSettings"]["alpn"] = alpn;
+      }
+    } else if (security == 'reality') {
       streamSettings["realitySettings"] = {
-        if (sni != null) "serverName": sni,
-        if (fingerprint != null) "fingerprint": fingerprint,
-        if (publicKey != null) "publicKey": publicKey,
-        if (shortId != null) "shortId": shortId,
-        if (flow != null) "flow": flow,
+        "serverName": sni ?? host,
+        "fingerprint": fingerprint ?? "chrome",
+        "show": false,
+        "publicKey": publicKey ?? "",
+        "shortId": shortId ?? "",
       };
+      
+      if (alpn != null && alpn.isNotEmpty) {
+        streamSettings["realitySettings"]["alpn"] = alpn;
+      }
     }
     
     return streamSettings;
-  }
-  
-  static String _prettyJson(Map<String, dynamic> json) {
-    // Use proper JSON encoder with indentation
-    const encoder = JsonEncoder.withIndent('  ');
-    return encoder.convert(json);
   }
 }
