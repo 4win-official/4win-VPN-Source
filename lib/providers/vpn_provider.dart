@@ -576,25 +576,64 @@ class VpnProvider with ChangeNotifier {
         return;
       }
 
-      // Generate V2Ray config JSON
-      final configJson = XrayVpnConnection.generateV2RayConfig(
-        protocol: _selectedXrayConfig!.protocol,
-        address: _selectedXrayConfig!.address,
-        port: _selectedXrayConfig!.port,
-        id: _selectedXrayConfig!.id,
-        flow: _selectedXrayConfig!.flow,
-        encryption: _selectedXrayConfig!.encryption,
-        security: _selectedXrayConfig!.security,
-        network: _selectedXrayConfig!.network,
-        path: _selectedXrayConfig!.path,
-        host: _selectedXrayConfig!.host,
-        sni: _selectedXrayConfig!.sni,
-        fingerprint: _selectedXrayConfig!.fingerprint,
-        publicKey: _selectedXrayConfig!.publicKey,
-        shortId: _selectedXrayConfig!.shortId,
-        alpn: _selectedXrayConfig!.alpn != null ? _selectedXrayConfig!.alpn!.split(',') : null,
-        headerType: _selectedXrayConfig!.headerType,
-      );
+      // Use rawConfig if available, otherwise generate config
+      String configJson;
+      
+      if (_selectedXrayConfig!.rawConfig.isNotEmpty) {
+        // Try to use flutter_vless parser to get full config
+        try {
+          final parsed = await XrayVpnConnection.parseFromURL(_selectedXrayConfig!.rawConfig);
+          configJson = parsed.getFullConfiguration();
+          
+          if (kDebugMode) {
+            debugPrint('✅ Using parsed config from rawConfig URL');
+          }
+        } catch (e) {
+          // Fallback to manual generation if parsing fails
+          if (kDebugMode) {
+            debugPrint('⚠️ Failed to parse rawConfig, using manual generation: $e');
+          }
+          
+          configJson = XrayVpnConnection.generateV2RayConfig(
+            protocol: _selectedXrayConfig!.protocol,
+            address: _selectedXrayConfig!.address,
+            port: _selectedXrayConfig!.port,
+            id: _selectedXrayConfig!.id,
+            flow: _selectedXrayConfig!.flow,
+            encryption: _selectedXrayConfig!.encryption,
+            security: _selectedXrayConfig!.security,
+            network: _selectedXrayConfig!.network,
+            path: _selectedXrayConfig!.path,
+            host: _selectedXrayConfig!.host,
+            sni: _selectedXrayConfig!.sni,
+            fingerprint: _selectedXrayConfig!.fingerprint,
+            publicKey: _selectedXrayConfig!.publicKey,
+            shortId: _selectedXrayConfig!.shortId,
+            alpn: _selectedXrayConfig!.alpn != null ? _selectedXrayConfig!.alpn!.split(',') : null,
+            headerType: _selectedXrayConfig!.headerType,
+          );
+        }
+      } else {
+        // No rawConfig, generate from fields
+        configJson = XrayVpnConnection.generateV2RayConfig(
+          protocol: _selectedXrayConfig!.protocol,
+          address: _selectedXrayConfig!.address,
+          port: _selectedXrayConfig!.port,
+          id: _selectedXrayConfig!.id,
+          flow: _selectedXrayConfig!.flow,
+          encryption: _selectedXrayConfig!.encryption,
+          security: _selectedXrayConfig!.security,
+          network: _selectedXrayConfig!.network,
+          path: _selectedXrayConfig!.path,
+          host: _selectedXrayConfig!.host,
+          sni: _selectedXrayConfig!.sni,
+          fingerprint: _selectedXrayConfig!.fingerprint,
+          publicKey: _selectedXrayConfig!.publicKey,
+          shortId: _selectedXrayConfig!.shortId,
+          alpn: _selectedXrayConfig!.alpn != null ? _selectedXrayConfig!.alpn!.split(',') : null,
+          headerType: _selectedXrayConfig!.headerType,
+        );
+      }
 
       if (kDebugMode) {
         debugPrint('🔧 Generated Xray Config JSON (first 500 chars):');

@@ -152,6 +152,19 @@ class XrayVpnConnection {
     }
   }
   
+  /// Parse VLESS/VMESS URL using flutter_vless parser
+  static Future<dynamic> parseFromURL(String url) async {
+    try {
+      await initialize();
+      return await FlutterVless.parseFromURL(url);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to parse URL: $e');
+      }
+      rethrow;
+    }
+  }
+  
   /// Convert XrayConfig to V2Ray/Xray JSON format
   /// Supports VLESS, VMESS, Trojan, Shadowsocks
   static String generateV2RayConfig({
