@@ -1,16 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vpn_server.dart';
 import '../models/dns_server.dart';
-import '../models/xray_config.dart';
 import '../services/server_service.dart';
 import '../services/vpn_service.dart';
 import '../services/dns_service.dart';
 import '../services/dns_vpn_connection.dart';
-import '../services/xray_service.dart';
-import '../services/xray_vpn_connection.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -19,12 +15,11 @@ class VpnProvider with ChangeNotifier {
   final ServerService _serverService = ServerService();
   final VpnService _vpnService = VpnService();
   final DnsService _dnsService = DnsService();
-  final XrayService _xrayService = XrayService();
   
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
-  // Protocol selection: 'sstp', 'direct_dns', or 'xray'
+  // Protocol selection: 'sstp' or 'direct_dns'
   String _selectedProtocol = 'sstp';
   String get selectedProtocol => _selectedProtocol;
   
@@ -33,12 +28,6 @@ class VpnProvider with ChangeNotifier {
   DnsServer? _selectedDnsServer;
   List<DnsServer> get dnsServers => _dnsServers;
   DnsServer? get selectedDnsServer => _selectedDnsServer;
-  
-  // Xray configs
-  List<XrayConfig> _xrayConfigs = [];
-  XrayConfig? _selectedXrayConfig;
-  List<XrayConfig> get xrayConfigs => _xrayConfigs;
-  XrayConfig? get selectedXrayConfig => _selectedXrayConfig;
 
   List<VpnServer> _servers = [];
   VpnServer? _selectedServer;
@@ -118,15 +107,9 @@ class VpnProvider with ChangeNotifier {
   }
   
   Future<void> _loadAndTestServers() async {
-    // Load SSTP servers (no test - only download)
+    // فقط دانلود - تست نشود
+    // تست هنگام کلیک دکمه اتصال انجام می‌شود
     await loadServers(forceRefresh: true);
-    
-    // Load Xray configs (no test - only download)
-    await loadXrayConfigs(forceRefresh: true);
-    
-    if (kDebugMode) {
-      debugPrint('✅ Servers loaded: SSTP=${_servers.length}, Xray=${_xrayConfigs.length}');
-    }
   }
 
   void _startDurationTimer() {
@@ -354,14 +337,10 @@ class VpnProvider with ChangeNotifier {
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
 
-    // 🔀 PROTOCOL DETECTION: Direct DNS, Xray, or SSTP
+    // 🔀 PROTOCOL DETECTION: Direct DNS vs SSTP
     if (_selectedProtocol == 'direct_dns') {
       // ✅ Direct DNS: Use selected DNS server
       await _connectDirectDns();
-      return;
-    } else if (_selectedProtocol == 'xray') {
-      // ✅ Xray: Use selected Xray config
-      await _connectXray();
       return;
     }
 
@@ -546,137 +525,6 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  /// Connect to selected Xray config
-  Future<void> _connectXray() async {
-    if (_selectedXrayConfig == null) {
-      _status = VpnConnectionStatus.error;
-      _errorMessage = 'Please select an Xray config first';
-      notifyListeners();
-      
-      if (kDebugMode) {
-        debugPrint('❌ No Xray config selected');
-      }
-      return;
-    }
-
-    try {
-      _status = VpnConnectionStatus.connecting;
-      notifyListeners();
-
-      if (kDebugMode) {
-        debugPrint('🚀 Connecting to Xray config: ${_selectedXrayConfig!.remark}');
-      }
-
-      // Request VPN permission
-      final hasPermission = await XrayVpnConnection.requestPermission();
-      if (!hasPermission) {
-        _status = VpnConnectionStatus.disconnected;
-        _errorMessage = 'VPN permission denied';
-        notifyListeners();
-        return;
-      }
-
-      // Use rawConfig if available, otherwise generate config
-      String configJson;
-      
-      if (_selectedXrayConfig!.rawConfig.isNotEmpty) {
-        // Try to use flutter_vless parser to get full config
-        try {
-          final parsed = await XrayVpnConnection.parseFromURL(_selectedXrayConfig!.rawConfig);
-          configJson = parsed.getFullConfiguration();
-          
-          if (kDebugMode) {
-            debugPrint('✅ Using parsed config from rawConfig URL');
-          }
-        } catch (e) {
-          // Fallback to manual generation if parsing fails
-          if (kDebugMode) {
-            debugPrint('⚠️ Failed to parse rawConfig, using manual generation: $e');
-          }
-          
-          configJson = XrayVpnConnection.generateV2RayConfig(
-            protocol: _selectedXrayConfig!.protocol,
-            address: _selectedXrayConfig!.address,
-            port: _selectedXrayConfig!.port,
-            id: _selectedXrayConfig!.id,
-            flow: _selectedXrayConfig!.flow,
-            encryption: _selectedXrayConfig!.encryption,
-            security: _selectedXrayConfig!.security,
-            network: _selectedXrayConfig!.network,
-            path: _selectedXrayConfig!.path,
-            host: _selectedXrayConfig!.host,
-            sni: _selectedXrayConfig!.sni,
-            fingerprint: _selectedXrayConfig!.fingerprint,
-            publicKey: _selectedXrayConfig!.publicKey,
-            shortId: _selectedXrayConfig!.shortId,
-            alpn: _selectedXrayConfig!.alpn != null ? _selectedXrayConfig!.alpn!.split(',') : null,
-            headerType: _selectedXrayConfig!.headerType,
-          );
-        }
-      } else {
-        // No rawConfig, generate from fields
-        configJson = XrayVpnConnection.generateV2RayConfig(
-          protocol: _selectedXrayConfig!.protocol,
-          address: _selectedXrayConfig!.address,
-          port: _selectedXrayConfig!.port,
-          id: _selectedXrayConfig!.id,
-          flow: _selectedXrayConfig!.flow,
-          encryption: _selectedXrayConfig!.encryption,
-          security: _selectedXrayConfig!.security,
-          network: _selectedXrayConfig!.network,
-          path: _selectedXrayConfig!.path,
-          host: _selectedXrayConfig!.host,
-          sni: _selectedXrayConfig!.sni,
-          fingerprint: _selectedXrayConfig!.fingerprint,
-          publicKey: _selectedXrayConfig!.publicKey,
-          shortId: _selectedXrayConfig!.shortId,
-          alpn: _selectedXrayConfig!.alpn != null ? _selectedXrayConfig!.alpn!.split(',') : null,
-          headerType: _selectedXrayConfig!.headerType,
-        );
-      }
-
-      if (kDebugMode) {
-        debugPrint('🔧 Generated Xray Config JSON (first 500 chars):');
-        debugPrint(configJson.substring(0, configJson.length > 500 ? 500 : configJson.length));
-        debugPrint('📝 Config Details:');
-        debugPrint('  Protocol: ${_selectedXrayConfig!.protocol}');
-        debugPrint('  Address: ${_selectedXrayConfig!.address}:${_selectedXrayConfig!.port}');
-        debugPrint('  Security: ${_selectedXrayConfig!.security}');
-        debugPrint('  Network: ${_selectedXrayConfig!.network}');
-        debugPrint('  SNI: ${_selectedXrayConfig!.sni}');
-      }
-
-      // Connect via flutter_v2ray (real V2Ray core)
-      final connected = await XrayVpnConnection.connect(
-        configContent: configJson,
-        remark: _selectedXrayConfig!.remark,
-      );
-      
-      if (connected) {
-        _status = VpnConnectionStatus.connected;
-        _connectedServer = null; // Xray mode has no traditional VPN server
-        _startDurationTimer();
-        notifyListeners();
-
-        if (kDebugMode) {
-          debugPrint('✅ Connected to Xray: ${_selectedXrayConfig!.remark}');
-          debugPrint('🔍 Check logcat to verify V2Ray core is running and routing traffic');
-        }
-      } else {
-        _status = VpnConnectionStatus.disconnected;
-        _errorMessage = 'Failed to establish Xray connection';
-        notifyListeners();
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('⚠️ Failed to connect Xray: $e');
-      }
-      _status = VpnConnectionStatus.disconnected;
-      _errorMessage = 'Failed to connect: $e';
-      notifyListeners();
-    }
-  }
-
   /// Disconnect from VPN
   Future<void> disconnect() async {
     if (_status == VpnConnectionStatus.disconnecting || _status == VpnConnectionStatus.disconnected) {
@@ -690,11 +538,6 @@ class VpnProvider with ChangeNotifier {
       // Disconnect based on protocol
       if (_selectedProtocol == 'direct_dns') {
         await DnsVpnConnection.disconnect();
-      } else if (_selectedProtocol == 'xray') {
-        await XrayVpnConnection.disconnect();
-        if (kDebugMode) {
-          debugPrint('🔌 Disconnecting Xray...');
-        }
       } else {
         await _vpnService.disconnect();
       }
@@ -866,112 +709,6 @@ class VpnProvider with ChangeNotifier {
     
     // Automatically connect
     await connect();
-  }
-
-  /// ==================== Xray Methods ====================
-  
-  /// Select Xray config and connect
-  Future<void> selectXrayConfigAndConnect(XrayConfig config) async {
-    _selectedXrayConfig = config;
-    
-    // Save to preferences
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('selected_xray_config', config.rawConfig);
-    
-    notifyListeners();
-    
-    if (kDebugMode) {
-      debugPrint('✅ Xray Config Selected: ${config.remark}');
-    }
-    
-    // Automatically connect
-    await connect();
-  }
-  
-  /// Load Xray configs
-  Future<void> loadXrayConfigs({bool forceRefresh = false}) async {
-    try {
-      _xrayConfigs = await _xrayService.fetchConfigs(forceRefresh: forceRefresh);
-      
-      // Load custom configs from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final customConfigsJson = prefs.getStringList('custom_xray_configs') ?? [];
-      
-      for (final configJson in customConfigsJson) {
-        try {
-          final config = XrayConfig.fromJson(jsonDecode(configJson));
-          // Add if not already in list
-          if (!_xrayConfigs.any((c) => c.rawConfig == config.rawConfig)) {
-            _xrayConfigs.add(config);
-          }
-        } catch (e) {
-          if (kDebugMode) {
-            debugPrint('⚠️ Failed to parse custom config: $e');
-          }
-        }
-      }
-      
-      notifyListeners();
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('⚠️ Failed to load Xray configs: $e');
-      }
-    }
-  }
-  
-  /// Add custom Xray config
-  Future<void> addCustomXrayConfig(XrayConfig config) async {
-    try {
-      // Add to list
-      _xrayConfigs.add(config);
-      
-      // Save to SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final customConfigsJson = prefs.getStringList('custom_xray_configs') ?? [];
-      customConfigsJson.add(jsonEncode(config.toJson()));
-      await prefs.setStringList('custom_xray_configs', customConfigsJson);
-      
-      notifyListeners();
-      
-      if (kDebugMode) {
-        debugPrint('✅ Custom config added: ${config.remark}');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('⚠️ Failed to add custom config: $e');
-      }
-      rethrow;
-    }
-  }
-  
-  /// Remove custom Xray config
-  Future<void> removeCustomXrayConfig(XrayConfig config) async {
-    try {
-      _xrayConfigs.remove(config);
-      
-      // Remove from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final customConfigsJson = prefs.getStringList('custom_xray_configs') ?? [];
-      customConfigsJson.removeWhere((json) {
-        try {
-          final c = XrayConfig.fromJson(jsonDecode(json));
-          return c.rawConfig == config.rawConfig;
-        } catch (e) {
-          return false;
-        }
-      });
-      await prefs.setStringList('custom_xray_configs', customConfigsJson);
-      
-      notifyListeners();
-      
-      if (kDebugMode) {
-        debugPrint('✅ Custom config removed: ${config.remark}');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('⚠️ Failed to remove custom config: $e');
-      }
-    }
   }
 
   @override

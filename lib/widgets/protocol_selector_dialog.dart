@@ -116,43 +116,6 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         Navigator.pop(context); // Auto-close
                       },
                     ),
-                    
-                    const Divider(height: 20),
-                    
-                    // Xray Option
-                    ListTile(
-                      leading: Icon(
-                        Icons.shield_outlined,
-                        color: vpnProvider.selectedProtocol == 'xray'
-                            ? Colors.purple
-                            : (isDark ? Colors.white54 : Colors.black54),
-                        size: 28,
-                      ),
-                      title: Text(
-                        'Xray (V2Ray)',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                          fontWeight: vpnProvider.selectedProtocol == 'xray'
-                              ? FontWeight.bold
-                              : FontWeight.w500,
-                          fontSize: 16,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'VLESS & VMess protocols',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isDark ? Colors.white60 : Colors.black54,
-                        ),
-                      ),
-                      trailing: vpnProvider.selectedProtocol == 'xray'
-                          ? const Icon(Icons.check_circle, color: Colors.purple)
-                          : null,
-                      onTap: () {
-                        vpnProvider.switchProtocol('xray');
-                        Navigator.pop(context); // Auto-close
-                      },
-                    ),
                   ],
                 ),
               ),

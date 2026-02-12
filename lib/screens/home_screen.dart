@@ -10,7 +10,6 @@ import 'donate_screen.dart';
 import 'theme_selection_screen.dart';
 import 'settings_screen.dart';
 import 'dns_servers_screen.dart';
-import 'xray_configs_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -103,10 +102,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
           ),
           
-          // Dark Mode Toggle (فقط برای System و Pixel)
-          if (themeProvider.selectedTheme != AppTheme.snow && 
-              themeProvider.selectedTheme != AppTheme.pink &&
-              themeProvider.selectedTheme != AppTheme.rain)
+          // Dark Mode Toggle (فقط اگر تم برفی نباشد - تم پیکسلی می‌تونه دارک/لایت داشته باشه)
+          if (themeProvider.selectedTheme != AppTheme.snow)
             IconButton(
               icon: Icon(
                 themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
@@ -272,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         ),
                                         const SizedBox(width: 12),
                                         Text(
-                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "xray" ? "Xray" : "Direct DNS"}',
+                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : "Direct DNS"}',
                                           style: TextStyle(
                                             fontSize: 14,
                                             color: isDark ? Colors.white : Colors.black87,
@@ -373,64 +370,58 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         
                         const SizedBox(height: 40),
                         
-                        // Data Usage Info + Connection Duration (ارتفاع ثابت برای جلوگیری از layout shift)
-                        SizedBox(
-                          height: 100, // ارتفاع ثابت
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.start,
-                            children: [
-                              // Data Usage Info (فقط برای SSTP)
-                              if (provider.isConnected && provider.selectedProtocol == 'sstp')
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                                  child: Text(
-                                    provider.dataUsage,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: isDark ? Colors.white70 : Colors.black87,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    textAlign: TextAlign.center,
+                        // Data Usage Info (فقط برای SSTP)
+                        if (provider.isConnected && provider.selectedProtocol == 'sstp')
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: Text(
+                              provider.dataUsage,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark ? Colors.white70 : Colors.black87,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        
+                        // Connection Duration
+                        if (provider.isConnected && provider.connectionDuration.inSeconds > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Column(
+                              children: [
+                                Text(
+                                  _formatDuration(provider.connectionDuration),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: isDark ? Colors.white54 : Colors.black54,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
-                              
-                              // Connection Duration
-                              if (provider.isConnected && provider.connectionDuration.inSeconds > 0)
+                                // Show ping (همیشه نمایش داده شود)
                                 Padding(
-                                  padding: const EdgeInsets.only(top: 16),
-                                  child: Column(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Text(
-                                        _formatDuration(provider.connectionDuration),
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: isDark ? Colors.white54 : Colors.black54,
-                                          fontWeight: FontWeight.w500,
-                                        ),
+                                      Icon(
+                                        Icons.network_ping,
+                                        size: 16,
+                                        color: provider.currentPing != null 
+                                            ? _getPingColor(provider.currentPing!)
+                                            : (isDark ? Colors.white38 : Colors.black38),
                                       ),
-                                      // Show ping (همیشه نمایش داده شود)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 8),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.center,
-                                          children: [
-                                            Icon(
-                                              Icons.network_ping,
-                                              size: 16,
-                                              color: provider.currentPing != null 
-                                                  ? _getPingColor(provider.currentPing!)
-                                                  : (isDark ? Colors.white38 : Colors.black38),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              provider.currentPing != null 
-                                                  ? '${provider.currentPing}ms'
-                                                  : 'Testing...',
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                color: provider.currentPing != null
-                                                    ? _getPingColor(provider.currentPing!)
-                                                    : (isDark ? Colors.white38 : Colors.black38),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        provider.currentPing != null 
+                                            ? '${provider.currentPing}ms'
+                                            : 'Testing...',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: provider.currentPing != null
+                                              ? _getPingColor(provider.currentPing!)
+                                              : (isDark ? Colors.white38 : Colors.black38),
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
@@ -440,9 +431,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               ],
                             ),
                           ),
-                            ],
-                          ),
-                        ),
                         
                         // Error Message
                         if (provider.errorMessage != null)
@@ -465,100 +453,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             
             // Server Action Button (Next Server for SSTP, Server List for DNS)
-            // Fixed height to prevent layout shift
-            SizedBox(
-              height: 72, // Fixed height (16 padding + 48 button + 8 padding)
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Consumer<VpnProvider>(
-                  builder: (context, provider, _) {
-                    // DNS: Always show "Server List" button
-                    if (provider.selectedProtocol == 'direct_dns') {
-                      return SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const DnsServersScreen(),
-                              ),
-                            );
-                          },
-                          icon: Icon(
-                            Icons.dns,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                          ),
-                          label: Text(
-                            'Server List',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: isDark ? Colors.white70 : Colors.black87,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      );
-                    }
-                    
-                    // Xray: Always show "Config List" button
-                    if (provider.selectedProtocol == 'xray') {
-                      return SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const XrayConfigsScreen(),
-                              ),
-                            );
-                          },
-                          icon: Icon(
-                            Icons.dashboard_customize,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                          ),
-                          label: Text(
-                            'Config List',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: isDark ? Colors.white70 : Colors.black87,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      );
-                    }
-                    
-                    // SSTP: Show "Next Server" only when connected
-                    if (!provider.isConnected) {
-                      return const SizedBox.shrink(); // Empty space but maintains height
-                    }
-                    
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Consumer<VpnProvider>(
+                builder: (context, provider, _) {
+                  // DNS: Always show "Server List" button
+                  if (provider.selectedProtocol == 'direct_dns') {
                     return SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: provider.isConnecting ? null : () => provider.connectToNextServer(),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const DnsServersScreen(),
+                            ),
+                          );
+                        },
                         icon: Icon(
-                          Icons.skip_next,
+                          Icons.dns,
                           color: isDark ? Colors.white70 : Colors.black87,
                         ),
                         label: Text(
-                          'Next Server',
+                          'Server List',
                           style: TextStyle(
                             fontSize: 16,
                             color: isDark ? Colors.white70 : Colors.black87,
@@ -574,8 +491,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     );
-                  },
-                ),
+                  }
+                  
+                  // SSTP: Show "Next Server" only when connected
+                  if (!provider.isConnected) {
+                    return const SizedBox.shrink();
+                  }
+                  
+                  return SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: provider.isConnecting ? null : () => provider.connectToNextServer(),
+                      icon: Icon(
+                        Icons.skip_next,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                      label: Text(
+                        'Next Server',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
                   ],
