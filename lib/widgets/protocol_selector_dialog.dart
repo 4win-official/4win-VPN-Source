@@ -116,6 +116,43 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         Navigator.pop(context); // Auto-close
                       },
                     ),
+                    
+                    const Divider(height: 20),
+                    
+                    // OpenVPN Option
+                    ListTile(
+                      leading: Icon(
+                        Icons.shield,
+                        color: vpnProvider.selectedProtocol == 'openvpn'
+                            ? Colors.purple
+                            : (isDark ? Colors.white54 : Colors.black54),
+                        size: 28,
+                      ),
+                      title: Text(
+                        'OpenVPN',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                          fontWeight: vpnProvider.selectedProtocol == 'openvpn'
+                              ? FontWeight.bold
+                              : FontWeight.w500,
+                          fontSize: 16,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Custom config support',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                      trailing: vpnProvider.selectedProtocol == 'openvpn'
+                          ? const Icon(Icons.check_circle, color: Colors.purple)
+                          : null,
+                      onTap: () {
+                        vpnProvider.switchProtocol('openvpn');
+                        Navigator.pop(context); // Auto-close
+                      },
+                    ),
                   ],
                 ),
               ),

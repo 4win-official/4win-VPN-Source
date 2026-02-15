@@ -10,6 +10,7 @@ import 'donate_screen.dart';
 import 'theme_selection_screen.dart';
 import 'settings_screen.dart';
 import 'dns_servers_screen.dart';
+import 'openvpn_configs_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -476,6 +477,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                         label: Text(
                           'Server List',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  
+                  // OpenVPN: Always show "OpenVPN Configs" button
+                  if (provider.selectedProtocol == 'openvpn') {
+                    return SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const OpenVpnConfigsScreen(),
+                            ),
+                          );
+                        },
+                        icon: Icon(
+                          Icons.shield,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                        label: Text(
+                          'OpenVPN Configs',
                           style: TextStyle(
                             fontSize: 16,
                             color: isDark ? Colors.white70 : Colors.black87,

@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:openvpn_flutter/openvpn_flutter.dart';
 import '../models/vpn_server.dart';
 import '../models/dns_server.dart';
+import '../models/openvpn_config.dart';
 import '../services/server_service.dart';
 import '../services/vpn_service.dart';
 import '../services/dns_service.dart';
 import '../services/dns_vpn_connection.dart';
+import '../services/openvpn_service.dart';
+import '../services/openvpn_connection.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -15,11 +19,12 @@ class VpnProvider with ChangeNotifier {
   final ServerService _serverService = ServerService();
   final VpnService _vpnService = VpnService();
   final DnsService _dnsService = DnsService();
+  final OpenVpnService _openVpnService = OpenVpnService();
   
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
-  // Protocol selection: 'sstp' or 'direct_dns'
+  // Protocol selection: 'sstp', 'direct_dns', or 'openvpn'
   String _selectedProtocol = 'sstp';
   String get selectedProtocol => _selectedProtocol;
   
@@ -28,6 +33,12 @@ class VpnProvider with ChangeNotifier {
   DnsServer? _selectedDnsServer;
   List<DnsServer> get dnsServers => _dnsServers;
   DnsServer? get selectedDnsServer => _selectedDnsServer;
+  
+  // OpenVPN configs
+  List<OpenVpnConfig> _openVpnConfigs = [];
+  OpenVpnConfig? _selectedOpenVpnConfig;
+  List<OpenVpnConfig> get openVpnConfigs => _openVpnConfigs;
+  OpenVpnConfig? get selectedOpenVpnConfig => _selectedOpenVpnConfig;
 
   List<VpnServer> _servers = [];
   VpnServer? _selectedServer;
@@ -337,10 +348,14 @@ class VpnProvider with ChangeNotifier {
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
 
-    // 🔀 PROTOCOL DETECTION: Direct DNS vs SSTP
+    // 🔀 PROTOCOL DETECTION: Direct DNS, OpenVPN, or SSTP
     if (_selectedProtocol == 'direct_dns') {
       // ✅ Direct DNS: Use selected DNS server
       await _connectDirectDns();
+      return;
+    } else if (_selectedProtocol == 'openvpn') {
+      // ✅ OpenVPN: Use selected OpenVPN config
+      await _connectOpenVpn();
       return;
     }
 
@@ -525,6 +540,73 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
+  /// Connect via OpenVPN
+  Future<void> _connectOpenVpn() async {
+    if (_selectedOpenVpnConfig == null) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Please select an OpenVPN config first';
+      notifyListeners();
+      
+      if (kDebugMode) {
+        debugPrint('❌ No OpenVPN config selected');
+      }
+      return;
+    }
+
+    try {
+      _status = VpnConnectionStatus.connecting;
+      notifyListeners();
+
+      if (kDebugMode) {
+        debugPrint('🚀 Connecting to OpenVPN: ${_selectedOpenVpnConfig!.name}');
+      }
+
+      // Initialize OpenVPN with stage callback
+      OpenVpnConnection.onStageChanged = (VPNStage? stage) {
+        if (kDebugMode) {
+          debugPrint('🔵 OpenVPN Stage: $stage');
+        }
+        
+        // Update status based on stage
+        if (stage == VPNStage.connected) {
+          _status = VpnConnectionStatus.connected;
+          _connectedServer = null; // OpenVPN mode has no traditional VPN server
+          _startDurationTimer();
+          _startPingTimer();
+          notifyListeners();
+        } else if (stage == VPNStage.disconnected || 
+                   stage == VPNStage.error || 
+                   stage == VPNStage.denied) {
+          _status = VpnConnectionStatus.disconnected;
+          _stopDurationTimer();
+          _stopPingTimer();
+          notifyListeners();
+        } else if (stage == VPNStage.connecting || 
+                   stage == VPNStage.prepare || 
+                   stage == VPNStage.authenticating) {
+          _status = VpnConnectionStatus.connecting;
+          notifyListeners();
+        }
+      };
+
+      // Connect using OpenVPN
+      final connected = await OpenVpnConnection.connect(_selectedOpenVpnConfig!);
+      
+      if (!connected) {
+        _status = VpnConnectionStatus.disconnected;
+        _errorMessage = 'Failed to establish OpenVPN connection';
+        notifyListeners();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to connect OpenVPN: $e');
+      }
+      _status = VpnConnectionStatus.disconnected;
+      _errorMessage = 'Failed to connect: $e';
+      notifyListeners();
+    }
+  }
+
   /// Disconnect from VPN
   Future<void> disconnect() async {
     if (_status == VpnConnectionStatus.disconnecting || _status == VpnConnectionStatus.disconnected) {
@@ -538,6 +620,11 @@ class VpnProvider with ChangeNotifier {
       // Disconnect based on protocol
       if (_selectedProtocol == 'direct_dns') {
         await DnsVpnConnection.disconnect();
+      } else if (_selectedProtocol == 'openvpn') {
+        await OpenVpnConnection.disconnect();
+        if (kDebugMode) {
+          debugPrint('🔌 Disconnecting OpenVPN...');
+        }
       } else {
         await _vpnService.disconnect();
       }
@@ -705,6 +792,51 @@ class VpnProvider with ChangeNotifier {
     
     if (kDebugMode) {
       debugPrint('✅ DNS Server Selected: ${server.name} (${server.primaryDns})');
+    }
+    
+    // Automatically connect
+    await connect();
+  }
+  
+  /// ==================== OpenVPN Methods ====================
+  
+  /// Load OpenVPN configs
+  Future<void> loadOpenVpnConfigs() async {
+    try {
+      _openVpnConfigs = await _openVpnService.loadConfigs();
+      
+      // Load selected config
+      final selectedName = await _openVpnService.getSelectedConfigName();
+      if (selectedName != null) {
+        _selectedOpenVpnConfig = _openVpnConfigs.firstWhere(
+          (config) => config.name == selectedName,
+          orElse: () => _openVpnConfigs.isNotEmpty ? _openVpnConfigs.first : null as OpenVpnConfig,
+        );
+      }
+      
+      notifyListeners();
+      
+      if (kDebugMode) {
+        debugPrint('✅ Loaded ${_openVpnConfigs.length} OpenVPN configs');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to load OpenVPN configs: $e');
+      }
+    }
+  }
+  
+  /// Select OpenVPN config and connect
+  Future<void> selectOpenVpnConfigAndConnect(OpenVpnConfig config) async {
+    _selectedOpenVpnConfig = config;
+    
+    // Save selected config
+    await _openVpnService.setSelectedConfig(config.name);
+    
+    notifyListeners();
+    
+    if (kDebugMode) {
+      debugPrint('✅ OpenVPN Config Selected: ${config.name}');
     }
     
     // Automatically connect

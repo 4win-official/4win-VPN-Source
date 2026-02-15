@@ -5,12 +5,19 @@ import android.net.VpnService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import id.laskarmedia.openvpn_flutter.OpenVPNFlutterPlugin
 
 class MainActivity: FlutterActivity() {
     private val DNS_CHANNEL = "com.forwin.vpn/dns"
     private val XRAY_CHANNEL = "com.forwin.vpn/xray"
     private val VPN_REQUEST_CODE = 100
     private val XRAY_REQUEST_CODE = 101
+    
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        // OpenVPN permission handler
+        OpenVPNFlutterPlugin.connectWhileGranted(requestCode == 24 && resultCode == RESULT_OK)
+        super.onActivityResult(requestCode, resultCode, data)
+    }
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
