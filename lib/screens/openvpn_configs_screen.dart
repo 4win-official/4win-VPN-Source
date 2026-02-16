@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../providers/vpn_provider.dart';
 import '../models/openvpn_config.dart';
 import '../services/openvpn_service.dart';
@@ -49,6 +50,185 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         );
       }
     }
+  }
+
+  Future<void> _pickAndAddConfigFile() async {
+    try {
+      // انتخاب فایل .ovpn
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['ovpn'],
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        
+        // خواندن محتوای فایل
+        String? configContent;
+        if (file.bytes != null) {
+          // Web platform
+          configContent = String.fromCharCodes(file.bytes!);
+        } else if (file.path != null) {
+          // Mobile/Desktop platform
+          final fileContent = await FilePicker.platform.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: ['ovpn'],
+          );
+          
+          if (fileContent != null && fileContent.files.isNotEmpty) {
+            final bytes = fileContent.files.first.bytes;
+            if (bytes != null) {
+              configContent = String.fromCharCodes(bytes);
+            }
+          }
+        }
+
+        if (configContent == null || configContent.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('❌ Failed to read file content')),
+            );
+          }
+          return;
+        }
+
+        // Validate config
+        if (!OpenVpnService.validateConfig(configContent)) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('❌ Invalid OpenVPN config format')),
+            );
+          }
+          return;
+        }
+
+        // استخراج نام از فایل یا محتوا
+        String configName = file.name.replaceAll('.ovpn', '');
+        if (configName.isEmpty) {
+          configName = OpenVpnService.extractConfigName(configContent);
+        }
+
+        // نمایش دیالوگ برای username/password (اختیاری)
+        await _showCredentialsDialog(configName, configContent);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error picking file: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showCredentialsDialog(String configName, String configContent) async {
+    final nameController = TextEditingController(text: configName);
+    final usernameController = TextEditingController();
+    final passwordController = TextEditingController();
+    bool obscurePassword = true;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Config Details'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Config Name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: usernameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Username (Optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: passwordController,
+                  obscureText: obscurePassword,
+                  decoration: InputDecoration(
+                    labelText: 'Password (Optional)',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscurePassword
+                            ? Icons.visibility
+                            : Icons.visibility_off,
+                      ),
+                      onPressed: () {
+                        setDialogState(() {
+                          obscurePassword = !obscurePassword;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final name = nameController.text.trim();
+
+                if (name.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Name is required')),
+                  );
+                  return;
+                }
+
+                final newConfig = OpenVpnConfig(
+                  name: name,
+                  config: configContent,
+                  username: usernameController.text.trim().isEmpty
+                      ? null
+                      : usernameController.text.trim(),
+                  password: passwordController.text.trim().isEmpty
+                      ? null
+                      : passwordController.text.trim(),
+                );
+
+                final success = await _service.addConfig(newConfig);
+
+                if (mounted) {
+                  Navigator.pop(context);
+
+                  if (success) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('✅ Config added successfully'),
+                      ),
+                    );
+                    _loadConfigs();
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('❌ Failed to add config (name may already exist)'),
+                      ),
+                    );
+                  }
+                }
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showAddConfigDialog() async {
@@ -278,9 +458,9 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         title: const Text('OpenVPN Configs'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _showAddConfigDialog,
-            tooltip: 'Add Config',
+            icon: const Icon(Icons.upload_file),
+            onPressed: _pickAndAddConfigFile,
+            tooltip: 'Add .ovpn File',
           ),
         ],
       ),
@@ -306,7 +486,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Tap + to add a config',
+                        'Tap upload icon to add .ovpn file',
                         style: TextStyle(
                           fontSize: 14,
                           color: Colors.grey[500],

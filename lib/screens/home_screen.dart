@@ -262,15 +262,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         Icon(
                                           vpnProvider.selectedProtocol == 'sstp'
                                               ? Icons.vpn_key
-                                              : Icons.dns,
+                                              : vpnProvider.selectedProtocol == 'openvpn'
+                                                  ? Icons.shield
+                                                  : Icons.dns,
                                           color: vpnProvider.selectedProtocol == 'sstp'
                                               ? Colors.green
-                                              : Colors.blue,
+                                              : vpnProvider.selectedProtocol == 'openvpn'
+                                                  ? Colors.purple
+                                                  : Colors.blue,
                                           size: 20,
                                         ),
                                         const SizedBox(width: 12),
                                         Text(
-                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : "Direct DNS"}',
+                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : "Direct DNS"}',
                                           style: TextStyle(
                                             fontSize: 14,
                                             color: isDark ? Colors.white : Colors.black87,
