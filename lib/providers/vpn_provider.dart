@@ -571,13 +571,24 @@ class VpnProvider with ChangeNotifier {
         if (stage == VPNStage.connected) {
           _status = VpnConnectionStatus.connected;
           _connectedServer = null; // OpenVPN mode has no traditional VPN server
+          _errorMessage = null; // Clear any previous errors
           _startDurationTimer();
           _startPingTimer();
           notifyListeners();
-        } else if (stage == VPNStage.disconnected || 
-                   stage == VPNStage.error || 
-                   stage == VPNStage.denied) {
+        } else if (stage == VPNStage.disconnected) {
           _status = VpnConnectionStatus.disconnected;
+          _stopDurationTimer();
+          _stopPingTimer();
+          notifyListeners();
+        } else if (stage == VPNStage.error) {
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'OpenVPN connection error';
+          _stopDurationTimer();
+          _stopPingTimer();
+          notifyListeners();
+        } else if (stage == VPNStage.denied) {
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'VPN permission denied';
           _stopDurationTimer();
           _stopPingTimer();
           notifyListeners();
@@ -589,20 +600,35 @@ class VpnProvider with ChangeNotifier {
         }
       };
 
-      // Connect using OpenVPN
-      final connected = await OpenVpnConnection.connect(_selectedOpenVpnConfig!);
+      // Connect using OpenVPN with timeout
+      final connected = await OpenVpnConnection.connect(_selectedOpenVpnConfig!).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          if (kDebugMode) {
+            debugPrint('⏱️ OpenVPN connection timeout (30s)');
+          }
+          return false;
+        },
+      );
       
       if (!connected) {
-        _status = VpnConnectionStatus.disconnected;
-        _errorMessage = 'Failed to establish OpenVPN connection';
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Failed to establish OpenVPN connection. Please check your config and try again.';
         notifyListeners();
       }
+    } on TimeoutException {
+      if (kDebugMode) {
+        debugPrint('⏱️ OpenVPN connection timeout');
+      }
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Connection timeout. Please try again.';
+      notifyListeners();
     } catch (e) {
       if (kDebugMode) {
         debugPrint('⚠️ Failed to connect OpenVPN: $e');
       }
-      _status = VpnConnectionStatus.disconnected;
-      _errorMessage = 'Failed to connect: $e';
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Failed to connect: ${e.toString()}';
       notifyListeners();
     }
   }

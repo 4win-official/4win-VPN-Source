@@ -54,68 +54,116 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
 
   Future<void> _pickAndAddConfigFile() async {
     try {
-      // انتخاب فایل .ovpn
+      // انتخاب فایل - استفاده از FileType.any برای پشتیبانی از تمام فرمت‌ها
+      // فرمت‌های پشتیبانی شده: .ovpn, .conf, .open
       FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['ovpn'],
+        type: FileType.any, // استفاده از any برای جلوگیری از محدودیت extension
         allowMultiple: false,
+        withData: true, // خواندن bytes به‌صورت خودکار
       );
 
-      if (result != null && result.files.isNotEmpty) {
-        final file = result.files.first;
-        
-        // خواندن محتوای فایل
-        String? configContent;
+      if (result == null || result.files.isEmpty) {
+        // کاربر انتخاب را کنسل کرد
+        return;
+      }
+
+      final file = result.files.first;
+      
+      // بررسی extension فایل (manual check)
+      final fileName = file.name.toLowerCase();
+      if (!fileName.endsWith('.ovpn') && 
+          !fileName.endsWith('.conf') && 
+          !fileName.endsWith('.open')) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Invalid file format. Please select .ovpn, .conf, or .open file'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+      
+      // خواندن محتوای فایل
+      String? configContent;
+      
+      try {
         if (file.bytes != null) {
-          // Web platform
+          // Web platform یا withData: true
           configContent = String.fromCharCodes(file.bytes!);
         } else if (file.path != null) {
-          // Mobile/Desktop platform
-          final fileContent = await FilePicker.platform.pickFiles(
-            type: FileType.custom,
-            allowedExtensions: ['ovpn'],
+          // Mobile/Desktop platform - fallback
+          final fileBytes = await FilePicker.platform.pickFiles(
+            type: FileType.any,
+            withData: true,
           );
           
-          if (fileContent != null && fileContent.files.isNotEmpty) {
-            final bytes = fileContent.files.first.bytes;
-            if (bytes != null) {
-              configContent = String.fromCharCodes(bytes);
-            }
+          if (fileBytes != null && fileBytes.files.isNotEmpty && fileBytes.files.first.bytes != null) {
+            configContent = String.fromCharCodes(fileBytes.files.first.bytes!);
           }
         }
-
-        if (configContent == null || configContent.isEmpty) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('❌ Failed to read file content')),
-            );
-          }
-          return;
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('❌ Failed to read file: $e')),
+          );
         }
+        return;
+      }
 
-        // Validate config
-        if (!OpenVpnService.validateConfig(configContent)) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('❌ Invalid OpenVPN config format')),
-            );
-          }
-          return;
+      if (configContent == null || configContent.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('❌ File is empty or unreadable')),
+          );
         }
+        return;
+      }
 
-        // استخراج نام از فایل یا محتوا
-        String configName = file.name.replaceAll('.ovpn', '');
-        if (configName.isEmpty) {
-          configName = OpenVpnService.extractConfigName(configContent);
+      // Validate config
+      if (!OpenVpnService.validateConfig(configContent)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Invalid OpenVPN config format. Missing required fields (client, remote, dev)'),
+              duration: Duration(seconds: 4),
+            ),
+          );
         }
+        return;
+      }
 
-        // نمایش دیالوگ برای username/password (اختیاری)
-        await _showCredentialsDialog(configName, configContent);
+      // استخراج نام از فایل
+      String configName = file.name
+          .replaceAll('.ovpn', '')
+          .replaceAll('.conf', '')
+          .replaceAll('.open', '')
+          .trim();
+      
+      if (configName.isEmpty) {
+        configName = OpenVpnService.extractConfigName(configContent);
+      }
+
+      // نمایش دیالوگ برای username/password (اختیاری)
+      await _showCredentialsDialog(configName, configContent);
+      
+    } on PlatformException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Platform error: ${e.message ?? e.code}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error picking file: $e')),
+          SnackBar(
+            content: Text('❌ Error: $e'),
+            duration: const Duration(seconds: 3),
+          ),
         );
       }
     }

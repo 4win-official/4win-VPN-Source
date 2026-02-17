@@ -65,6 +65,27 @@ class OpenVpnConnection {
         debugPrint('   Protocol: ${config.protocol}');
       }
       
+      // ✅ Request Android VPN permission first
+      try {
+        final permissionGranted = await _openvpn.requestPermissionAndroid();
+        if (kDebugMode) {
+          debugPrint('📱 Android VPN permission: ${permissionGranted ? "✅ Granted" : "❌ Denied"}');
+        }
+        
+        if (!permissionGranted) {
+          if (kDebugMode) {
+            debugPrint('❌ VPN permission denied by user');
+          }
+          return false;
+        }
+      } catch (e) {
+        // Permission request not available on iOS or error
+        if (kDebugMode) {
+          debugPrint('⚠️ Permission request error (might be iOS): $e');
+        }
+      }
+      
+      // ✅ Connect after permission granted
       _openvpn.connect(
         config.config,
         config.name,
