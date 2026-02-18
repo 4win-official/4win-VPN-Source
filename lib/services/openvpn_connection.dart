@@ -59,10 +59,20 @@ class OpenVpnConnection {
     try {
       await initialize();
       
+      // ✅ استفاده از effectiveUsername و effectivePassword
+      // اولویت با username/password embedded در فایل است
+      final username = config.effectiveUsername;
+      final password = config.effectivePassword;
+      
       if (kDebugMode) {
         debugPrint('🚀 Connecting to OpenVPN: ${config.name}');
         debugPrint('   Server: ${config.serverAddress}:${config.serverPort}');
         debugPrint('   Protocol: ${config.protocol}');
+        debugPrint('   Username: ${username != null && username.isNotEmpty ? "✅ Provided" : "❌ Not provided"}');
+        debugPrint('   Password: ${password != null && password.isNotEmpty ? "✅ Provided" : "❌ Not provided"}');
+        if (config.embeddedUsername != null) {
+          debugPrint('   📄 Credentials extracted from config file');
+        }
       }
       
       // ✅ Request Android VPN permission first
@@ -89,8 +99,8 @@ class OpenVpnConnection {
       _openvpn.connect(
         config.config,
         config.name,
-        username: config.username,
-        password: config.password,
+        username: username,
+        password: password,
         certIsRequired: false, // برای جلوگیری از stuck شدن در iOS
         bypassPackages: [], // لیست اپ‌هایی که نباید از VPN استفاده کنند
       );

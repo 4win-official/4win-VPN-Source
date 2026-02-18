@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
@@ -145,8 +146,27 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         configName = OpenVpnService.extractConfigName(configContent);
       }
 
-      // نمایش دیالوگ برای username/password (اختیاری)
-      await _showCredentialsDialog(configName, configContent);
+      // ✅ بررسی اینکه آیا credentials در فایل است یا نه
+      final parsedInfo = OpenVpnConfig.parseConfigFile(configContent);
+      final hasEmbeddedCredentials = parsedInfo['username'] != null && parsedInfo['username']!.isNotEmpty;
+      
+      if (hasEmbeddedCredentials) {
+        // ✅ Credentials در فایل است - مستقیم اضافه می‌کنیم
+        if (kDebugMode) {
+          debugPrint('✅ Credentials found in config file');
+          debugPrint('   Username: ${parsedInfo['username']}');
+        }
+        
+        // نمایش دیالوگ فقط برای تایید نام
+        await _showSimpleNameDialog(configName, configContent);
+      } else {
+        // ❌ Credentials در فایل نیست - از کاربر بپرس
+        if (kDebugMode) {
+          debugPrint('⚠️ No credentials in config file - requesting from user');
+        }
+        
+        await _showCredentialsDialog(configName, configContent);
+      }
       
     } on PlatformException catch (e) {
       if (mounted) {
@@ -167,6 +187,89 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         );
       }
     }
+  }
+
+  /// نمایش دیالوگ ساده فقط برای نام (وقتی credentials در فایل است)
+  Future<void> _showSimpleNameDialog(String configName, String configContent) async {
+    final nameController = TextEditingController(text: configName);
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Config'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 48),
+            const SizedBox(height: 16),
+            const Text(
+              '✅ Credentials found in config file',
+              style: TextStyle(
+                color: Colors.green,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Config Name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Name is required')),
+                );
+                return;
+              }
+
+              // ✅ Config با credentials embedded
+              final newConfig = OpenVpnConfig(
+                name: name,
+                config: configContent,
+                username: null, // خودکار از فایل extract می‌شود
+                password: null, // خودکار از فایل extract می‌شود
+              );
+
+              final success = await _service.addConfig(newConfig);
+
+              if (mounted) {
+                Navigator.pop(context);
+
+                if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('✅ Config added successfully with embedded credentials'),
+                    ),
+                  );
+                  _loadConfigs();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('❌ Failed to add config (name may already exist)'),
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showCredentialsDialog(String configName, String configContent) async {

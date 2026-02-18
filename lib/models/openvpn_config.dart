@@ -55,7 +55,46 @@ class OpenVpnConfig {
       result['proto'] = protoMatch.group(1) ?? 'udp';
     }
     
+    // ✅ Extract username/password from config file
+    // Format 1: <auth-user-pass> ... </auth-user-pass>
+    final authBlockRegex = RegExp(r'<auth-user-pass>\s*(.+?)\s*</auth-user-pass>', dotAll: true);
+    final authBlockMatch = authBlockRegex.firstMatch(configContent);
+    if (authBlockMatch != null) {
+      final authContent = authBlockMatch.group(1)?.trim() ?? '';
+      final lines = authContent.split('\n');
+      if (lines.length >= 2) {
+        result['username'] = lines[0].trim();
+        result['password'] = lines[1].trim();
+      } else if (lines.length == 1) {
+        // فقط username (password خالی)
+        result['username'] = lines[0].trim();
+        result['password'] = '';
+      }
+    }
+    
     return result;
+  }
+  
+  /// Get embedded username from config file
+  String? get embeddedUsername {
+    final parsed = parseConfigFile(config);
+    return parsed['username'];
+  }
+  
+  /// Get embedded password from config file
+  String? get embeddedPassword {
+    final parsed = parseConfigFile(config);
+    return parsed['password'];
+  }
+  
+  /// Get effective username (embedded or user-provided)
+  String? get effectiveUsername {
+    return username ?? embeddedUsername;
+  }
+  
+  /// Get effective password (embedded or user-provided)
+  String? get effectivePassword {
+    return password ?? embeddedPassword;
   }
   
   /// Get server address from config
