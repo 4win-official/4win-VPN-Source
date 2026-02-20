@@ -20,12 +20,18 @@ class OpenVpnConnection {
       _openvpn = OpenVPN(
         onVpnStatusChanged: (data) {
           if (kDebugMode) {
-            debugPrint('🔵 OpenVPN Status Changed');
+            debugPrint('🔵 OpenVPN Status Changed:');
+            if (data != null) {
+              debugPrint('   Duration: ${data.duration ?? "N/A"}');
+              debugPrint('   Byte In: ${data.byteIn ?? "N/A"}');
+              debugPrint('   Byte Out: ${data.byteOut ?? "N/A"}');
+            }
           }
         },
         onVpnStageChanged: (VPNStage stage, String message) {
           if (kDebugMode) {
-            debugPrint('🔵 OpenVPN Stage: $stage - $message');
+            debugPrint('🔵 OpenVPN Stage: $stage');
+            debugPrint('   Message: $message');
           }
           _currentStage = stage;
           if (onStageChanged != null) {
@@ -68,11 +74,18 @@ class OpenVpnConnection {
         debugPrint('🚀 Connecting to OpenVPN: ${config.name}');
         debugPrint('   Server: ${config.serverAddress}:${config.serverPort}');
         debugPrint('   Protocol: ${config.protocol}');
-        debugPrint('   Username: ${username != null && username.isNotEmpty ? "✅ Provided" : "❌ Not provided"}');
-        debugPrint('   Password: ${password != null && password.isNotEmpty ? "✅ Provided" : "❌ Not provided"}');
+        debugPrint('   Username: ${username != null && username.isNotEmpty ? "✅ Provided (${username.substring(0, username.length > 3 ? 3 : username.length)}***)" : "❌ Not provided"}');
+        debugPrint('   Password: ${password != null && password.isNotEmpty ? "✅ Provided (${password.length} chars)" : "❌ Not provided"}');
         if (config.embeddedUsername != null) {
           debugPrint('   📄 Credentials extracted from config file');
         }
+        
+        // Log first 500 chars of config for debugging
+        final configPreview = config.config.length > 500 
+            ? '${config.config.substring(0, 500)}...' 
+            : config.config;
+        debugPrint('📝 Config preview (first 500 chars):');
+        debugPrint(configPreview);
       }
       
       // ✅ Request Android VPN permission first

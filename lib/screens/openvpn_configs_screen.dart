@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
+import 'dart:async';
 import '../providers/vpn_provider.dart';
 import '../models/openvpn_config.dart';
 import '../services/openvpn_service.dart';
@@ -599,6 +601,163 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     }
   }
 
+  /// تست ping به سرور OpenVPN
+  Future<void> _testPing(OpenVpnConfig config) async {
+    if (config.serverAddress == null || config.serverAddress!.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('❌ No server address found in config')),
+        );
+      }
+      return;
+    }
+
+    // نمایش دیالوگ loading
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Testing ping...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final stopwatch = Stopwatch()..start();
+      
+      // استفاده از HTTP HEAD request به‌جای ICMP ping
+      // چون ICMP ping در Android بدون root ممکن نیست
+      final client = http.Client();
+      
+      try {
+        // تست با HTTP/HTTPS
+        final port = config.serverPort ?? '443';
+        final uri = Uri.parse('https://${config.serverAddress}:$port');
+        
+        final response = await client.head(uri).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Connection timeout');
+          },
+        );
+        
+        stopwatch.stop();
+        final pingMs = stopwatch.elapsedMilliseconds;
+        
+        if (mounted) {
+          Navigator.pop(context); // بستن loading dialog
+          
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.green),
+                  SizedBox(width: 8),
+                  Text('Ping Test Result'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Server: ${config.serverAddress}'),
+                  Text('Port: ${config.serverPort}'),
+                  const SizedBox(height: 8),
+                  Text(
+                    '✅ Response Time: ${pingMs}ms',
+                    style: const TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    'Status: ${response.statusCode}',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+      } catch (e) {
+        stopwatch.stop();
+        
+        if (mounted) {
+          Navigator.pop(context); // بستن loading dialog
+          
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.error, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('Ping Test Result'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Server: ${config.serverAddress}'),
+                  Text('Port: ${config.serverPort}'),
+                  const SizedBox(height: 8),
+                  Text(
+                    '⚠️ ${e.toString()}',
+                    style: const TextStyle(
+                      color: Colors.orange,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Note: Server might still work with OpenVPN protocol',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // بستن loading dialog
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Ping test failed: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -733,9 +892,16 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                                 ),
                               ),
                             const SizedBox(width: 8),
+                            // 🔧 دکمه Ping Test
+                            IconButton(
+                              icon: const Icon(Icons.speed, color: Colors.blue),
+                              onPressed: () => _testPing(config),
+                              tooltip: 'Test Ping',
+                            ),
                             IconButton(
                               icon: const Icon(Icons.delete, color: Colors.red),
                               onPressed: () => _confirmDelete(config),
+                              tooltip: 'Delete',
                             ),
                           ],
                         ),
