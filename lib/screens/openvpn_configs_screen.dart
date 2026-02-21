@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
+import 'dart:io';
 import '../providers/vpn_provider.dart';
 import '../models/openvpn_config.dart';
 import '../services/openvpn_service.dart';
@@ -601,7 +602,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     }
   }
 
-  /// تست ping به سرور OpenVPN
+  /// تست ping به سرور OpenVPN (استفاده از Socket)
   Future<void> _testPing(OpenVpnConfig config) async {
     if (config.serverAddress == null || config.serverAddress!.isEmpty) {
       if (mounted) {
@@ -624,34 +625,33 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
           children: [
             CircularProgressIndicator(),
             SizedBox(height: 16),
-            Text('Testing ping...'),
+            Text('Testing connection...'),
           ],
         ),
       ),
     );
 
     try {
+      final serverAddress = config.serverAddress!;
+      final serverPort = int.tryParse(config.serverPort ?? '1194') ?? 1194;
+      
       final stopwatch = Stopwatch()..start();
       
-      // استفاده از HTTP HEAD request به‌جای ICMP ping
-      // چون ICMP ping در Android بدون root ممکن نیست
-      final client = http.Client();
+      // ✅ استفاده از Socket.connect برای تست TCP connection
+      // این روش برای OpenVPN سرورها کار می‌کند
+      Socket? socket;
       
       try {
-        // تست با HTTP/HTTPS
-        final port = config.serverPort ?? '443';
-        final uri = Uri.parse('https://${config.serverAddress}:$port');
-        
-        final response = await client.head(uri).timeout(
-          const Duration(seconds: 5),
-          onTimeout: () {
-            throw TimeoutException('Connection timeout');
-          },
+        socket = await Socket.connect(
+          serverAddress,
+          serverPort,
+          timeout: const Duration(seconds: 5),
         );
         
         stopwatch.stop();
         final pingMs = stopwatch.elapsedMilliseconds;
         
+        // ✅ اتصال موفق
         if (mounted) {
           Navigator.pop(context); // بستن loading dialog
           
@@ -662,74 +662,46 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                 children: [
                   Icon(Icons.check_circle, color: Colors.green),
                   SizedBox(width: 8),
-                  Text('Ping Test Result'),
+                  Text('Connection Test'),
                 ],
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Server: ${config.serverAddress}'),
-                  Text('Port: ${config.serverPort}'),
-                  const SizedBox(height: 8),
                   Text(
-                    '✅ Response Time: ${pingMs}ms',
+                    '✅ Server is reachable',
                     style: const TextStyle(
                       color: Colors.green,
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
                     ),
                   ),
-                  Text(
-                    'Status: ${response.statusCode}',
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          );
-        }
-      } catch (e) {
-        stopwatch.stop();
-        
-        if (mounted) {
-          Navigator.pop(context); // بستن loading dialog
-          
-          showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Row(
-                children: [
-                  Icon(Icons.error, color: Colors.orange),
-                  SizedBox(width: 8),
-                  Text('Ping Test Result'),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Server: ${config.serverAddress}'),
-                  Text('Port: ${config.serverPort}'),
+                  const SizedBox(height: 12),
+                  Text('Server: $serverAddress'),
+                  Text('Port: $serverPort'),
                   const SizedBox(height: 8),
                   Text(
-                    '⚠️ ${e.toString()}',
-                    style: const TextStyle(
-                      color: Colors.orange,
-                      fontSize: 14,
+                    '⚡ Response Time: ${pingMs}ms',
+                    style: TextStyle(
+                      color: pingMs < 100 
+                          ? Colors.green 
+                          : pingMs < 300 
+                              ? Colors.orange 
+                              : Colors.red,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Note: Server might still work with OpenVPN protocol',
+                  Text(
+                    pingMs < 100 
+                        ? '🟢 Excellent connection'
+                        : pingMs < 300 
+                            ? '🟡 Good connection'
+                            : '🔴 Slow connection',
                     style: TextStyle(
                       fontSize: 12,
+                      color: Colors.grey[600],
                       fontStyle: FontStyle.italic,
                     ),
                   ),
@@ -744,15 +716,134 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
             ),
           );
         }
+        
+      } on SocketException catch (e) {
+        stopwatch.stop();
+        
+        // ❌ اتصال ناموفق
+        if (mounted) {
+          Navigator.pop(context); // بستن loading dialog
+          
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Connection Test'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '❌ Cannot reach server',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Server: $serverAddress'),
+                  Text('Port: $serverPort'),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Error: ${e.message}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.red,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      '💡 This might be due to:\n'
+                      '• Server is down\n'
+                      '• Firewall blocking connection\n'
+                      '• Wrong port number\n'
+                      '• Internet connection issue',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+      } on TimeoutException {
+        stopwatch.stop();
+        
+        if (mounted) {
+          Navigator.pop(context);
+          
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.timer_off, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('Connection Test'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '⏱️ Connection timeout',
+                    style: TextStyle(
+                      color: Colors.orange,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Server: $serverAddress'),
+                  Text('Port: $serverPort'),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Server did not respond within 5 seconds. It might be slow or unreachable.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
       } finally {
-        client.close();
+        socket?.close();
       }
+      
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context); // بستن loading dialog
+        Navigator.pop(context);
         
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Ping test failed: $e')),
+          SnackBar(content: Text('❌ Test failed: $e')),
         );
       }
     }

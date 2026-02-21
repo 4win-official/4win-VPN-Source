@@ -561,6 +561,19 @@ class VpnProvider with ChangeNotifier {
         debugPrint('🚀 Connecting to OpenVPN: ${_selectedOpenVpnConfig!.name}');
       }
 
+      // ✅ Connection timeout watchdog (15 seconds)
+      Timer? connectionTimeoutTimer;
+      connectionTimeoutTimer = Timer(const Duration(seconds: 15), () {
+        if (_status == VpnConnectionStatus.connecting) {
+          if (kDebugMode) {
+            debugPrint('⏱️ Connection timeout - still connecting after 15s');
+          }
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'Connection timeout. Please try again or check server.';
+          notifyListeners();
+        }
+      });
+
       // Initialize OpenVPN with stage callback
       OpenVpnConnection.onStageChanged = (VPNStage? stage) {
         if (kDebugMode) {
@@ -569,6 +582,7 @@ class VpnProvider with ChangeNotifier {
         
         // Update status based on stage
         if (stage == VPNStage.connected) {
+          connectionTimeoutTimer?.cancel(); // ✅ اتصال موفق - cancel timeout
           _status = VpnConnectionStatus.connected;
           _connectedServer = null; // OpenVPN mode has no traditional VPN server
           _errorMessage = null; // Clear any previous errors
@@ -576,17 +590,20 @@ class VpnProvider with ChangeNotifier {
           _startPingTimer();
           notifyListeners();
         } else if (stage == VPNStage.disconnected) {
+          connectionTimeoutTimer?.cancel();
           _status = VpnConnectionStatus.disconnected;
           _stopDurationTimer();
           _stopPingTimer();
           notifyListeners();
         } else if (stage == VPNStage.error) {
+          connectionTimeoutTimer?.cancel();
           _status = VpnConnectionStatus.error;
-          _errorMessage = 'OpenVPN connection error';
+          _errorMessage = 'Connection failed. Tap to retry.';
           _stopDurationTimer();
           _stopPingTimer();
           notifyListeners();
         } else if (stage == VPNStage.denied) {
+          connectionTimeoutTimer?.cancel();
           _status = VpnConnectionStatus.error;
           _errorMessage = 'VPN permission denied';
           _stopDurationTimer();
@@ -607,11 +624,13 @@ class VpnProvider with ChangeNotifier {
           if (kDebugMode) {
             debugPrint('⏱️ OpenVPN connection timeout (30s)');
           }
+          connectionTimeoutTimer?.cancel();
           return false;
         },
       );
       
       if (!connected) {
+        connectionTimeoutTimer?.cancel();
         _status = VpnConnectionStatus.error;
         _errorMessage = 'Failed to establish OpenVPN connection. Please check your config and try again.';
         notifyListeners();
