@@ -97,6 +97,42 @@ class OpenVpnConfig {
     return password ?? embeddedPassword;
   }
   
+  /// Get normalized config with fixes for common issues
+  String get normalizedConfig {
+    String normalized = config;
+    
+    // ✅ Fix 1: Convert "proto tcp" to "proto tcp-client"
+    // OpenVPN requires tcp-client for client configs, not just tcp
+    normalized = normalized.replaceAll(RegExp(r'\bproto\s+tcp\b'), 'proto tcp-client');
+    
+    // ✅ Fix 2: Ensure auth-user-pass is present if credentials are provided
+    final hasAuthBlock = normalized.contains('<auth-user-pass>');
+    final hasAuthLine = normalized.contains(RegExp(r'\bauth-user-pass\b'));
+    
+    if (!hasAuthBlock && !hasAuthLine) {
+      // اگر credentials داریم ولی auth-user-pass در config نیست
+      final user = effectiveUsername;
+      final pass = effectivePassword;
+      
+      if (user != null && user.isNotEmpty) {
+        // اضافه کردن auth block
+        final authBlock = '\n<auth-user-pass>\n$user\n${pass ?? ""}\n</auth-user-pass>\n';
+        
+        // اضافه کردن قبل از خطوط cert یا key
+        if (normalized.contains('<ca>')) {
+          normalized = normalized.replaceFirst('<ca>', '$authBlock<ca>');
+        } else if (normalized.contains('<cert>')) {
+          normalized = normalized.replaceFirst('<cert>', '$authBlock<cert>');
+        } else {
+          // اضافه کردن به انتها
+          normalized = normalized + authBlock;
+        }
+      }
+    }
+    
+    return normalized;
+  }
+  
   /// Get server address from config
   String? get serverAddress {
     final parsed = parseConfigFile(config);

@@ -70,6 +70,9 @@ class OpenVpnConnection {
       final username = config.effectiveUsername;
       final password = config.effectivePassword;
       
+      // ✅ استفاده از normalizedConfig برای fix کردن TCP و credentials
+      final normalizedConfigContent = config.normalizedConfig;
+      
       if (kDebugMode) {
         debugPrint('🚀 Connecting to OpenVPN: ${config.name}');
         debugPrint('   Server: ${config.serverAddress}:${config.serverPort}');
@@ -79,12 +82,15 @@ class OpenVpnConnection {
         if (config.embeddedUsername != null) {
           debugPrint('   📄 Credentials extracted from config file');
         }
+        if (username != null && username.isNotEmpty) {
+          debugPrint('   🔐 Credentials will be injected into config');
+        }
         
-        // Log first 500 chars of config for debugging
-        final configPreview = config.config.length > 500 
-            ? '${config.config.substring(0, 500)}...' 
-            : config.config;
-        debugPrint('📝 Config preview (first 500 chars):');
+        // Log first 500 chars of normalized config for debugging
+        final configPreview = normalizedConfigContent.length > 500 
+            ? '${normalizedConfigContent.substring(0, 500)}...' 
+            : normalizedConfigContent;
+        debugPrint('📝 Normalized config preview (first 500 chars):');
         debugPrint(configPreview);
       }
       
@@ -108,9 +114,9 @@ class OpenVpnConnection {
         }
       }
       
-      // ✅ Connect after permission granted
+      // ✅ Connect after permission granted با normalizedConfig
       _openvpn.connect(
-        config.config,
+        normalizedConfigContent, // استفاده از normalized config
         config.name,
         username: username,
         password: password,
