@@ -48,11 +48,19 @@ class OpenVpnConfig {
       result['port'] = remoteMatch.group(2) ?? '';
     }
     
-    // پیدا کردن proto (protocol: tcp or udp)
-    final protoRegex = RegExp(r'proto\s+(\S+)');
+    // پیدا کردن proto (protocol: tcp, tcp-client, udp, udp4, udp6)
+    final protoRegex = RegExp(r'proto\s+(tcp-client|tcp|udp6|udp4|udp)');
     final protoMatch = protoRegex.firstMatch(configContent);
     if (protoMatch != null) {
-      result['proto'] = protoMatch.group(1) ?? 'udp';
+      var proto = protoMatch.group(1) ?? 'udp';
+      // Normalize: tcp → tcp-client (for display purposes)
+      if (proto == 'tcp') {
+        proto = 'tcp-client';
+      }
+      result['proto'] = proto;
+    } else {
+      // Default to UDP if not specified
+      result['proto'] = 'udp';
     }
     
     // ✅ Extract username/password from config file
@@ -127,6 +135,43 @@ class OpenVpnConfig {
           // اضافه کردن به انتها
           normalized = normalized + authBlock;
         }
+      }
+    }
+    
+    // ✅ Fix 3: Add essential OpenVPN settings if missing
+    final lines = normalized.split('\n');
+    final essentialSettings = <String>[];
+    
+    // DNS Settings - اضافه کردن اگر وجود ندارد
+    if (!normalized.contains('dhcp-option DNS')) {
+      essentialSettings.add('# DNS Servers (Google DNS)');
+      essentialSettings.add('dhcp-option DNS 8.8.8.8');
+      essentialSettings.add('dhcp-option DNS 8.8.4.4');
+    }
+    
+    // Ensure these critical settings exist
+    if (!normalized.contains('persist-key')) {
+      essentialSettings.add('persist-key');
+    }
+    if (!normalized.contains('persist-tun')) {
+      essentialSettings.add('persist-tun');
+    }
+    if (!normalized.contains('nobind')) {
+      essentialSettings.add('nobind');
+    }
+    if (!normalized.contains('resolv-retry infinite')) {
+      essentialSettings.add('resolv-retry infinite');
+    }
+    
+    // اضافه کردن تنظیمات ضروری به ابتدای config (بعد از remote)
+    if (essentialSettings.isNotEmpty) {
+      final remoteLineIndex = lines.indexWhere((line) => line.trim().startsWith('remote '));
+      if (remoteLineIndex != -1) {
+        lines.insertAll(remoteLineIndex + 1, essentialSettings);
+        normalized = lines.join('\n');
+      } else {
+        // اگر remote نیست، به ابتدا اضافه کن
+        normalized = '${essentialSettings.join('\n')}\n$normalized';
       }
     }
     
