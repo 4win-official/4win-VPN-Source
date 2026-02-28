@@ -12,6 +12,8 @@ class _RainAnimationState extends State<RainAnimation> with SingleTickerProvider
   late AnimationController _controller;
   final List<RainDrop> _rainDrops = [];
   final Random _random = Random();
+  bool _showLightning = false;
+  int _lightningFlashes = 0;
 
   @override
   void initState() {
@@ -31,6 +33,51 @@ class _RainAnimationState extends State<RainAnimation> with SingleTickerProvider
         thickness: 1 + _random.nextDouble() * 0.8,
       ));
     }
+    
+    // ⚡ شروع رعد و برق تصادفی
+    _startLightningTimer();
+  }
+  
+  void _startLightningTimer() {
+    Future.delayed(Duration(seconds: 8 + _random.nextInt(12)), () {
+      if (mounted) {
+        _triggerLightning();
+        _startLightningTimer(); // دوباره شروع
+      }
+    });
+  }
+  
+  void _triggerLightning() {
+    if (!mounted) return;
+    
+    setState(() {
+      _showLightning = true;
+      _lightningFlashes = 0;
+    });
+    
+    // چند بار flash کن (2-4 بار)
+    final flashCount = 2 + _random.nextInt(3);
+    _flashLightning(flashCount);
+  }
+  
+  void _flashLightning(int remainingFlashes) {
+    if (!mounted || remainingFlashes <= 0) {
+      if (mounted) {
+        setState(() {
+          _showLightning = false;
+        });
+      }
+      return;
+    }
+    
+    Future.delayed(Duration(milliseconds: 50 + _random.nextInt(100)), () {
+      if (mounted) {
+        setState(() {
+          _showLightning = !_showLightning;
+        });
+        _flashLightning(remainingFlashes - 1);
+      }
+    });
   }
 
   @override
@@ -41,17 +88,28 @@ class _RainAnimationState extends State<RainAnimation> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return CustomPaint(
-          painter: RainPainter(
-            rainDrops: _rainDrops,
-            animation: _controller.value,
+    return Stack(
+      children: [
+        // ⚡ Lightning flash overlay
+        if (_showLightning)
+          Container(
+            color: Colors.white.withValues(alpha: 0.3),
           ),
-          size: Size.infinite,
-        );
-      },
+        
+        // باران
+        AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            return CustomPaint(
+              painter: RainPainter(
+                rainDrops: _rainDrops,
+                animation: _controller.value,
+              ),
+              size: Size.infinite,
+            );
+          },
+        ),
+      ],
     );
   }
 }

@@ -142,6 +142,9 @@ class OpenVpnConfig {
     final lines = normalized.split('\n');
     final essentialSettings = <String>[];
     
+    // Check if using TCP protocol
+    final isTcp = normalized.contains('proto tcp');
+    
     // DNS Settings - اضافه کردن اگر وجود ندارد
     if (!normalized.contains('dhcp-option DNS')) {
       essentialSettings.add('# DNS Servers (Google DNS)');
@@ -161,6 +164,16 @@ class OpenVpnConfig {
     }
     if (!normalized.contains('resolv-retry infinite')) {
       essentialSettings.add('resolv-retry infinite');
+    }
+    
+    // TCP-specific settings
+    if (isTcp) {
+      if (!normalized.contains('connect-retry-max')) {
+        essentialSettings.add('connect-retry-max 3');
+      }
+      if (!normalized.contains('connect-retry')) {
+        essentialSettings.add('connect-retry 5');
+      }
     }
     
     // اضافه کردن تنظیمات ضروری به ابتدای config (بعد از remote)
