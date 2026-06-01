@@ -5,12 +5,14 @@ import 'package:openvpn_flutter/openvpn_flutter.dart';
 import '../models/vpn_server.dart';
 import '../models/dns_server.dart';
 import '../models/openvpn_config.dart';
+import '../models/slowdns_config.dart';
 import '../services/server_service.dart';
 import '../services/vpn_service.dart';
 import '../services/dns_service.dart';
 import '../services/dns_vpn_connection.dart';
 import '../services/openvpn_service.dart';
 import '../services/openvpn_connection.dart';
+import '../services/slowdns_service.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -24,9 +26,15 @@ class VpnProvider with ChangeNotifier {
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
-  // Protocol selection: 'sstp', 'direct_dns', or 'openvpn'
+  // Protocol selection: 'sstp', 'direct_dns', 'openvpn', or 'slowdns'
   String _selectedProtocol = 'sstp';
   String get selectedProtocol => _selectedProtocol;
+  
+  // Slow DNS configs
+  List<SlowDnsConfig> _slowDnsConfigs = [];
+  SlowDnsConfig? _selectedSlowDnsConfig;
+  List<SlowDnsConfig> get slowDnsConfigs => _slowDnsConfigs;
+  SlowDnsConfig? get selectedSlowDnsConfig => _selectedSlowDnsConfig;
   
   // DNS servers
   List<DnsServer> _dnsServers = [];
@@ -348,7 +356,7 @@ class VpnProvider with ChangeNotifier {
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
 
-    // 🔀 PROTOCOL DETECTION: Direct DNS, OpenVPN, or SSTP
+    // 🔀 PROTOCOL DETECTION: Direct DNS, OpenVPN, Slow DNS, or SSTP
     if (_selectedProtocol == 'direct_dns') {
       // ✅ Direct DNS: Use selected DNS server
       await _connectDirectDns();
@@ -356,6 +364,10 @@ class VpnProvider with ChangeNotifier {
     } else if (_selectedProtocol == 'openvpn') {
       // ✅ OpenVPN: Use selected OpenVPN config
       await _connectOpenVpn();
+      return;
+    } else if (_selectedProtocol == 'slowdns') {
+      // ✅ Slow DNS: Use selected Slow DNS config
+      await _connectSlowDns();
       return;
     }
 
@@ -652,6 +664,65 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
+  /// Connect to Slow DNS
+  Future<void> _connectSlowDns() async {
+    if (_selectedSlowDnsConfig == null) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Please select a Slow DNS config first';
+      notifyListeners();
+      
+      if (kDebugMode) {
+        debugPrint('❌ No Slow DNS config selected');
+      }
+      return;
+    }
+
+    try {
+      _status = VpnConnectionStatus.connecting;
+      notifyListeners();
+
+      if (kDebugMode) {
+        debugPrint('🌐 Connecting to Slow DNS: ${_selectedSlowDnsConfig!.name}');
+        debugPrint('   Domain: ${_selectedSlowDnsConfig!.domain}');
+        debugPrint('   Name Server: ${_selectedSlowDnsConfig!.nameServer}');
+      }
+
+      // Setup Slow DNS connection state callback
+      SlowDnsConnection.onStateChanged = (bool connected, String message) {
+        if (connected) {
+          _status = VpnConnectionStatus.connected;
+          _connectedServer = null; // Slow DNS mode
+          _errorMessage = null;
+          _startDurationTimer();
+          _startPingTimer();
+        } else {
+          _status = VpnConnectionStatus.disconnected;
+          _errorMessage = message;
+          _stopDurationTimer();
+          _stopPingTimer();
+        }
+        notifyListeners();
+      };
+
+      // Connect using Slow DNS
+      final connected = await SlowDnsConnection.connect(_selectedSlowDnsConfig!);
+      
+      if (!connected) {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Failed to connect. Check config and try again.';
+        notifyListeners();
+      }
+      
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to connect Slow DNS: $e');
+      }
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Failed to connect: ${e.toString()}';
+      notifyListeners();
+    }
+  }
+
   /// Disconnect from VPN
   Future<void> disconnect() async {
     if (_status == VpnConnectionStatus.disconnecting || _status == VpnConnectionStatus.disconnected) {
@@ -669,6 +740,11 @@ class VpnProvider with ChangeNotifier {
         await OpenVpnConnection.disconnect();
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting OpenVPN...');
+        }
+      } else if (_selectedProtocol == 'slowdns') {
+        await SlowDnsConnection.disconnect();
+        if (kDebugMode) {
+          debugPrint('🔌 Disconnecting Slow DNS...');
         }
       } else {
         await _vpnService.disconnect();

@@ -8,7 +8,7 @@ import '../models/vpn_server.dart';
 
 class ServerService {
   // لینک سرور - محرمانه (هرگز به کاربر نمایش داده نمی‌شود)
-  static const String _serverUrl = 'https://v-1.storage.c2.liara.space/1/gate.txt';
+  static const String _serverUrl = 'https://raw.githubusercontent.com/4win-official/sub/refs/heads/main/Gate.txt';
   static const String cacheKey = 'cached_servers';
   static const String lastUpdateKey = 'last_server_update';
   static const Duration cacheExpiration = Duration(hours: 6);

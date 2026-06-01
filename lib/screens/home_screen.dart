@@ -11,6 +11,7 @@ import 'theme_selection_screen.dart';
 import 'settings_screen.dart';
 import 'dns_servers_screen.dart';
 import 'openvpn_configs_screen.dart';
+import 'slowdns_configs_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -274,7 +275,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         ),
                                         const SizedBox(width: 12),
                                         Text(
-                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : "Direct DNS"}',
+                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : "Direct DNS"}',
                                           style: TextStyle(
                                             fontSize: 14,
                                             color: isDark ? Colors.white : Colors.black87,
@@ -531,6 +532,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
+                    );
+                  }
+                  
+                  // Slow DNS: Show DNS Scanner and Configs buttons
+                  if (provider.selectedProtocol == 'slowdns') {
+                    return Column(
+                      children: [
+                        // DNS Scanner button
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const SlowDnsConfigsScreen(),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.radar),
+                            label: const Text(
+                              'DNS Scanner & Configs',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              backgroundColor: Colors.orange,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     );
                   }
                   

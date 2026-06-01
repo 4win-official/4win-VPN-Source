@@ -153,6 +153,43 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         Navigator.pop(context); // Auto-close
                       },
                     ),
+                    
+                    const Divider(height: 20),
+                    
+                    // Slow DNS Option
+                    ListTile(
+                      leading: Icon(
+                        Icons.cloud_queue,
+                        color: vpnProvider.selectedProtocol == 'slowdns'
+                            ? Colors.orange
+                            : (isDark ? Colors.white54 : Colors.black54),
+                        size: 28,
+                      ),
+                      title: Text(
+                        'Slow DNS',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                          fontWeight: vpnProvider.selectedProtocol == 'slowdns'
+                              ? FontWeight.bold
+                              : FontWeight.w500,
+                          fontSize: 16,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'DNS Tunneling for heavy censorship',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                      trailing: vpnProvider.selectedProtocol == 'slowdns'
+                          ? const Icon(Icons.check_circle, color: Colors.orange)
+                          : null,
+                      onTap: () {
+                        vpnProvider.switchProtocol('slowdns');
+                        Navigator.pop(context); // Auto-close
+                      },
+                    ),
                   ],
                 ),
               ),
