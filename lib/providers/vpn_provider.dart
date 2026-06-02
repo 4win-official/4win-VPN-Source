@@ -22,6 +22,7 @@ class VpnProvider with ChangeNotifier {
   final VpnService _vpnService = VpnService();
   final DnsService _dnsService = DnsService();
   final OpenVpnService _openVpnService = OpenVpnService();
+  final SlowDnsService _slowDnsService = SlowDnsService();
   
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
@@ -961,6 +962,69 @@ class VpnProvider with ChangeNotifier {
     }
     
     // Automatically connect
+    await connect();
+  }
+
+  /// Load Slow DNS configs from storage
+  Future<void> loadSlowDnsConfigs() async {
+    try {
+      _slowDnsConfigs = await _slowDnsService.loadConfigs();
+
+      final selectedName = await _slowDnsService.getSelectedConfigName();
+      if (selectedName != null && _slowDnsConfigs.isNotEmpty) {
+        try {
+          _selectedSlowDnsConfig = _slowDnsConfigs.firstWhere(
+            (config) => config.name == selectedName,
+          );
+        } catch (_) {
+          _selectedSlowDnsConfig = _slowDnsConfigs.first;
+        }
+      }
+
+      notifyListeners();
+
+      if (kDebugMode) {
+        debugPrint('✅ Loaded ${_slowDnsConfigs.length} Slow DNS configs');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to load Slow DNS configs: $e');
+      }
+    }
+  }
+
+  /// Add a Slow DNS config
+  Future<bool> addSlowDnsConfig(SlowDnsConfig config) async {
+    final success = await _slowDnsService.addConfig(config);
+    if (success) {
+      await loadSlowDnsConfigs();
+    }
+    return success;
+  }
+
+  /// Remove a Slow DNS config by name
+  Future<void> removeSlowDnsConfig(String name) async {
+    await _slowDnsService.removeConfig(name);
+    if (_selectedSlowDnsConfig?.name == name) {
+      _selectedSlowDnsConfig = null;
+    }
+    await loadSlowDnsConfigs();
+  }
+
+  /// Select a Slow DNS config (without connecting)
+  Future<void> selectSlowDnsConfig(SlowDnsConfig config) async {
+    _selectedSlowDnsConfig = config;
+    await _slowDnsService.setSelectedConfig(config.name);
+    notifyListeners();
+
+    if (kDebugMode) {
+      debugPrint('✅ Slow DNS Config Selected: ${config.name}');
+    }
+  }
+
+  /// Select a Slow DNS config and connect
+  Future<void> selectSlowDnsConfigAndConnect(SlowDnsConfig config) async {
+    await selectSlowDnsConfig(config);
     await connect();
   }
 
