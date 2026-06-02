@@ -165,15 +165,48 @@ class ProtocolSelectorDialog extends StatelessWidget {
                             : (isDark ? Colors.white54 : Colors.black54),
                         size: 28,
                       ),
-                      title: Text(
-                        'Slow DNS',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                          fontWeight: vpnProvider.selectedProtocol == 'slowdns'
-                              ? FontWeight.bold
-                              : FontWeight.w500,
-                          fontSize: 16,
-                        ),
+                      title: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'Slow DNS',
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontWeight:
+                                    vpnProvider.selectedProtocol == 'slowdns'
+                                        ? FontWeight.bold
+                                        : FontWeight.w500,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // Beta badge
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.orange.withValues(alpha: 0.6),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Text(
+                              'Beta',
+                              style: TextStyle(
+                                color: Colors.orange,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       subtitle: Text(
                         'DNS Tunneling for heavy censorship',
