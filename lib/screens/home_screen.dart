@@ -12,6 +12,8 @@ import 'settings_screen.dart';
 import 'dns_servers_screen.dart';
 import 'openvpn_configs_screen.dart';
 import 'slowdns_configs_screen.dart';
+import '../services/update_service.dart';
+import '../widgets/update_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -22,10 +24,36 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
+  final UpdateService _updateService = UpdateService();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // بررسی خودکار آپدیت هنگام ورود به اپ
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForUpdate();
+    });
+  }
+
+  /// بررسی خودکار آپدیت از طریق GitHub Releases و نمایش دیالوگ در صورت وجود نسخه جدید
+  Future<void> _checkForUpdate() async {
+    try {
+      final updateInfo = await _updateService.checkForUpdate();
+      if (updateInfo == null) return; // نسخه جدیدی نیست -> کاری نکن
+      if (!mounted) return;
+
+      final currentVersion = await _updateService.getCurrentVersion();
+      if (!mounted) return;
+
+      await UpdateDialog.show(
+        context,
+        updateInfo: updateInfo,
+        currentVersion: currentVersion,
+      );
+    } catch (_) {
+      // خطا در بررسی آپدیت را بی‌صدا رد کن - نباید تجربه کاربر مختل شود
+    }
   }
 
   @override

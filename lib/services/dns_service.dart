@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../models/dns_server.dart';
 
@@ -20,30 +20,40 @@ class DnsService {
     await prefs.setString(selectedProtocolKey, protocol);
   }
 
-  /// تست اتصال به DNS server (با HTTP request به IP سرور)
+  /// تست اتصال (پینگ واقعی) به DNS server با Socket.connect به IP خود سرور
+  /// مثل دستور ping 1.1.1.1 در ترموکس - تاخیر واقعی تا اون DNS رو اندازه می‌گیره
   Future<int?> testDnsConnectivity(DnsServer server) async {
-    try {
-      final stopwatch = Stopwatch()..start();
-      
-      // تست HTTP به آدرس سرور DNS
-      // از Cloudflare استفاده می‌کنیم که سریع و قابل اعتماد است
-      final response = await http.get(
-        Uri.parse('https://1.1.1.1/dns-query?name=google.com&type=A'),
-        headers: {'Accept': 'application/dns-json'},
-      ).timeout(const Duration(seconds: 3));
-      
-      stopwatch.stop();
-      
-      // اگر پاسخ موفق بود، پینگ را برگردان
-      if (response.statusCode == 200) {
+    // پورت‌هایی که یک سرور DNS معمولاً روی اون‌ها پاسخ میده
+    // 53 = DNS استاندارد ، 443 = DNS-over-HTTPS ، 853 = DNS-over-TLS ، 80 = fallback
+    const List<int> portsToTry = [53, 443, 853, 80];
+
+    for (final port in portsToTry) {
+      try {
+        final stopwatch = Stopwatch()..start();
+
+        final socket = await Socket.connect(
+          server.primaryDns,
+          port,
+          timeout: const Duration(seconds: 3),
+        );
+
+        stopwatch.stop();
+        await socket.close();
+
         final ping = stopwatch.elapsedMilliseconds;
-        return ping;
+        // فقط پینگ منطقی برگردان (زیر 2 ثانیه)
+        if (ping < 2000) {
+          return ping;
+        }
+        return null;
+      } catch (_) {
+        // این پورت پاسخ نداد، پورت بعدی رو امتحان کن
+        continue;
       }
-      
-      return null;
-    } catch (e) {
-      return null; // اگر خطا بود، null برگردان تا N/A نشون بده
     }
+
+    // هیچ پورتی پاسخ نداد
+    return null;
   }
 
   /// تست همزمان چند DNS server

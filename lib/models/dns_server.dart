@@ -42,6 +42,57 @@ class DnsServer {
   // لیست DNS های عمومی پیش‌فرض
   static List<DnsServer> getPublicDnsServers() {
     return [
+      // ===== DNS های ضد تحریم ایرانی (Anti-Censorship) =====
+      DnsServer(
+        name: 'Shekan',
+        primaryDns: '178.22.122.100',
+        secondaryDns: '185.51.200.2',
+        description: 'Iranian anti-censorship DNS',
+        country: 'Iran',
+      ),
+      DnsServer(
+        name: 'Bertina',
+        primaryDns: '193.186.32.32',
+        secondaryDns: null,
+        description: 'Iranian anti-censorship DNS',
+        country: 'Iran',
+      ),
+      DnsServer(
+        name: 'Electro',
+        primaryDns: '78.157.42.100',
+        secondaryDns: '78.157.42.101',
+        description: 'Iranian anti-censorship DNS',
+        country: 'Iran',
+      ),
+      DnsServer(
+        name: 'DNS Pro',
+        primaryDns: '87.107.110.109',
+        secondaryDns: null,
+        description: 'Iranian anti-censorship DNS',
+        country: 'Iran',
+      ),
+      DnsServer(
+        name: 'Begzar',
+        primaryDns: '185.55.226.26',
+        secondaryDns: '185.55.225.25',
+        description: 'Iranian anti-censorship DNS',
+        country: 'Iran',
+      ),
+      DnsServer(
+        name: 'Radar Game',
+        primaryDns: '10.202.10.10',
+        secondaryDns: '10.202.10.11',
+        description: 'Iranian anti-censorship DNS',
+        country: 'Iran',
+      ),
+      DnsServer(
+        name: 'Online.403',
+        primaryDns: '10.202.10.202',
+        secondaryDns: '10.202.10.102',
+        description: 'Iranian anti-censorship DNS',
+        country: 'Iran',
+      ),
+      // ===== DNS های عمومی جهانی =====
       DnsServer(
         name: 'Google DNS',
         primaryDns: '8.8.8.8',
