@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../providers/vpn_provider.dart';
 import 'home_screen.dart';
 
@@ -12,10 +13,27 @@ class LoadingScreen extends StatefulWidget {
 }
 
 class _LoadingScreenState extends State<LoadingScreen> {
+  String _appVersion = '';
+
   @override
   void initState() {
     super.initState();
+    _loadAppVersion();
     _loadServersAndNavigate();
+  }
+
+  /// خواندن خودکار نسخه اپ از pubspec (package_info)
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _appVersion = info.version;
+        });
+      }
+    } catch (_) {
+      // اگر خواندن نسخه ناموفق بود، چیزی نمایش نده
+    }
   }
 
   Future<void> _loadServersAndNavigate() async {
@@ -55,7 +73,9 @@ class _LoadingScreenState extends State<LoadingScreen> {
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF000000) : Colors.white, // Pure black
       body: SafeArea(
-        child: Center(
+        child: Stack(
+          children: [
+            Center(
           child: Consumer<VpnProvider>(
             builder: (context, provider, _) {
               return Column(
@@ -138,6 +158,24 @@ class _LoadingScreenState extends State<LoadingScreen> {
               );
             },
           ),
+            ),
+
+            // نمایش نسخه اپ پایین صفحه (خودکار از pubspec)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 24),
+                child: Text(
+                  _appVersion.isNotEmpty ? 'Version $_appVersion' : '',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

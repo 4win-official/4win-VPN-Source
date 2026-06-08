@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
+import 'slowdns_configs_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -38,6 +39,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _killSwitch = prefs.getBool('kill_switch') ?? false;
       _useCustomServer = prefs.getBool('use_custom_server') ?? false;
     });
+  }
+
+  /// نام نمایشی صحیح برای هر پروتکل (رفع باگ نمایش اشتباه «Direct DNS»)
+  String _protocolDisplayName(String protocol) {
+    switch (protocol) {
+      case 'sstp':
+        return 'SSTP';
+      case 'direct_dns':
+        return 'Direct DNS';
+      case 'openvpn':
+        return 'OpenVPN';
+      case 'slowdns':
+        return 'Slow DNS';
+      default:
+        return protocol;
+    }
   }
 
   Future<void> _saveSettings() async {
@@ -337,7 +354,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 24),
                 ],
-            
+
+                // Slow DNS-specific settings
+                if (provider.selectedProtocol == 'slowdns') ...[
+                  _SettingsSection(
+                    title: 'Slow DNS Settings',
+                    children: [
+                      InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const SlowDnsConfigsScreen(),
+                            ),
+                          );
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.dns_outlined,
+                                color: isDark ? Colors.blue[300] : Colors.blue,
+                                size: 24,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Manage Configurations',
+                                      style: TextStyle(
+                                        color: isDark ? Colors.white : Colors.black87,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Add, edit, or delete Slow DNS configs',
+                                      style: TextStyle(
+                                        color: isDark ? Colors.white70 : Colors.black54,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.arrow_forward_ios,
+                                color: isDark ? Colors.white38 : Colors.black26,
+                                size: 16,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
                 // Kill Switch
                 _SettingsSection(
                   title: 'Security',
@@ -388,7 +466,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SettingsSection(
                   title: 'About',
                   children: [
-                    _InfoRow('Protocol', provider.selectedProtocol == 'sstp' ? 'SSTP' : 'Direct DNS', isDark),
+                    _InfoRow('Protocol', _protocolDisplayName(provider.selectedProtocol), isDark),
                     // Show servers only for SSTP
                     if (provider.selectedProtocol == 'sstp')
                       _InfoRow('Servers', '${provider.servers.length} available', isDark),

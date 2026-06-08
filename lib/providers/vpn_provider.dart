@@ -180,14 +180,14 @@ class VpnProvider with ChangeNotifier {
     });
   }
 
-  // Ping timer - every 5 seconds
+  // Ping timer - every 3 seconds
   void _startPingTimer() {
     _stopPingTimer();
     
     // Get initial ping
     _updateCurrentPing();
     
-    _pingTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+    _pingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       _updateCurrentPing();
     });
   }
@@ -539,6 +539,8 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.connected;
       _connectedServer = null; // DNS mode has no VPN server
       _startDurationTimer();
+      // ✅ شروع پینگ خودکار به سرور DNS متصل (هر ۳ ثانیه در صفحه هوم)
+      _startPingTimer();
       notifyListeners();
 
       if (kDebugMode) {
@@ -737,6 +739,10 @@ class VpnProvider with ChangeNotifier {
       // Disconnect based on protocol
       if (_selectedProtocol == 'direct_dns') {
         await DnsVpnConnection.disconnect();
+        // ✅ توقف تایمرهای پینگ و مدت زمان برای حالت DNS
+        _stopPingTimer();
+        _stopDurationTimer();
+        _connectionDuration = Duration.zero;
       } else if (_selectedProtocol == 'openvpn') {
         await OpenVpnConnection.disconnect();
         if (kDebugMode) {
