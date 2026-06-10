@@ -293,12 +293,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               ? Icons.vpn_key
                                               : vpnProvider.selectedProtocol == 'openvpn'
                                                   ? Icons.shield
-                                                  : Icons.dns,
+                                                  : vpnProvider.selectedProtocol == 'slowdns'
+                                                      ? Icons.cloud_queue
+                                                      : Icons.dns,
                                           color: vpnProvider.selectedProtocol == 'sstp'
                                               ? Colors.green
                                               : vpnProvider.selectedProtocol == 'openvpn'
                                                   ? Colors.purple
-                                                  : Colors.blue,
+                                                  : vpnProvider.selectedProtocol == 'slowdns'
+                                                      ? Colors.orange
+                                                      : Colors.blue,
                                           size: 20,
                                         ),
                                         const SizedBox(width: 12),
@@ -404,8 +408,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         
                         const SizedBox(height: 40),
                         
-                        // Data Usage Info (فقط برای SSTP)
-                        if (provider.isConnected && provider.selectedProtocol == 'sstp')
+                        // Data Usage Info (برای SSTP و Direct DNS)
+                        if (provider.isConnected &&
+                            (provider.selectedProtocol == 'sstp' ||
+                                provider.selectedProtocol == 'direct_dns'))
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 32),
                             child: Text(

@@ -48,4 +48,42 @@ class DnsVpnConnection {
       return false;
     }
   }
+
+  /// پینگ واقعی به سرور DNS (به‌صورت native).
+  /// این روش حتی وقتی VPN دایرکت DNS فعال است هم به‌درستی کار می‌کند.
+  /// خروجی: تاخیر بر حسب میلی‌ثانیه، یا null در صورت ناموفق بودن.
+  static Future<int?> pingDns(String dnsIp) async {
+    try {
+      final result = await platform.invokeMethod('pingDns', {'dnsIp': dnsIp});
+      if (result is int && result >= 0) {
+        return result;
+      }
+      return null;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ DNS ping error: $e');
+      }
+      return null;
+    }
+  }
+
+  /// مجموع ترافیک رد و بدل شده دستگاه (بایت) را برمی‌گرداند
+  /// خروجی: {'rxBytes': int, 'txBytes': int}
+  static Future<Map<String, int>> getStats() async {
+    try {
+      final result = await platform.invokeMethod('getDnsStats');
+      if (result is Map) {
+        return {
+          'rxBytes': (result['rxBytes'] as num?)?.toInt() ?? 0,
+          'txBytes': (result['txBytes'] as num?)?.toInt() ?? 0,
+        };
+      }
+      return {'rxBytes': 0, 'txBytes': 0};
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ DNS VPN getStats error: $e');
+      }
+      return {'rxBytes': 0, 'txBytes': 0};
+    }
+  }
 }

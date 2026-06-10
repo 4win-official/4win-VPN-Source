@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/dns_server.dart';
@@ -20,40 +21,93 @@ class DnsService {
     await prefs.setString(selectedProtocolKey, protocol);
   }
 
-  /// تست اتصال (پینگ واقعی) به DNS server با Socket.connect به IP خود سرور
-  /// مثل دستور ping 1.1.1.1 در ترموکس - تاخیر واقعی تا اون DNS رو اندازه می‌گیره
+  /// تست اتصال (پینگ واقعی) به DNS server.
+  /// مثل دستور ping در ترموکس - تاخیر واقعی تا اون DNS رو اندازه می‌گیره.
+  ///
+  /// روش اصلی: یک DNS query واقعی روی UDP پورت 53 می‌فرسته و زمان پاسخ رو
+  /// اندازه می‌گیره. این روش حتی وقتی VPN دایرکت DNS فعاله هم کار می‌کنه چون
+  /// از پروتکل واقعی DNS استفاده می‌کنه (مثل کاری که خود اپ موقع DNS resolution
+  /// انجام می‌ده). اگر UDP پاسخ نداد، به‌عنوان fallback از TCP Socket استفاده می‌کنه.
   Future<int?> testDnsConnectivity(DnsServer server) async {
-    // پورت‌هایی که یک سرور DNS معمولاً روی اون‌ها پاسخ میده
-    // 53 = DNS استاندارد ، 443 = DNS-over-HTTPS ، 853 = DNS-over-TLS ، 80 = fallback
-    const List<int> portsToTry = [53, 443, 853, 80];
+    // روش 1: پینگ واقعی DNS با UDP query
+    final udpPing = await _pingDnsUdp(server.primaryDns);
+    if (udpPing != null) return udpPing;
 
+    // روش 2 (fallback): تست TCP روی پورت‌های رایج DNS
+    const List<int> portsToTry = [53, 443, 853, 80];
     for (final port in portsToTry) {
       try {
         final stopwatch = Stopwatch()..start();
-
         final socket = await Socket.connect(
           server.primaryDns,
           port,
           timeout: const Duration(seconds: 3),
         );
-
         stopwatch.stop();
         await socket.close();
-
         final ping = stopwatch.elapsedMilliseconds;
-        // فقط پینگ منطقی برگردان (زیر 2 ثانیه)
-        if (ping < 2000) {
-          return ping;
-        }
+        if (ping < 2000) return ping;
         return null;
       } catch (_) {
-        // این پورت پاسخ نداد، پورت بعدی رو امتحان کن
         continue;
       }
     }
 
-    // هیچ پورتی پاسخ نداد
     return null;
+  }
+
+  /// ارسال یک DNS query واقعی روی UDP و اندازه‌گیری زمان پاسخ (میلی‌ثانیه)
+  Future<int?> _pingDnsUdp(String ip) async {
+    RawDatagramSocket? socket;
+    try {
+      final InternetAddress address = InternetAddress(ip);
+      final query = _buildDnsQuery('google.com');
+
+      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      final completer = Completer<int?>();
+      final stopwatch = Stopwatch()..start();
+
+      socket.listen((event) {
+        if (event == RawSocketEvent.read) {
+          final datagram = socket!.receive();
+          if (datagram != null && !completer.isCompleted) {
+            stopwatch.stop();
+            completer.complete(stopwatch.elapsedMilliseconds);
+          }
+        }
+      });
+
+      socket.send(query, address, 53);
+
+      final result = await completer.future.timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => null,
+      );
+
+      if (result != null && result < 2000) return result;
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      socket?.close();
+    }
+  }
+
+  /// ساخت یک بسته‌ی استاندارد DNS query (نوع A) برای دامنه‌ی داده‌شده
+  Uint8List _buildDnsQuery(String domain) {
+    final builder = BytesBuilder();
+    builder.add([0x12, 0x34]); // Transaction ID
+    builder.add([0x01, 0x00]); // Flags: standard query, recursion desired
+    builder.add([0x00, 0x01]); // QDCOUNT = 1
+    builder.add([0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // AN/NS/AR = 0
+    for (final part in domain.split('.')) {
+      builder.addByte(part.length);
+      builder.add(part.codeUnits);
+    }
+    builder.addByte(0); // پایان نام دامنه
+    builder.add([0x00, 0x01]); // QTYPE = A
+    builder.add([0x00, 0x01]); // QCLASS = IN
+    return builder.toBytes();
   }
 
   /// تست همزمان چند DNS server

@@ -64,6 +64,10 @@ class VpnProvider with ChangeNotifier {
   int _totalUploadBytes = 0;
   int _lastDownloadBytes = 0;
   int _lastUploadBytes = 0;
+
+  // Direct DNS traffic baseline (TrafficStats - device-wide counters)
+  int _dnsBaselineRxBytes = -1;
+  int _dnsBaselineTxBytes = -1;
   
   // Ping tracking
   int? _currentPing;
@@ -150,15 +154,20 @@ class VpnProvider with ChangeNotifier {
 
   // Real data usage from VPN service (cumulative)
   void _updateRealDataUsage() {
+    // reset baseline در شروع هر اتصال جدید
+    _dnsBaselineRxBytes = -1;
+    _dnsBaselineTxBytes = -1;
+
     Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!isConnected) {
         timer.cancel();
         return;
       }
       
-      // DNS mode: No data usage tracking (only ping)
+      // Direct DNS mode: ترافیک رد و بدل شده با استفاده از TrafficStats دستگاه
       if (_selectedProtocol == 'direct_dns') {
-        return; // Skip data usage for DNS
+        _updateDnsTraffic();
+        return;
       }
       
       // SSTP mode: Get current traffic from VPN service
@@ -180,6 +189,41 @@ class VpnProvider with ChangeNotifier {
     });
   }
 
+  // محاسبه ترافیک رد و بدل شده در حالت Direct DNS
+  // از TrafficStats دستگاه استفاده می‌کنیم: مقدار اولیه را به عنوان baseline
+  // ذخیره و سپس اختلاف نسبت به baseline را به عنوان ترافیک مصرفی محاسبه می‌کنیم
+  Future<void> _updateDnsTraffic() async {
+    try {
+      final stats = await DnsVpnConnection.getStats();
+      final rx = stats['rxBytes'] ?? 0;
+      final tx = stats['txBytes'] ?? 0;
+
+      if (rx <= 0 && tx <= 0) {
+        return; // TrafficStats در دسترس نیست
+      }
+
+      // اولین خوانش: ثبت baseline
+      if (_dnsBaselineRxBytes < 0 || _dnsBaselineTxBytes < 0) {
+        _dnsBaselineRxBytes = rx;
+        _dnsBaselineTxBytes = tx;
+        _totalDownloadBytes = 0;
+        _totalUploadBytes = 0;
+        notifyListeners();
+        return;
+      }
+
+      // اختلاف نسبت به baseline = ترافیک از زمان اتصال
+      final downloaded = rx - _dnsBaselineRxBytes;
+      final uploaded = tx - _dnsBaselineTxBytes;
+      _totalDownloadBytes = downloaded > 0 ? downloaded : 0;
+      _totalUploadBytes = uploaded > 0 ? uploaded : 0;
+
+      notifyListeners();
+    } catch (_) {
+      // در صورت خطا چیزی به‌روزرسانی نمی‌کنیم
+    }
+  }
+
   // Ping timer - every 3 seconds
   void _startPingTimer() {
     _stopPingTimer();
@@ -199,16 +243,26 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> _updateCurrentPing() async {
-    // DNS mode: ping DNS server
+    // DNS mode: ping DNS server (پینگ native که حتی موقع فعال بودن VPN هم کار می‌کند)
     if (_selectedProtocol == 'direct_dns' && _selectedDnsServer != null) {
       try {
         _pingFailed = false;
-        final ping = await _dnsService.testDnsConnectivity(_selectedDnsServer!)
+        // ابتدا تلاش با پینگ native (قابل اعتمادتر از طریق تونل VPN)
+        int? ping = await DnsVpnConnection.pingDns(_selectedDnsServer!.primaryDns)
+            .timeout(
+              const Duration(seconds: 4),
+              onTimeout: () => null,
+            );
+        // در صورت ناموفق بودن native، fallback به روش Dart
+        ping ??= await _dnsService.testDnsConnectivity(_selectedDnsServer!)
             .timeout(
               const Duration(seconds: 3),
               onTimeout: () => null,
             );
         _currentPing = ping;
+        if (ping == null) {
+          _pingFailed = true;
+        }
       } catch (e) {
         _currentPing = null;
         _pingFailed = true;
@@ -541,6 +595,8 @@ class VpnProvider with ChangeNotifier {
       _startDurationTimer();
       // ✅ شروع پینگ خودکار به سرور DNS متصل (هر ۳ ثانیه در صفحه هوم)
       _startPingTimer();
+      // ✅ شروع ردیابی ترافیک رد و بدل شده از زمان اتصال
+      _updateRealDataUsage();
       notifyListeners();
 
       if (kDebugMode) {
@@ -743,6 +799,11 @@ class VpnProvider with ChangeNotifier {
         _stopPingTimer();
         _stopDurationTimer();
         _connectionDuration = Duration.zero;
+        // ✅ ریست شمارنده‌های ترافیک
+        _totalDownloadBytes = 0;
+        _totalUploadBytes = 0;
+        _dnsBaselineRxBytes = -1;
+        _dnsBaselineTxBytes = -1;
       } else if (_selectedProtocol == 'openvpn') {
         await OpenVpnConnection.disconnect();
         if (kDebugMode) {
