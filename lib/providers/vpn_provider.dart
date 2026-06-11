@@ -243,26 +243,23 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> _updateCurrentPing() async {
-    // DNS mode: ping DNS server (پینگ native که حتی موقع فعال بودن VPN هم کار می‌کند)
+    // DNS mode: پینگ به سرور DNS متصل‌شده (هر ۳ ثانیه، مثل دستور ping ترموکس)
     if (_selectedProtocol == 'direct_dns' && _selectedDnsServer != null) {
+      final dnsIp = _selectedDnsServer!.primaryDns;
       try {
         _pingFailed = false;
-        // ابتدا تلاش با پینگ native (قابل اعتمادتر از طریق تونل VPN)
-        int? ping = await DnsVpnConnection.pingDns(_selectedDnsServer!.primaryDns)
-            .timeout(
-              const Duration(seconds: 4),
-              onTimeout: () => null,
-            );
+        // پینگ native (ICMP + TCP + UDP) - حتی موقع فعال بودن VPN هم کار می‌کند
+        int? ping = await DnsVpnConnection.pingDns(dnsIp).timeout(
+          const Duration(seconds: 6),
+          onTimeout: () => null,
+        );
         // در صورت ناموفق بودن native، fallback به روش Dart
-        ping ??= await _dnsService.testDnsConnectivity(_selectedDnsServer!)
-            .timeout(
-              const Duration(seconds: 3),
-              onTimeout: () => null,
-            );
+        ping ??= await _dnsService.testDnsConnectivity(_selectedDnsServer!).timeout(
+          const Duration(seconds: 4),
+          onTimeout: () => null,
+        );
         _currentPing = ping;
-        if (ping == null) {
-          _pingFailed = true;
-        }
+        _pingFailed = (ping == null);
       } catch (e) {
         _currentPing = null;
         _pingFailed = true;

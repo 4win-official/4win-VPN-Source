@@ -456,12 +456,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       Text(
                                         provider.currentPing != null 
                                             ? '${provider.currentPing}ms'
-                                            : 'Testing...',
+                                            : (provider.pingFailed ? 'Failed' : 'Testing...'),
                                         style: TextStyle(
                                           fontSize: 13,
                                           color: provider.currentPing != null
                                               ? _getPingColor(provider.currentPing!)
-                                              : (isDark ? Colors.white38 : Colors.black38),
+                                              : (provider.pingFailed
+                                                  ? Colors.redAccent
+                                                  : (isDark ? Colors.white38 : Colors.black38)),
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),

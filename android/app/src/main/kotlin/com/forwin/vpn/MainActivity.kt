@@ -120,17 +120,38 @@ class MainActivity: FlutterActivity() {
 
     /**
      * پینگ واقعی به سرور DNS و برگرداندن تاخیر بر حسب میلی‌ثانیه.
-     * روش 1: ارسال یک DNS query واقعی روی UDP پورت 53 و اندازه‌گیری زمان پاسخ.
-     * روش 2 (fallback): اتصال TCP به پورت 53.
-     * در صورت ناموفق بودن هر دو، -1 برمی‌گرداند.
+     * دقیقاً مثل دستور `ping` در ترموکس عمل می‌کند.
+     * روش 1: ICMP ping با InetAddress.isReachable (مثل ترموکس ping).
+     * روش 2: TCP connect روی پورت‌های رایج (53، 443، 80).
+     * روش 3: UDP DNS query روی پورت 53.
+     * در صورت ناموفق بودن همه، -1 برمی‌گرداند.
      */
     private fun pingDnsServer(dnsIp: String): Int {
-        // روش 1: UDP DNS query
-        val udp = pingDnsUdp(dnsIp)
-        if (udp >= 0) return udp
+        // روش 1: ICMP echo (دقیقاً مثل دستور ping ترموکس)
+        val icmp = pingIcmp(dnsIp)
+        if (icmp >= 0) return icmp
 
-        // روش 2 (fallback): TCP connect روی پورت 53
-        return pingTcp(dnsIp, 53)
+        // روش 2: TCP connect روی پورت‌های رایج
+        for (port in intArrayOf(53, 443, 80)) {
+            val tcp = pingTcp(dnsIp, port)
+            if (tcp >= 0) return tcp
+        }
+
+        // روش 3: UDP DNS query
+        return pingDnsUdp(dnsIp)
+    }
+
+    /** ICMP ping - مثل دستور ping در ترموکس */
+    private fun pingIcmp(host: String): Int {
+        return try {
+            val address = InetAddress.getByName(host)
+            val start = System.currentTimeMillis()
+            val reachable = address.isReachable(2000)
+            val elapsed = (System.currentTimeMillis() - start).toInt()
+            if (reachable && elapsed in 0..3000) elapsed else -1
+        } catch (e: Exception) {
+            -1
+        }
     }
 
     private fun pingDnsUdp(dnsIp: String): Int {
@@ -140,7 +161,7 @@ class MainActivity: FlutterActivity() {
             val query = buildDnsQuery("google.com")
 
             socket = DatagramSocket()
-            socket.soTimeout = 2000
+            socket.soTimeout = 1500
 
             val sendPacket = DatagramPacket(query, query.size, address, 53)
             val responseBuffer = ByteArray(512)
@@ -164,7 +185,7 @@ class MainActivity: FlutterActivity() {
         return try {
             socket = Socket()
             val start = System.currentTimeMillis()
-            socket.connect(InetSocketAddress(host, port), 2000)
+            socket.connect(InetSocketAddress(host, port), 1500)
             val elapsed = (System.currentTimeMillis() - start).toInt()
             if (elapsed in 0..3000) elapsed else -1
         } catch (e: Exception) {

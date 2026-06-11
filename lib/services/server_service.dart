@@ -18,6 +18,13 @@ class ServerService {
     return prefs.getInt('concurrent_tests') ?? 100; // پیش‌فرض 100
   }
 
+  /// آیا حالت Deep Scan فعال است؟ (برای اینترنت ضعیف یا محدودیت دولتی)
+  /// در این حالت اپ با دقت بیشتر، تلاش مجدد و آستانه‌ی پینگ بالاتر اسکن می‌کند.
+  static Future<bool> isDeepScanEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('deep_scan') ?? false;
+  }
+
   /// Fetch servers from URL
   Future<List<VpnServer>> fetchServers({bool forceRefresh = false}) async {
     try {
@@ -121,47 +128,80 @@ class ServerService {
   }
 
   /// Test server connectivity (actual SSTP port check) - سختگیرانه‌تر
+  ///
+  /// در حالت Deep Scan (برای اینترنت ضعیف یا محدودیت دولتی):
+  /// - تایم‌اوت اتصال کوتاه‌تر (3 ثانیه) برای رد سریع سرورهای فیلترشده
+  /// - تا 3 بار تلاش مجدد روی هر سرور (مقابله با قطعی‌های لحظه‌ای)
+  /// - آستانه‌ی پینگ بالاتر (2000ms) تا سرورهای کندتر هم برای کاربرانِ
+  ///   با اینترنت ضعیف قابل‌استفاده باقی بمانند
   Future<int?> testServerConnectivity(VpnServer server) async {
+    final bool deepScan = await isDeepScanEnabled();
+
+    // پارامترها بر اساس حالت Deep Scan
+    final Duration connectTimeout =
+        deepScan ? const Duration(seconds: 3) : const Duration(seconds: 5);
+    final int maxAttempts = deepScan ? 3 : 1; // تلاش مجدد فقط در Deep Scan
+    final int pingThreshold = deepScan ? 2000 : 800; // آستانه‌ی پذیرش
+
+    int? bestPing;
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      final ping = await _singleConnectivityTest(
+        server,
+        connectTimeout,
+        pingThreshold,
+      );
+      if (ping != null) {
+        // بهترین (کمترین) پینگ بین تلاش‌ها را نگه می‌داریم
+        if (bestPing == null || ping < bestPing) {
+          bestPing = ping;
+        }
+        // در حالت عادی همان اولین موفقیت کافی است
+        if (!deepScan) break;
+      }
+    }
+    return bestPing;
+  }
+
+  /// یک بار تست اتصال به سرور و برگرداندن پینگ (یا null)
+  Future<int?> _singleConnectivityTest(
+    VpnServer server,
+    Duration connectTimeout,
+    int pingThreshold,
+  ) async {
     try {
       final stopwatch = Stopwatch()..start();
-      
-      // تست اتصال واقعی به پورت SSTP با تایم‌اوت بیشتر (5 ثانیه)
+
       final socket = await Socket.connect(
         server.address,
         server.port,
-        timeout: const Duration(seconds: 5), // تایم‌اوت بزرگتر
+        timeout: connectTimeout,
       );
-      
+
       stopwatch.stop();
-      
+
       // تست دقیق‌تر: چک کردن اینکه سرور واقعاً پاسخ میده
       try {
-        // ارسال داده تست واقعی
         socket.write('CONNECT\r\n');
         await socket.flush();
-        
-        // صبر کمی برای پاسخ
+
         await Future.delayed(const Duration(milliseconds: 100));
-        
-        // چک کردن اینکه سوکت هنوز زنده است
+
         if (socket.remoteAddress.address.isEmpty) {
           await socket.close();
           return null; // سرور فیک - پینگ نداد
         }
-        
-        // تلاش برای خواندن هر داده‌ای - اگه هیچی نیومد هم OK
-        // مهم اینه که سوکت باز بمونه
+
         bool socketAlive = true;
         try {
           socket.listen(
-            (data) {}, 
+            (data) {},
             onDone: () => socketAlive = false,
             onError: (e) => socketAlive = false,
             cancelOnError: true,
           );
-          
+
           await Future.delayed(const Duration(milliseconds: 200));
-          
+
           if (!socketAlive) {
             await socket.close();
             return null; // سرور قطع کرد - فیک است
@@ -173,14 +213,11 @@ class ServerService {
         await socket.close();
         return null; // خطا - سرور قابل اتصال نیست
       }
-      
+
       await socket.close();
-      
+
       final ping = stopwatch.elapsedMilliseconds;
-      
-      // سختگیرانه: فقط < 800ms (کمی بیشتر از قبل برای اطمینان از سرور سالم)
-      // این تضمین می‌کند سرور واقعاً قابل اتصال و پایدار است
-      return ping < 800 ? ping : null;
+      return ping < pingThreshold ? ping : null;
     } catch (e) {
       return null; // Server unreachable
     }

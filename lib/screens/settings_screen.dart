@@ -20,6 +20,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _parallelConnection = false; // سوییچ اتصال موازی
   bool _killSwitch = false; // Kill Switch
   bool _useCustomServer = false; // سوییچ استفاده از سرور اختصاصی
+  bool _deepScan = false; // اسکن عمیق (برای اینترنت ضعیف/محدودیت دولتی)
 
   @override
   void initState() {
@@ -38,6 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _parallelConnection = prefs.getBool('parallel_connection') ?? false;
       _killSwitch = prefs.getBool('kill_switch') ?? false;
       _useCustomServer = prefs.getBool('use_custom_server') ?? false;
+      _deepScan = prefs.getBool('deep_scan') ?? false;
     });
   }
 
@@ -276,6 +278,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                         ),
+                      ),
+
+                      const SizedBox(height: 20),
+                      Divider(color: isDark ? Colors.white12 : Colors.black12),
+                      const SizedBox(height: 12),
+
+                      // 🔍 Deep Scan - اسکن عمیق برای اینترنت ضعیف یا محدودیت دولتی
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.travel_explore,
+                            color: _deepScan
+                                ? (isDark ? const Color(0xFF00FF88) : Colors.blue)
+                                : (isDark ? Colors.white38 : Colors.black38),
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Deep Scan',
+                                  style: TextStyle(
+                                    color: isDark ? Colors.white : Colors.black87,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _deepScan
+                                      ? 'فعال: اسکن دقیق‌تر با تایم‌اوت کمتر و تلاش بیشتر'
+                                      : 'برای اینترنت ضعیف یا محدودیت شدید روشن کنید',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? Colors.white38 : Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch(
+                            value: _deepScan,
+                            onChanged: (value) async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              setState(() {
+                                _deepScan = value;
+                              });
+                              final prefs = await SharedPreferences.getInstance();
+                              await prefs.setBool('deep_scan', value);
+                              messenger.showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    value
+                                        ? '🔍 Deep Scan فعال شد - اسکن با دقت بیشتر'
+                                        : 'Deep Scan خاموش شد',
+                                  ),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                            activeTrackColor:
+                                isDark ? const Color(0xFF00FF88) : Colors.blue,
+                          ),
+                        ],
                       ),
                     ],
                   ),
