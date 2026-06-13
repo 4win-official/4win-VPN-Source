@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
+import '../models/dns_server.dart';
 import 'slowdns_configs_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -43,13 +44,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  /// نام نمایشی صحیح برای هر پروتکل (رفع باگ نمایش اشتباه «Direct DNS»)
+  /// Returns the current Custom DNS value if it matches one of the known DNS
+  /// servers (so the dropdown can highlight it), otherwise null.
+  String? _selectedSstpDnsValue() {
+    final current = _dnsController.text.trim();
+    if (current.isEmpty) return null;
+    final match = DnsServer.getPublicDnsServers()
+        .any((d) => d.primaryDns == current);
+    return match ? current : null;
+  }
+
+  /// Correct display name for each protocol
   String _protocolDisplayName(String protocol) {
     switch (protocol) {
       case 'sstp':
         return 'SSTP';
       case 'direct_dns':
-        return 'Direct DNS';
+        return 'DNS changer';
       case 'openvpn':
         return 'OpenVPN';
       case 'slowdns':
@@ -113,8 +124,78 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _SettingsSection(
                     title: 'SSTP Settings',
                     children: [
+                      // DNS server picker (same list as DNS changer servers).
+                      // Disabled when Deep Scan is on (app tries every DNS automatically).
+                      Text(
+                        'DNS Server',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Opacity(
+                        opacity: _deepScan ? 0.4 : 1.0,
+                        child: IgnorePointer(
+                          ignoring: _deepScan,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: isDark ? Colors.white24 : Colors.black26,
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: DropdownButton<String>(
+                              value: _selectedSstpDnsValue(),
+                              isExpanded: true,
+                              underline: const SizedBox.shrink(),
+                              dropdownColor:
+                                  isDark ? const Color(0xFF1A1A1A) : Colors.white,
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontSize: 14,
+                              ),
+                              hint: Text(
+                                'Select a DNS server',
+                                style: TextStyle(
+                                  color: isDark ? Colors.white38 : Colors.black38,
+                                ),
+                              ),
+                              items: DnsServer.getPublicDnsServers().map((dns) {
+                                return DropdownMenuItem<String>(
+                                  value: dns.primaryDns,
+                                  child: Text('${dns.name}  •  ${dns.primaryDns}'),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                if (value != null) {
+                                  setState(() {
+                                    _dnsController.text = value;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_deepScan)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            'Disabled while Deep Scan is on — the app tests every DNS automatically.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? Colors.white38 : Colors.black54,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+
                       TextField(
                         controller: _dnsController,
+                        enabled: !_deepScan,
                         style: TextStyle(
                           color: isDark ? Colors.white : Colors.black87,
                         ),
@@ -132,6 +213,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           focusedBorder: OutlineInputBorder(
                             borderSide: BorderSide(
                               color: isDark ? const Color(0xFF00FF88) : Colors.blue,
+                            ),
+                          ),
+                          disabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                              color: isDark ? Colors.white12 : Colors.black12,
                             ),
                           ),
                         ),
@@ -310,8 +396,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 const SizedBox(height: 4),
                                 Text(
                                   _deepScan
-                                      ? 'فعال: اسکن دقیق‌تر با تایم‌اوت کمتر و تلاش بیشتر'
-                                      : 'برای اینترنت ضعیف یا محدودیت شدید روشن کنید',
+                                      ? 'On: deeper scan, shorter timeout, more retries'
+                                      : 'Turn on for weak internet or heavy censorship',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: isDark ? Colors.white38 : Colors.black54,
@@ -333,8 +419,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 SnackBar(
                                   content: Text(
                                     value
-                                        ? '🔍 Deep Scan فعال شد - اسکن با دقت بیشتر'
-                                        : 'Deep Scan خاموش شد',
+                                        ? '🔍 Deep Scan enabled — scanning more thoroughly'
+                                        : 'Deep Scan disabled',
                                   ),
                                   duration: const Duration(seconds: 2),
                                 ),
@@ -353,7 +439,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // DNS-specific settings
                 if (provider.selectedProtocol == 'direct_dns') ...[
                   _SettingsSection(
-                    title: 'Direct DNS Settings',
+                    title: 'DNS changer Settings',
                     children: [
                       Text(
                         'DNS servers can be managed from the Server List screen',

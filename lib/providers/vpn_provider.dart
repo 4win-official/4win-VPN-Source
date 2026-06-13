@@ -139,6 +139,13 @@ class VpnProvider with ChangeNotifier {
   void _startDurationTimer() {
     _stopDurationTimer();
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      // برای direct_dns و slowdns سرویس SSTP فعال نیست و getConnectionDuration
+      // مقدار null برمی‌گرداند؛ پس مدت‌زمان را خودمان به‌صورت دستی می‌شماریم.
+      if (_selectedProtocol == 'direct_dns' || _selectedProtocol == 'slowdns') {
+        _connectionDuration += const Duration(seconds: 1);
+        notifyListeners();
+        return;
+      }
       final duration = _vpnService.getConnectionDuration();
       if (duration != null) {
         _connectionDuration = duration;
@@ -515,32 +522,45 @@ class VpnProvider with ChangeNotifier {
       await testAllServers();
     }
 
+    // تنظیمات DNS برای اتصال SSTP
+    final bool deepScan = prefs.getBool('deep_scan') ?? false;
+    final String chosenDns = (prefs.getString('custom_dns') ?? '8.8.8.8').trim();
+
+    // در حالت Deep Scan هر سرور با چند DNS مختلف تست می‌شود (ممکن است یک سرور
+    // با DNS گوگل و سرور دیگری با DNS کلادفلر کار کند). در حالت عادی فقط از
+    // DNS انتخاب‌شده‌ی کاربر استفاده می‌شود.
+    final List<String> dnsCandidates = deepScan
+        ? _deepScanDnsList()
+        : [chosenDns.isNotEmpty ? chosenDns : '8.8.8.8'];
+
     // 4️⃣ Try connecting one by one (best ping first)
     for (var server in _servers) {
       _selectedServer = server;
       notifyListeners();
-      
-      try {
-        // Request VPN permission first
-        final permissionGranted = await _vpnService.requestPermission();
-        
-        if (!permissionGranted) {
-          // No error message - just keep trying
-          return;
+
+      for (final dns in dnsCandidates) {
+        try {
+          // Request VPN permission first
+          final permissionGranted = await _vpnService.requestPermission();
+
+          if (!permissionGranted) {
+            // No error message - just keep trying
+            return;
+          }
+
+          final success = await _vpnService.connect(server, dns: dns);
+
+          if (success) {
+            // Success - exit loop
+            return;
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Failed: ${server.fullAddress} via DNS $dns: $e');
+          }
+          // Continue to next DNS / next server
+          continue;
         }
-        
-        final success = await _vpnService.connect(server);
-        
-        if (success) {
-          // Success - exit loop
-          return;
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('⚠️ Failed to connect to ${server.fullAddress}: $e');
-        }
-        // Continue to next server
-        continue;
       }
     }
 
@@ -550,7 +570,24 @@ class VpnProvider with ChangeNotifier {
       await connect();
     }
   }
-  
+
+  /// لیست DNS هایی که در حالت Deep Scan برای هر سرور امتحان می‌شوند.
+  /// ترکیبی از DNS های جهانی و DNS های ضد تحریم ایرانی تا بیشترین شانس
+  /// اتصال برای کاربرانِ با اینترنت محدودشده فراهم شود.
+  List<String> _deepScanDnsList() {
+    return const [
+      '8.8.8.8',          // Google
+      '1.1.1.1',          // Cloudflare
+      '178.22.122.100',   // Shekan
+      '185.51.200.2',     // Shekan secondary
+      '10.202.10.10',     // Radar Game
+      '10.202.10.202',    // Online.403
+      '78.157.42.100',    // Electro
+      '185.55.226.26',    // Begzar
+      '208.67.222.222',   // OpenDNS
+    ];
+  }
+
   /// Connect via Direct DNS (separate from SSTP)
   Future<void> _connectDirectDns() async {
     // Check if DNS server is selected

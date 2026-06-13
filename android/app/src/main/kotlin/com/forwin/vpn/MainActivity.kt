@@ -127,6 +127,13 @@ class MainActivity: FlutterActivity() {
      * در صورت ناموفق بودن همه، -1 برمی‌گرداند.
      */
     private fun pingDnsServer(dnsIp: String): Int {
+        // روش اصلی: پینگ از طریق سرویس VPN با سوکت protect-شده.
+        // این تنها روشی است که موقع فعال بودن تونل دایرکت دی‌ان‌اس قطعاً کار می‌کند،
+        // چون سوکت پینگ از تونل خارج می‌شود و مستقیم به DNS server می‌رسد.
+        val viaService = DnsVpnService.pingViaService(dnsIp)
+        if (viaService >= 0) return viaService
+        // viaService == -2 یعنی سرویس فعال نیست → ادامه با روش‌های مستقیم
+
         // روش 1: ICMP echo (دقیقاً مثل دستور ping ترموکس)
         val icmp = pingIcmp(dnsIp)
         if (icmp >= 0) return icmp

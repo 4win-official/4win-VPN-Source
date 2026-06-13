@@ -10,6 +10,11 @@ import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.nio.ByteBuffer
 
 /**
@@ -29,6 +34,19 @@ class DnsVpnService : VpnService() {
         const val EXTRA_DNS_SECONDARY = "dns_secondary"
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "dns_vpn_channel"
+
+        // ارجاع به نمونه‌ی فعال سرویس تا MainActivity بتواند پینگ protected بگیرد
+        @Volatile
+        var instance: DnsVpnService? = null
+
+        /**
+         * پینگ به سرور DNS از طریق سوکت protect-شده (خارج از تونل VPN).
+         * اگر سرویس فعال نباشد، -1 برمی‌گرداند تا caller روش دیگری امتحان کند.
+         */
+        fun pingViaService(dnsIp: String): Int {
+            val svc = instance ?: return -2 // سرویس فعال نیست
+            return svc.pingDnsProtected(dnsIp)
+        }
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -109,6 +127,7 @@ class DnsVpnService : VpnService() {
             
             if (vpnInterface != null) {
                 isRunning = true
+                instance = this // ثبت نمونه‌ی فعال برای پینگ protected
                 
                 // Start minimal packet handler thread
                 // This is required by VpnService but we don't actually process packets
@@ -164,6 +183,9 @@ class DnsVpnService : VpnService() {
     
     private fun stopVpn() {
         isRunning = false
+        if (instance === this) {
+            instance = null // پاک کردن نمونه‌ی فعال
+        }
         
         vpnThread?.interrupt()
         vpnThread = null
@@ -193,6 +215,87 @@ class DnsVpnService : VpnService() {
         }
     }
     
+    /**
+     * پینگ به سرور DNS از طریق سوکت‌های protect-شده (با VpnService.protect)
+     * تا ترافیک پینگ از تونل VPN عبور نکند و مستقیم به مقصد برسد.
+     * روش 1: UDP DNS query روی پورت 53. روش 2: TCP connect.
+     * خروجی: میلی‌ثانیه یا -1 در صورت ناموفق بودن.
+     */
+    fun pingDnsProtected(dnsIp: String): Int {
+        // روش 1: UDP DNS query با سوکت protect-شده
+        val udp = pingUdpProtected(dnsIp)
+        if (udp >= 0) return udp
+
+        // روش 2 (fallback): TCP روی پورت‌های رایج با سوکت protect-شده
+        for (port in intArrayOf(53, 443, 80)) {
+            val tcp = pingTcpProtected(dnsIp, port)
+            if (tcp >= 0) return tcp
+        }
+        return -1
+    }
+
+    private fun pingUdpProtected(dnsIp: String): Int {
+        var socket: DatagramSocket? = null
+        return try {
+            val address = InetAddress.getByName(dnsIp)
+            val query = buildDnsQuery("google.com")
+
+            socket = DatagramSocket()
+            // protect: سوکت را از تونل VPN خارج می‌کند
+            protect(socket)
+            socket.soTimeout = 2000
+
+            val sendPacket = DatagramPacket(query, query.size, address, 53)
+            val responseBuffer = ByteArray(512)
+            val responsePacket = DatagramPacket(responseBuffer, responseBuffer.size)
+
+            val start = System.currentTimeMillis()
+            socket.send(sendPacket)
+            socket.receive(responsePacket)
+            val elapsed = (System.currentTimeMillis() - start).toInt()
+            if (elapsed in 0..3000) elapsed else -1
+        } catch (e: Exception) {
+            -1
+        } finally {
+            socket?.close()
+        }
+    }
+
+    private fun pingTcpProtected(host: String, port: Int): Int {
+        var socket: Socket? = null
+        return try {
+            socket = Socket()
+            // protect قبل از connect
+            protect(socket)
+            val start = System.currentTimeMillis()
+            socket.connect(InetSocketAddress(host, port), 2000)
+            val elapsed = (System.currentTimeMillis() - start).toInt()
+            if (elapsed in 0..3000) elapsed else -1
+        } catch (e: Exception) {
+            -1
+        } finally {
+            try { socket?.close() } catch (e: Exception) {}
+        }
+    }
+
+    /** ساخت بسته‌ی استاندارد DNS query (نوع A) */
+    private fun buildDnsQuery(domain: String): ByteArray {
+        val out = ArrayList<Byte>()
+        fun b(v: Int) = out.add(v.toByte())
+        b(0x12); b(0x34) // Transaction ID
+        b(0x01); b(0x00) // Flags
+        b(0x00); b(0x01) // QDCOUNT
+        b(0x00); b(0x00); b(0x00); b(0x00); b(0x00); b(0x00) // AN/NS/AR
+        for (part in domain.split(".")) {
+            b(part.length)
+            for (c in part.toByteArray(Charsets.US_ASCII)) out.add(c)
+        }
+        b(0x00) // end of name
+        b(0x00); b(0x01) // QTYPE = A
+        b(0x00); b(0x01) // QCLASS = IN
+        return out.toByteArray()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         stopVpn()

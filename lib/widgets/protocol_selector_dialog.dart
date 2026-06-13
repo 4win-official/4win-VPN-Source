@@ -92,7 +92,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         size: 28,
                       ),
                       title: Text(
-                        'Direct DNS',
+                        'DNS changer',
                         style: TextStyle(
                           color: isDark ? Colors.white : Colors.black87,
                           fontWeight: vpnProvider.selectedProtocol == 'direct_dns'

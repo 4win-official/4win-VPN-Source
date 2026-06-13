@@ -45,7 +45,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
     // اگر لینک مستقیم APK نبود، صفحه ریلیز را باز کن
     if (apkUrl == null || apkUrl.isEmpty) {
       setState(() {
-        _error = 'فایل نصبی پیدا نشد. لطفاً از صفحه گیت‌هاب دانلود کنید.';
+        _error = 'Installer not found. Please download from the GitHub page.';
       });
       return;
     }
@@ -75,7 +75,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
     } else {
       setState(() {
         _isDownloading = false;
-        _error = 'دانلود ناموفق بود. دوباره تلاش کنید.';
+        _error = 'Download failed. Please try again.';
       });
     }
   }
@@ -97,7 +97,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'آپدیت جدید موجود است',
+              'New update available',
               style: TextStyle(
                 color: textColor,
                 fontSize: 18,
@@ -112,12 +112,12 @@ class _UpdateDialogState extends State<UpdateDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'نسخه فعلی شما: ${widget.currentVersion}',
+            'Your current version: ${widget.currentVersion}',
             style: TextStyle(color: subTextColor, fontSize: 14),
           ),
           const SizedBox(height: 4),
           Text(
-            'نسخه جدید: ${widget.updateInfo.latestVersion}',
+            'New version: ${widget.updateInfo.latestVersion}',
             style: TextStyle(
               color: accent,
               fontSize: 15,
@@ -127,7 +127,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           const SizedBox(height: 12),
           if (widget.updateInfo.releaseNotes != null) ...[
             Text(
-              'تغییرات:',
+              'Changes:',
               style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 4),
@@ -152,8 +152,8 @@ class _UpdateDialogState extends State<UpdateDialog> {
             const SizedBox(height: 8),
             Text(
               _progress > 0
-                  ? 'در حال دانلود... ${(_progress * 100).toStringAsFixed(0)}%'
-                  : 'در حال دانلود...',
+                  ? 'Downloading... ${(_progress * 100).toStringAsFixed(0)}%'
+                  : 'Downloading...',
               style: TextStyle(color: subTextColor, fontSize: 13),
             ),
           ],
@@ -172,7 +172,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
                 child: Text(
-                  'بعداً',
+                  'Later',
                   style: TextStyle(color: subTextColor),
                 ),
               ),
@@ -187,7 +187,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                 ),
                 icon: const Icon(Icons.download, size: 18),
                 label: const Text(
-                  'دانلود میکنم',
+                  'Download',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),

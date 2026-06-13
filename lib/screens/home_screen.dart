@@ -307,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         ),
                                         const SizedBox(width: 12),
                                         Text(
-                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : "Direct DNS"}',
+                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : "DNS changer"}',
                                           style: TextStyle(
                                             fontSize: 14,
                                             color: isDark ? Colors.white : Colors.black87,

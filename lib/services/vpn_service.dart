@@ -111,7 +111,7 @@ class VpnService {
   }
   
   /// Connect to SSTP VPN server
-  Future<bool> connect(VpnServer server) async {
+  Future<bool> connect(VpnServer server, {String dns = '8.8.8.8'}) async {
     try {
       _addLog('🚀 Starting connection to ${server.fullAddress}');
       _addLog('   Server: ${server.address}');
@@ -146,8 +146,8 @@ class VpnService {
       _addLog('💾 Saving server configuration...');
       await _sstpFlutter.saveServerData(server: sstpServer);
       
-      _addLog('🌐 Enabling DNS (8.8.8.8)...');
-      await _sstpFlutter.enableDns(dns: '8.8.8.8');
+      _addLog('🌐 Enabling DNS ($dns)...');
+      await _sstpFlutter.enableDns(dns: dns);
       
       _addLog('🔌 Initiating VPN connection...');
       await _sstpFlutter.connectVpn();
