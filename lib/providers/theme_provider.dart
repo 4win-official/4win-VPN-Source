@@ -33,8 +33,9 @@ class ThemeProvider with ChangeNotifier {
   }
 
   Future<void> toggleTheme() async {
-    // تم برفی، صورتی و بارانی قفل هستند
-    if (_selectedTheme == AppTheme.snow || _selectedTheme == AppTheme.pink || _selectedTheme == AppTheme.rain) return;
+    // تم برفی و بارانی قفل هستند (همیشه دارک). تم صورتی اکنون نسخه شب دارد
+    // و می‌تواند بین حالت روز و شب جابجا شود.
+    if (_selectedTheme == AppTheme.snow || _selectedTheme == AppTheme.rain) return;
     
     _isDarkMode = !_isDarkMode;
     final prefs = await SharedPreferences.getInstance();
@@ -53,11 +54,8 @@ class ThemeProvider with ChangeNotifier {
       await prefs.setBool(_darkModeKey, true);
     }
     
-    // تم صورتی: فقط لایت مود
-    if (theme == AppTheme.pink) {
-      _isDarkMode = false;
-      await prefs.setBool(_darkModeKey, false);
-    }
+    // تم صورتی: حالا هم نسخه روز و هم نسخه شب دارد. هنگام انتخاب،
+    // حالت فعلی دارک/لایت کاربر حفظ می‌شود و با دکمه تعویض قابل تغییر است.
     
     // تم بارانی: دارک مود فعال
     if (theme == AppTheme.rain) {

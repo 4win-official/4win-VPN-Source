@@ -22,6 +22,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _killSwitch = false; // Kill Switch
   bool _useCustomServer = false; // سوییچ استفاده از سرور اختصاصی
   bool _deepScan = false; // اسکن عمیق (برای اینترنت ضعیف/محدودیت دولتی)
+  String _mtuMode = 'off'; // حالت MTU: off | auto | manual
+  final _mtuController = TextEditingController(text: '1400'); // مقدار دستی MTU
 
   @override
   void initState() {
@@ -41,6 +43,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _killSwitch = prefs.getBool('kill_switch') ?? false;
       _useCustomServer = prefs.getBool('use_custom_server') ?? false;
       _deepScan = prefs.getBool('deep_scan') ?? false;
+      // مهاجرت از سوییچ قدیمی auto_mtu به حالت سه‌گانه جدید
+      final legacyAuto = prefs.getBool('auto_mtu');
+      _mtuMode = prefs.getString('mtu_mode') ??
+          (legacyAuto == true ? 'auto' : 'off');
+      _mtuController.text = (prefs.getInt('manual_mtu') ?? 1400).toString();
     });
   }
 
@@ -367,6 +374,135 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
 
                       const SizedBox(height: 20),
+                      Divider(color: isDark ? Colors.white12 : Colors.black12),
+                      const SizedBox(height: 12),
+
+                      // ⚙️ MTU - تنظیم واقعی MTU پروتکل SSTP (Off / Auto / Manual)
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.tune,
+                            color: _mtuMode != 'off'
+                                ? (isDark ? const Color(0xFF00FF88) : Colors.blue)
+                                : (isDark ? Colors.white38 : Colors.black38),
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'MTU',
+                                  style: TextStyle(
+                                    color: isDark ? Colors.white : Colors.black87,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _mtuMode == 'auto'
+                                      ? 'Auto: detects the best MTU (1280–1500) before connecting'
+                                      : _mtuMode == 'manual'
+                                          ? 'Manual: uses your value (1280–1500)'
+                                          : 'Off: default MTU (1500). Use Auto/Manual if data does not pass',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? Colors.white38 : Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      // انتخاب حالت MTU با سه دکمه
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'off', label: Text('Off')),
+                          ButtonSegment(value: 'auto', label: Text('Auto')),
+                          ButtonSegment(value: 'manual', label: Text('Manual')),
+                        ],
+                        selected: {_mtuMode},
+                        showSelectedIcon: false,
+                        onSelectionChanged: (selection) async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          final mode = selection.first;
+                          setState(() {
+                            _mtuMode = mode;
+                          });
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setString('mtu_mode', mode);
+                          // پاکسازی فلگ قدیمی
+                          await prefs.remove('auto_mtu');
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                mode == 'auto'
+                                    ? '⚙️ Auto MTU on — best MTU detected on connect'
+                                    : mode == 'manual'
+                                        ? '⚙️ Manual MTU on — set your value below'
+                                        : 'MTU set to default (1500)',
+                              ),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                      ),
+                      // فیلد ورودی دستی MTU (فقط در حالت manual)
+                      if (_mtuMode == 'manual') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _mtuController,
+                          keyboardType: TextInputType.number,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: 'MTU value (1280 – 1500)',
+                            labelStyle: TextStyle(
+                              color: isDark ? Colors.white54 : Colors.black54,
+                            ),
+                            helperText: 'Lower values help when data does not pass',
+                            helperStyle: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? Colors.white38 : Colors.black45,
+                            ),
+                            border: const OutlineInputBorder(),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(
+                                color: isDark ? Colors.white24 : Colors.black26,
+                              ),
+                            ),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                Icons.save,
+                                color: isDark ? const Color(0xFF00FF88) : Colors.blue,
+                              ),
+                              tooltip: 'Save MTU',
+                              onPressed: () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                final parsed = int.tryParse(_mtuController.text.trim());
+                                final value = (parsed ?? 1400).clamp(1280, 1500);
+                                setState(() {
+                                  _mtuController.text = value.toString();
+                                });
+                                final prefs = await SharedPreferences.getInstance();
+                                await prefs.setInt('manual_mtu', value);
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text('MTU saved: $value (applied on next connect)'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
                       Divider(color: isDark ? Colors.white12 : Colors.black12),
                       const SizedBox(height: 12),
 

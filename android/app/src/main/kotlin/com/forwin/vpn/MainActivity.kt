@@ -1,5 +1,6 @@
 package com.forwin.vpn
 
+import android.content.Context
 import android.content.Intent
 import android.net.TrafficStats
 import android.net.VpnService
@@ -80,6 +81,32 @@ class MainActivity: FlutterActivity() {
                         }
                     }.start()
                 }
+                "setSstpMtu" -> {
+                    // Write the sstp_flutter plugin's MTU value into the default
+                    // SharedPreferences (the plugin reads PPP_MTU from there as a String).
+                    // This really applies the MTU to the SSTP/PPP tunnel on the next connect.
+                    val mtu = call.argument<Int>("mtu") ?: 1400
+                    val ok = setSstpMtu(mtu)
+                    result.success(ok)
+                }
+                "detectBestMtu" -> {
+                    // REAL MTU auto-detection. Probes the path to the given host using
+                    // ping with the Don't-Fragment bit set, binary-searching for the
+                    // largest payload that passes without fragmentation, then converts to
+                    // the corresponding interface MTU and clamps to [minMtu, maxMtu].
+                    // Returns the detected MTU (Int). Falls back to 1400 if probing fails.
+                    val host = call.argument<String>("host") ?: "8.8.8.8"
+                    val minMtu = call.argument<Int>("minMtu") ?: 1280
+                    val maxMtu = call.argument<Int>("maxMtu") ?: 1500
+                    Thread {
+                        val mtu = detectBestMtu(host, minMtu, maxMtu)
+                        // Persist it immediately so the next SSTP connect uses it.
+                        setSstpMtu(mtu)
+                        runOnUiThread {
+                            result.success(mtu)
+                        }
+                    }.start()
+                }
                 else -> result.notImplemented()
             }
         }
@@ -146,6 +173,110 @@ class MainActivity: FlutterActivity() {
 
         // روش 3: UDP DNS query
         return pingDnsUdp(dnsIp)
+    }
+
+    /**
+     * Auto-MTU for SSTP. The sstp_flutter plugin reads its PPP MTU from the
+     * default SharedPreferences under the key "PPP_MTU" (stored as a String,
+     * see preference/accessor/int.kt). We clamp to the plugin's valid range
+     * (68..2000) and write it so the next connect uses the new MTU.
+     */
+    private fun setSstpMtu(mtu: Int): Boolean {
+        return try {
+            val clamped = mtu.coerceIn(68, 2000)
+            // PreferenceManager.getDefaultSharedPreferences(context) (used by the
+            // sstp_flutter plugin) is backed by the SharedPreferences file named
+            // "<packageName>_preferences". We open the exact same file here so the
+            // PPP_MTU we write is really read by the plugin on connect — without
+            // needing the androidx.preference dependency in the app module.
+            val prefs = applicationContext.getSharedPreferences(
+                "${applicationContext.packageName}_preferences",
+                Context.MODE_PRIVATE
+            )
+            prefs.edit().putString("PPP_MTU", clamped.toString()).apply()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * REAL MTU path discovery to [host].
+     *
+     * Uses `ping` with the Don't-Fragment (DF) bit set (`-M do`) and a controlled
+     * payload size (`-s`). When a payload is too large to traverse the path
+     * without fragmentation, the router replies "Frag needed" / "Message too long"
+     * and ping fails. We binary-search for the largest payload that succeeds.
+     *
+     * payload(success) -> path MTU = payload + 28 (20 IPv4 header + 8 ICMP header).
+     * We then subtract a conservative SSTP/PPP/TLS encapsulation overhead so the
+     * value we write is a safe inner (PPP) MTU, and clamp into [minMtu, maxMtu].
+     *
+     * Returns the detected MTU, or 1400 as a safe fallback if probing is not
+     * possible (e.g. ICMP blocked).
+     */
+    private fun detectBestMtu(host: String, minMtu: Int, maxMtu: Int): Int {
+        // SSTP runs PPP over TLS over TCP. Encapsulation overhead is roughly:
+        // IP(20) + TCP(20) + TLS(~29) + SSTP(~4) + PPP(~8) ≈ 80+ bytes. We keep a
+        // conservative margin so the inner MTU never causes fragmentation.
+        val encapOverhead = 80
+        // ICMP probe needs payload = mtu - 28 (IP + ICMP headers).
+        val maxPayload = maxMtu - 28
+        val minPayload = minMtu - 28
+
+        var bestPayload = -1
+        var lo = minPayload
+        var hi = maxPayload
+
+        // First confirm the minimum even works; if not, ICMP is likely blocked.
+        if (!pingWithDf(host, minPayload)) {
+            // Try once more with a tiny payload to distinguish "ICMP blocked"
+            // from "path too small". If even 64 bytes fails, fall back.
+            if (!pingWithDf(host, 64)) {
+                return 1400.coerceIn(minMtu, maxMtu)
+            }
+            lo = 64
+        } else {
+            bestPayload = minPayload
+        }
+
+        // Binary search for the largest passing payload.
+        var iterations = 0
+        while (lo <= hi && iterations < 16) {
+            iterations++
+            val mid = (lo + hi) / 2
+            if (pingWithDf(host, mid)) {
+                bestPayload = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+
+        if (bestPayload < 0) return 1400.coerceIn(minMtu, maxMtu)
+
+        val pathMtu = bestPayload + 28
+        val innerMtu = pathMtu - encapOverhead
+        return innerMtu.coerceIn(minMtu, maxMtu)
+    }
+
+    /**
+     * Sends a single ICMP echo to [host] with payload [payloadSize] bytes and the
+     * Don't-Fragment bit set. Returns true if it succeeds (path can carry this
+     * size without fragmentation), false otherwise.
+     */
+    private fun pingWithDf(host: String, payloadSize: Int): Boolean {
+        return try {
+            // -c 1 : one packet, -W 2 : 2s timeout, -M do : set DF, -s : payload size
+            val process = Runtime.getRuntime().exec(
+                arrayOf("/system/bin/ping", "-c", "1", "-W", "2", "-M", "do", "-s", payloadSize.toString(), host)
+            )
+            val finished = process.waitFor()
+            // ping exit code 0 == reply received (DF size passed).
+            finished == 0
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /** ICMP ping - مثل دستور ping در ترموکس */

@@ -67,6 +67,46 @@ class DnsVpnConnection {
     }
   }
 
+  /// Manually set the SSTP MTU. Writes the sstp_flutter plugin's PPP MTU value
+  /// natively (into the plugin's default SharedPreferences) so the next connect
+  /// really uses it. [mtu] should be in 1280..1500. Returns true on success.
+  static Future<bool> setSstpMtu(int mtu) async {
+    try {
+      final result = await platform.invokeMethod('setSstpMtu', {'mtu': mtu});
+      return result == true;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ setSstpMtu error: $e');
+      }
+      return false;
+    }
+  }
+
+  /// REAL automatic MTU detection. Probes the path to [host] using DF-bit pings,
+  /// binary-searching for the largest non-fragmenting size, converts it to a safe
+  /// inner (PPP) MTU within [minMtu]..[maxMtu], persists it natively, and returns
+  /// the detected MTU. Returns null on failure.
+  static Future<int?> detectBestMtu(
+    String host, {
+    int minMtu = 1280,
+    int maxMtu = 1500,
+  }) async {
+    try {
+      final result = await platform.invokeMethod('detectBestMtu', {
+        'host': host,
+        'minMtu': minMtu,
+        'maxMtu': maxMtu,
+      });
+      if (result is int) return result;
+      return null;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ detectBestMtu error: $e');
+      }
+      return null;
+    }
+  }
+
   /// مجموع ترافیک رد و بدل شده دستگاه (بایت) را برمی‌گرداند
   /// خروجی: {'rxBytes': int, 'txBytes': int}
   static Future<Map<String, int>> getStats() async {

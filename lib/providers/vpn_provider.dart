@@ -526,6 +526,13 @@ class VpnProvider with ChangeNotifier {
     final bool deepScan = prefs.getBool('deep_scan') ?? false;
     final String chosenDns = (prefs.getString('custom_dns') ?? '8.8.8.8').trim();
 
+    // تنظیم MTU برای SSTP. سه حالت:
+    //   'off'    : MTU پیش‌فرض (1500)
+    //   'manual' : مقدار دستی واردشده توسط کاربر (1280..1500)
+    //   'auto'   : تشخیص خودکار واقعی MTU با probe به سرور
+    final String mtuMode = prefs.getString('mtu_mode') ?? 'off';
+    final int manualMtu = (prefs.getInt('manual_mtu') ?? 1400).clamp(1280, 1500);
+
     // در حالت Deep Scan هر سرور با چند DNS مختلف تست می‌شود (ممکن است یک سرور
     // با DNS گوگل و سرور دیگری با DNS کلادفلر کار کند). در حالت عادی فقط از
     // DNS انتخاب‌شده‌ی کاربر استفاده می‌شود.
@@ -548,7 +555,12 @@ class VpnProvider with ChangeNotifier {
             return;
           }
 
-          final success = await _vpnService.connect(server, dns: dns);
+          final success = await _vpnService.connect(
+            server,
+            dns: dns,
+            mtuMode: mtuMode,
+            manualMtu: manualMtu,
+          );
 
           if (success) {
             // Success - exit loop

@@ -7,6 +7,7 @@ import 'package:sstp_flutter/ios_configuration_sstp.dart';
 import 'package:sstp_flutter/traffic.dart';
 import 'package:sstp_flutter/ssl_versions.dart';
 import '../models/vpn_server.dart';
+import 'dns_vpn_connection.dart';
 
 enum VpnConnectionStatus {
   disconnected,
@@ -110,8 +111,21 @@ class VpnService {
     }
   }
   
-  /// Connect to SSTP VPN server
-  Future<bool> connect(VpnServer server, {String dns = '8.8.8.8'}) async {
+  /// Connect to SSTP VPN server.
+  ///
+  /// MTU handling (all of these REALLY apply to the SSTP/PPP tunnel because they
+  /// write the sstp_flutter plugin's `PPP_MTU` preference natively before the
+  /// connect):
+  ///   * [mtuMode] == 'off'    -> restore the plugin default (1500).
+  ///   * [mtuMode] == 'manual' -> apply [manualMtu] (clamped to 1280..1500).
+  ///   * [mtuMode] == 'auto'   -> run a REAL DF-bit path-MTU probe to the server
+  ///                              and apply the detected value.
+  Future<bool> connect(
+    VpnServer server, {
+    String dns = '8.8.8.8',
+    String mtuMode = 'off',
+    int manualMtu = 1400,
+  }) async {
     try {
       _addLog('🚀 Starting connection to ${server.fullAddress}');
       _addLog('   Server: ${server.address}');
@@ -120,6 +134,37 @@ class VpnService {
       
       _updateStatus(VpnConnectionStatus.connecting);
       _connectedServer = server;
+
+      // MTU tuning: applied natively to the SSTP/PPP tunnel before saving config.
+      try {
+        switch (mtuMode) {
+          case 'manual':
+            final m = manualMtu.clamp(1280, 1500);
+            await DnsVpnConnection.setSstpMtu(m);
+            _addLog('🔧 SSTP MTU set manually to $m');
+            break;
+          case 'auto':
+            _addLog('🔎 Auto-detecting best MTU (DF-bit probe to ${server.address})...');
+            final detected = await DnsVpnConnection.detectBestMtu(
+              server.address,
+              minMtu: 1280,
+              maxMtu: 1500,
+            );
+            if (detected != null) {
+              _addLog('✅ Auto MTU detected & applied: $detected');
+            } else {
+              // Probe failed (ICMP blocked) -> use a safe value.
+              await DnsVpnConnection.setSstpMtu(1400);
+              _addLog('⚠️ MTU probe failed, applied safe 1400');
+            }
+            break;
+          default:
+            await DnsVpnConnection.setSstpMtu(1500);
+            _addLog('🔧 SSTP MTU set to default 1500');
+        }
+      } catch (e) {
+        _addLog('⚠️ Failed to set MTU: $e');
+      }
       
       // Create SSTP server configuration
       SSTPServer sstpServer = SSTPServer(

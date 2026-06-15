@@ -77,7 +77,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                 // تم صورتی
                 _ThemeCard(
                   title: 'Pink Theme 💕',
-                  description: 'Cute pink & white theme (Light mode only)',
+                  description: 'Cute pink theme with day & night versions',
                   icon: Icons.favorite,
                   color: const Color(0xFFFF69B4), // Hot pink
                   warningColor: const Color(0xFFFF1493), // Deep pink

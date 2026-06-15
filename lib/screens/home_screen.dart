@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../providers/theme_provider.dart';
@@ -86,16 +87,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isRainTheme = themeProvider.selectedTheme == AppTheme.rain;
     
     // Theme-specific colors
-    final bgColor = isPinkTheme 
-        ? const Color(0xFFFFF0F5) // لاوندر صورتی روشن
+    // تم صورتی اکنون نسخه روز و شب دارد:
+    //  - روز: پس‌زمینه لاوندر روشن
+    //  - شب: پس‌زمینه بنفش-صورتی تیره با لهجه‌های صورتی روشن
+    final bgColor = isPinkTheme
+        ? (isDark
+            ? const Color(0xFF2A1A24) // صورتی-بنفش خیلی تیره (نسخه شب)
+            : const Color(0xFFFFF0F5)) // لاوندر صورتی روشن (نسخه روز)
         : (isDark ? const Color(0xFF000000) : Colors.white); // سیاه کامل در دارک مود
     
     final iconColor = isPinkTheme
-        ? const Color(0xFFFF69B4) // صورتی داغ
+        ? (isDark
+            ? const Color(0xFFFF9EC4) // صورتی روشن برای کنتراست روی پس‌زمینه تیره
+            : const Color(0xFFFF69B4)) // صورتی داغ
         : (isDark ? Colors.white70 : Colors.black54);
     
     final textColor = isPinkTheme
-        ? const Color(0xFFFF1493) // صورتی تیره
+        ? (isDark
+            ? const Color(0xFFFFB6D9) // صورتی پاستلی روشن (نسخه شب)
+            : const Color(0xFFFF1493)) // صورتی تیره (نسخه روز)
         : (isDark ? Colors.white : Colors.black87);
     
     // تم پیکسلی می‌تونه دارک یا لایت باشه (بر خلاف تم برفی که فقط دارک است)
@@ -667,8 +677,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final themeProvider = context.watch<ThemeProvider>();
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
     
-    // Pink theme: همه چی صورتی
+    // Pink theme: همه چی صورتی (با نسخه شب)
     if (isPinkTheme) {
+      if (isDark) {
+        // نسخه شب: رنگ‌های صورتی نئونی/درخشان روی پس‌زمینه تیره
+        switch (status) {
+          case VpnConnectionStatus.connected:
+            return const Color(0xFFFF4FA3); // Neon pink
+          case VpnConnectionStatus.connecting:
+          case VpnConnectionStatus.disconnecting:
+            return const Color(0xFFFF7FB6); // Bright hot pink
+          case VpnConnectionStatus.disconnected:
+            return const Color(0xFF6E3B52); // Muted dark pink
+          case VpnConnectionStatus.error:
+            return const Color(0xFFFF5C7A); // Bright crimson-pink
+        }
+      }
       switch (status) {
         case VpnConnectionStatus.connected:
           return const Color(0xFFFF1493); // Deep pink
@@ -754,12 +778,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _handleLongPress(BuildContext context) {
-    Navigator.push(
-      context,
+  void _handleLongPress(BuildContext context) async {
+    // Show a quick rotating-gear indicator so the user knows a long-press is
+    // taking them to settings (works for every protocol). After the short
+    // animation we navigate to the Settings screen.
+    HapticFeedback.mediumImpact();
+    final navigator = Navigator.of(context);
+    await _showSettingsTransition(context);
+    if (!mounted) return;
+    await navigator.push(
       MaterialPageRoute(
         builder: (context) => const SettingsScreen(),
       ),
+    );
+  }
+
+  /// Displays a brief animated gear (cog) overlay indicating navigation to
+  /// settings. Resolves after the animation completes (~700ms).
+  Future<void> _showSettingsTransition(BuildContext context) {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black54,
+      builder: (dialogContext) => const _SettingsTransitionOverlay(),
     );
   }
 
@@ -768,5 +809,113 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
     final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
     return '$hours:$minutes:$seconds';
+  }
+}
+
+/// A short-lived overlay shown when the user long-presses the power button.
+/// It displays a rotating gear (cog) with a scale/fade-in animation plus a
+/// "Settings" label so the user understands they are heading to settings.
+/// It automatically closes itself once the animation completes.
+class _SettingsTransitionOverlay extends StatefulWidget {
+  const _SettingsTransitionOverlay();
+
+  @override
+  State<_SettingsTransitionOverlay> createState() =>
+      _SettingsTransitionOverlayState();
+}
+
+class _SettingsTransitionOverlayState extends State<_SettingsTransitionOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _rotation;
+  late final Animation<double> _scale;
+  late final Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+    // Spin the gear ~1.25 turns while it appears.
+    _rotation = Tween<double>(begin: 0.0, end: 1.25).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    _scale = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
+    );
+    _fade = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.0, 0.4, curve: Curves.easeIn),
+      ),
+    );
+
+    _controller.forward().whenComplete(() {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: FadeTransition(
+        opacity: _fade,
+        child: ScaleTransition(
+          scale: _scale,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.78),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF00FF88).withValues(alpha: 0.35),
+                  blurRadius: 30,
+                  spreadRadius: 4,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedBuilder(
+                  animation: _rotation,
+                  builder: (context, child) {
+                    return Transform.rotate(
+                      angle: _rotation.value * 2 * 3.1415926535,
+                      child: child,
+                    );
+                  },
+                  child: const Icon(
+                    Icons.settings,
+                    size: 56,
+                    color: Color(0xFF00FF88),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Settings',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
