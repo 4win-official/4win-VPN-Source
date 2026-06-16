@@ -107,6 +107,43 @@ class DnsVpnConnection {
     }
   }
 
+  /// Manually set the SSTP PPP fragmentation (MRU). Writes PPP_MRU natively so
+  /// the plugin uses it during LCP negotiation. [mru] should be 1280..1500.
+  static Future<bool> setSstpFragment(int mru) async {
+    try {
+      final result = await platform.invokeMethod('setSstpFragment', {'mru': mru});
+      return result == true;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ setSstpFragment error: $e');
+      }
+      return false;
+    }
+  }
+
+  /// REAL automatic fragmentation: probes the path to [host] and applies the
+  /// detected size as the PPP MRU. Returns the applied value or null on failure.
+  static Future<int?> detectBestFragment(
+    String host, {
+    int minMru = 1280,
+    int maxMru = 1500,
+  }) async {
+    try {
+      final result = await platform.invokeMethod('detectBestFragment', {
+        'host': host,
+        'minMru': minMru,
+        'maxMru': maxMru,
+      });
+      if (result is int) return result;
+      return null;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ detectBestFragment error: $e');
+      }
+      return null;
+    }
+  }
+
   /// مجموع ترافیک رد و بدل شده دستگاه (بایت) را برمی‌گرداند
   /// خروجی: {'rxBytes': int, 'txBytes': int}
   static Future<Map<String, int>> getStats() async {

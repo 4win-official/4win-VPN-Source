@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/vpn_provider.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/snow_animation.dart';
@@ -10,6 +11,7 @@ import '../widgets/protocol_selector_dialog.dart';
 import 'donate_screen.dart';
 import 'theme_selection_screen.dart';
 import 'settings_screen.dart';
+import 'guide_screen.dart';
 import 'dns_servers_screen.dart';
 import 'openvpn_configs_screen.dart';
 import 'slowdns_configs_screen.dart';
@@ -31,10 +33,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // بررسی خودکار آپدیت هنگام ورود به اپ
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkForUpdate();
+    // بررسی خودکار آپدیت هنگام ورود به اپ + نمایش راهنما در اولین اجرا
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _maybeShowGuide();
+      await _checkForUpdate();
     });
+  }
+
+  /// در اولین اجرای اپ، راهنمای تصویری به‌صورت خودکار نمایش داده می‌شود تا
+  /// کاربر بداند تم را از کجا عوض کند و چطور به تنظیمات برود.
+  Future<void> _maybeShowGuide() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final seen = prefs.getBool('guide_seen') ?? false;
+      if (seen) return;
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const GuideScreen()),
+      );
+      await prefs.setBool('guide_seen', true);
+    } catch (_) {
+      // نمایش راهنما نباید مانع ادامه‌ی کار اپ شود
+    }
   }
 
   /// بررسی خودکار آپدیت از طریق GitHub Releases و نمایش دیالوگ در صورت وجود نسخه جدید
@@ -125,6 +146,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
         actions: [
+          // Help / Guide Button
+          IconButton(
+            icon: Icon(
+              Icons.help_outline,
+              color: iconColor,
+            ),
+            tooltip: 'Quick Guide',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const GuideScreen(),
+                ),
+              );
+            },
+          ),
+
           // Theme Selection Button
           IconButton(
             icon: Icon(

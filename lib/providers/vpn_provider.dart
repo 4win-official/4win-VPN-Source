@@ -533,6 +533,11 @@ class VpnProvider with ChangeNotifier {
     final String mtuMode = prefs.getString('mtu_mode') ?? 'off';
     final int manualMtu = (prefs.getInt('manual_mtu') ?? 1400).clamp(1280, 1500);
 
+    // تنظیم Fragment (PPP MRU) برای SSTP. سه حالت off | manual | auto
+    final String fragmentMode = prefs.getString('fragment_mode') ?? 'off';
+    final int manualFragment =
+        (prefs.getInt('manual_fragment') ?? 1400).clamp(1280, 1500);
+
     // در حالت Deep Scan هر سرور با چند DNS مختلف تست می‌شود (ممکن است یک سرور
     // با DNS گوگل و سرور دیگری با DNS کلادفلر کار کند). در حالت عادی فقط از
     // DNS انتخاب‌شده‌ی کاربر استفاده می‌شود.
@@ -560,6 +565,8 @@ class VpnProvider with ChangeNotifier {
             dns: dns,
             mtuMode: mtuMode,
             manualMtu: manualMtu,
+            fragmentMode: fragmentMode,
+            manualFragment: manualFragment,
           );
 
           if (success) {
