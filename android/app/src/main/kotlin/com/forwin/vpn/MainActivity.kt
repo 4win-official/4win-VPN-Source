@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.TrafficStats
 import android.net.VpnService
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -107,30 +108,6 @@ class MainActivity: FlutterActivity() {
                         }
                     }.start()
                 }
-                "setSstpFragment" -> {
-                    // REAL PPP fragmentation control for SSTP. The sstp_flutter plugin
-                    // reads PPP_MRU (Maximum Receive Unit) from the same default
-                    // SharedPreferences and uses it during LCP negotiation (currentMRU).
-                    // Lowering the MRU makes PPP frames smaller / fragmented, which helps
-                    // data pass through DPI/filtering. This really applies on next connect.
-                    val mru = call.argument<Int>("mru") ?: 1400
-                    val ok = setSstpFragment(mru)
-                    result.success(ok)
-                }
-                "detectBestFragment" -> {
-                    // REAL auto fragmentation: reuse the DF-bit path probe to find the
-                    // largest non-fragmenting size, then apply it as the PPP MRU.
-                    val host = call.argument<String>("host") ?: "8.8.8.8"
-                    val minMru = call.argument<Int>("minMru") ?: 1280
-                    val maxMru = call.argument<Int>("maxMru") ?: 1500
-                    Thread {
-                        val mru = detectBestMtu(host, minMru, maxMru)
-                        setSstpFragment(mru)
-                        runOnUiThread {
-                            result.success(mru)
-                        }
-                    }.start()
-                }
                 else -> result.notImplemented()
             }
         }
@@ -149,12 +126,16 @@ class MainActivity: FlutterActivity() {
                 }
                 "connectXray" -> {
                     val configJson = call.argument<String>("configJson") ?: ""
-                    
+
                     val intent = Intent(this, XrayVpnService::class.java).apply {
                         action = XrayVpnService.ACTION_CONNECT
                         putExtra(XrayVpnService.EXTRA_CONFIG_JSON, configJson)
                     }
-                    startService(intent)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
                     result.success(true)
                 }
                 "disconnectXray" -> {
@@ -163,6 +144,14 @@ class MainActivity: FlutterActivity() {
                     }
                     startService(intent)
                     result.success(true)
+                }
+                "isXrayRunning" -> {
+                    result.success(XrayVpnService.isServiceRunning)
+                }
+                "getXrayVersion" -> {
+                    result.success(
+                        runCatching { libv2ray.Libv2ray.checkVersionX() }.getOrDefault("unknown")
+                    )
                 }
                 else -> result.notImplemented()
             }
@@ -218,26 +207,6 @@ class MainActivity: FlutterActivity() {
                 Context.MODE_PRIVATE
             )
             prefs.edit().putString("PPP_MTU", clamped.toString()).apply()
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    /**
-     * REAL PPP fragmentation for SSTP. Writes the plugin's PPP_MRU preference.
-     * The sstp_flutter plugin reads PPP_MRU (see ClientBridge.currentMRU) and
-     * sends it in the LCP MRU option, so a smaller value makes the peer send
-     * smaller / fragmented PPP frames. Clamped to the plugin's valid 68..2000.
-     */
-    private fun setSstpFragment(mru: Int): Boolean {
-        return try {
-            val clamped = mru.coerceIn(68, 2000)
-            val prefs = applicationContext.getSharedPreferences(
-                "${applicationContext.packageName}_preferences",
-                Context.MODE_PRIVATE
-            )
-            prefs.edit().putString("PPP_MRU", clamped.toString()).apply()
             true
         } catch (e: Exception) {
             false

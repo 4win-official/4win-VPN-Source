@@ -8,6 +8,7 @@ import '../widgets/snow_animation.dart';
 import '../widgets/pixel_effect.dart';
 import '../widgets/rain_animation.dart';
 import '../widgets/protocol_selector_dialog.dart';
+import '../widgets/rainbow_heart_button.dart';
 import 'donate_screen.dart';
 import 'theme_selection_screen.dart';
 import 'settings_screen.dart';
@@ -15,6 +16,7 @@ import 'guide_screen.dart';
 import 'dns_servers_screen.dart';
 import 'openvpn_configs_screen.dart';
 import 'slowdns_configs_screen.dart';
+import 'xray_servers_screen.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
 
@@ -191,9 +193,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onPressed: () => themeProvider.toggleTheme(),
             ),
           
-          // Donate Button
-          IconButton(
-            icon: Icon(Icons.favorite_border, color: iconColor),
+          // Donate Button - animated rainbow heart to grab attention
+          RainbowHeartButton(
             tooltip: 'Support Us',
             onPressed: () {
               Navigator.push(
@@ -343,19 +344,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                   ? Icons.shield
                                                   : vpnProvider.selectedProtocol == 'slowdns'
                                                       ? Icons.cloud_queue
-                                                      : Icons.dns,
+                                                      : vpnProvider.selectedProtocol == 'xray'
+                                                          ? Icons.rocket_launch
+                                                          : Icons.dns,
                                           color: vpnProvider.selectedProtocol == 'sstp'
                                               ? Colors.green
                                               : vpnProvider.selectedProtocol == 'openvpn'
                                                   ? Colors.purple
                                                   : vpnProvider.selectedProtocol == 'slowdns'
                                                       ? Colors.orange
-                                                      : Colors.blue,
+                                                      : vpnProvider.selectedProtocol == 'xray'
+                                                          ? Colors.tealAccent.shade700
+                                                          : Colors.blue,
                                           size: 20,
                                         ),
                                         const SizedBox(width: 12),
                                         Text(
-                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : "DNS changer"}',
+                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : "DNS changer"}',
                                           style: TextStyle(
                                             fontSize: 14,
                                             color: isDark ? Colors.white : Colors.black87,
@@ -653,6 +658,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     );
                   }
                   
+                  // Xray: Always show "Xray Servers" button
+                  if (provider.selectedProtocol == 'xray') {
+                    return SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const XrayServersScreen(),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.rocket_launch),
+                        label: const Text(
+                          'Xray Servers',
+                          style: TextStyle(fontSize: 16),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          backgroundColor: Colors.tealAccent.shade700,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
                   // SSTP: Show "Next Server" only when connected
                   if (!provider.isConnected) {
                     return const SizedBox.shrink();

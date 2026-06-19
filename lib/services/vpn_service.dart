@@ -125,8 +125,6 @@ class VpnService {
     String dns = '8.8.8.8',
     String mtuMode = 'off',
     int manualMtu = 1400,
-    String fragmentMode = 'off',
-    int manualFragment = 1400,
   }) async {
     try {
       _addLog('🚀 Starting connection to ${server.fullAddress}');
@@ -166,36 +164,6 @@ class VpnService {
         }
       } catch (e) {
         _addLog('⚠️ Failed to set MTU: $e');
-      }
-
-      // PPP fragmentation tuning (PPP MRU) — really applied to the SSTP tunnel.
-      try {
-        switch (fragmentMode) {
-          case 'manual':
-            final f = manualFragment.clamp(1280, 1500);
-            await DnsVpnConnection.setSstpFragment(f);
-            _addLog('🧩 SSTP fragment (MRU) set manually to $f');
-            break;
-          case 'auto':
-            _addLog('🔎 Auto-detecting best fragment (MRU) to ${server.address}...');
-            final detected = await DnsVpnConnection.detectBestFragment(
-              server.address,
-              minMru: 1280,
-              maxMru: 1500,
-            );
-            if (detected != null) {
-              _addLog('✅ Auto fragment detected & applied: $detected');
-            } else {
-              await DnsVpnConnection.setSstpFragment(1400);
-              _addLog('⚠️ Fragment probe failed, applied safe 1400');
-            }
-            break;
-          default:
-            await DnsVpnConnection.setSstpFragment(1500);
-            _addLog('🧩 SSTP fragment (MRU) set to default 1500');
-        }
-      } catch (e) {
-        _addLog('⚠️ Failed to set fragment: $e');
       }
       
       // Create SSTP server configuration

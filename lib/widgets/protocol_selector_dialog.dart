@@ -223,6 +223,77 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         Navigator.pop(context); // Auto-close
                       },
                     ),
+
+                    const Divider(height: 20),
+
+                    // Xray Option (real Xray core / v2rayNG)
+                    ListTile(
+                      leading: Icon(
+                        Icons.rocket_launch,
+                        color: vpnProvider.selectedProtocol == 'xray'
+                            ? Colors.tealAccent.shade700
+                            : (isDark ? Colors.white54 : Colors.black54),
+                        size: 28,
+                      ),
+                      title: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'Xray',
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontWeight:
+                                    vpnProvider.selectedProtocol == 'xray'
+                                        ? FontWeight.bold
+                                        : FontWeight.w500,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.tealAccent.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color:
+                                    Colors.tealAccent.shade700.withValues(alpha: 0.6),
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              'VLESS/VMess',
+                              style: TextStyle(
+                                color: Colors.tealAccent.shade700,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Text(
+                        'Real Xray core + TLS fragment',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                      trailing: vpnProvider.selectedProtocol == 'xray'
+                          ? Icon(Icons.check_circle,
+                              color: Colors.tealAccent.shade700)
+                          : null,
+                      onTap: () {
+                        vpnProvider.switchProtocol('xray');
+                        Navigator.pop(context); // Auto-close
+                      },
+                    ),
                   ],
                 ),
               ),

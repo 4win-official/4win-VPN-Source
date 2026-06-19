@@ -13,6 +13,10 @@ import '../services/dns_vpn_connection.dart';
 import '../services/openvpn_service.dart';
 import '../services/openvpn_connection.dart';
 import '../services/slowdns_service.dart';
+import '../models/xray_server.dart';
+import '../services/xray_service.dart';
+import '../services/xray_connection.dart';
+import '../services/xray_config_builder.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -23,13 +27,20 @@ class VpnProvider with ChangeNotifier {
   final DnsService _dnsService = DnsService();
   final OpenVpnService _openVpnService = OpenVpnService();
   final SlowDnsService _slowDnsService = SlowDnsService();
+  final XrayServerService _xrayService = XrayServerService();
   
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
-  // Protocol selection: 'sstp', 'direct_dns', 'openvpn', or 'slowdns'
+  // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', or 'xray'
   String _selectedProtocol = 'sstp';
   String get selectedProtocol => _selectedProtocol;
+
+  // Xray (real Xray core / v2rayNG) servers
+  List<XrayServer> _xrayServers = [];
+  XrayServer? _selectedXrayServer;
+  List<XrayServer> get xrayServers => _xrayServers;
+  XrayServer? get selectedXrayServer => _selectedXrayServer;
   
   // Slow DNS configs
   List<SlowDnsConfig> _slowDnsConfigs = [];
@@ -97,6 +108,8 @@ class VpnProvider with ChangeNotifier {
     _init();
     // بارگیری پروتکل انتخابی
     loadSelectedProtocol();
+    // بارگیری سرورهای ایکس‌ری
+    loadXrayServers();
   }
 
   void _init() {
@@ -428,6 +441,10 @@ class VpnProvider with ChangeNotifier {
       // ✅ Slow DNS: Use selected Slow DNS config
       await _connectSlowDns();
       return;
+    } else if (_selectedProtocol == 'xray') {
+      // ✅ Xray (real Xray core): Use selected Xray server
+      await _connectXray();
+      return;
     }
 
     // ✅ SSTP: Original SSTP connection logic
@@ -533,11 +550,6 @@ class VpnProvider with ChangeNotifier {
     final String mtuMode = prefs.getString('mtu_mode') ?? 'off';
     final int manualMtu = (prefs.getInt('manual_mtu') ?? 1400).clamp(1280, 1500);
 
-    // تنظیم Fragment (PPP MRU) برای SSTP. سه حالت off | manual | auto
-    final String fragmentMode = prefs.getString('fragment_mode') ?? 'off';
-    final int manualFragment =
-        (prefs.getInt('manual_fragment') ?? 1400).clamp(1280, 1500);
-
     // در حالت Deep Scan هر سرور با چند DNS مختلف تست می‌شود (ممکن است یک سرور
     // با DNS گوگل و سرور دیگری با DNS کلادفلر کار کند). در حالت عادی فقط از
     // DNS انتخاب‌شده‌ی کاربر استفاده می‌شود.
@@ -565,8 +577,6 @@ class VpnProvider with ChangeNotifier {
             dns: dns,
             mtuMode: mtuMode,
             manualMtu: manualMtu,
-            fragmentMode: fragmentMode,
-            manualFragment: manualFragment,
           );
 
           if (success) {
@@ -835,6 +845,98 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
+  // ==================== Xray Protocol Methods ====================
+
+  /// Load persisted Xray servers + currently selected one.
+  Future<void> loadXrayServers() async {
+    _xrayServers = await _xrayService.loadServers();
+    _selectedXrayServer = await _xrayService.getSelectedServer();
+    notifyListeners();
+  }
+
+  /// Add server(s) from share link(s). Returns count added.
+  Future<int> addXrayServers(String raw) async {
+    final added = await _xrayService.addFromLinks(raw);
+    if (added > 0) {
+      await loadXrayServers();
+    }
+    return added;
+  }
+
+  /// Remove an Xray server by id.
+  Future<void> removeXrayServer(String id) async {
+    await _xrayService.removeServer(id);
+    await loadXrayServers();
+  }
+
+  /// Select an Xray server (for connecting).
+  Future<void> selectXrayServer(XrayServer server) async {
+    _selectedXrayServer = server;
+    await _xrayService.setSelectedId(server.id);
+    notifyListeners();
+  }
+
+  /// Connect using the real Xray core (libv2ray / v2rayNG) with TLS
+  /// ClientHello fragmentation enabled.
+  Future<void> _connectXray() async {
+    if (_selectedXrayServer == null) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Please add and select an Xray server first';
+      notifyListeners();
+      return;
+    }
+
+    try {
+      _status = VpnConnectionStatus.connecting;
+      notifyListeners();
+
+      // Read fragment settings (default ON).
+      final prefs = await SharedPreferences.getInstance();
+      final fragEnabled = prefs.getBool('xray_fragment') ?? true;
+      final fragLength = prefs.getString('xray_fragment_length') ?? '1-3';
+      final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
+
+      // Request VPN permission.
+      final granted = await XrayConnection.requestPermission();
+      if (!granted) {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'VPN permission denied';
+        notifyListeners();
+        return;
+      }
+
+      // Build the Xray JSON config (incl. TLS ClientHello fragment outbound).
+      final configJson = XrayConfigBuilder.build(
+        _selectedXrayServer!,
+        fragmentEnabled: fragEnabled,
+        fragmentLength: fragLength,
+        fragmentInterval: fragInterval,
+      );
+
+      if (kDebugMode) {
+        debugPrint('🚀 Connecting Xray: ${_selectedXrayServer!.remark} '
+            '(${_selectedXrayServer!.protocol}) fragment=$fragEnabled');
+      }
+
+      final connected = await XrayConnection.connect(configJson);
+      if (connected) {
+        _status = VpnConnectionStatus.connected;
+        _connectedServer = null; // Xray mode
+        _errorMessage = null;
+        _startDurationTimer();
+      } else {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Failed to start Xray core';
+      }
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ Xray connect failed: $e');
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Failed to connect: ${e.toString()}';
+      notifyListeners();
+    }
+  }
+
   /// Disconnect from VPN
   Future<void> disconnect() async {
     if (_status == VpnConnectionStatus.disconnecting || _status == VpnConnectionStatus.disconnected) {
@@ -866,6 +968,13 @@ class VpnProvider with ChangeNotifier {
         await SlowDnsConnection.disconnect();
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting Slow DNS...');
+        }
+      } else if (_selectedProtocol == 'xray') {
+        await XrayConnection.disconnect();
+        _stopDurationTimer();
+        _connectionDuration = Duration.zero;
+        if (kDebugMode) {
+          debugPrint('🔌 Disconnecting Xray...');
         }
       } else {
         await _vpnService.disconnect();

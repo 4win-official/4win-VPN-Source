@@ -24,8 +24,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _deepScan = false; // اسکن عمیق (برای اینترنت ضعیف/محدودیت دولتی)
   String _mtuMode = 'off'; // حالت MTU: off | auto | manual
   final _mtuController = TextEditingController(text: '1400'); // مقدار دستی MTU
-  String _fragmentMode = 'off'; // حالت Fragment (PPP MRU): off | auto | manual
-  final _fragmentController = TextEditingController(text: '1400'); // مقدار دستی Fragment
 
   @override
   void initState() {
@@ -50,9 +48,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _mtuMode = prefs.getString('mtu_mode') ??
           (legacyAuto == true ? 'auto' : 'off');
       _mtuController.text = (prefs.getInt('manual_mtu') ?? 1400).toString();
-      _fragmentMode = prefs.getString('fragment_mode') ?? 'off';
-      _fragmentController.text =
-          (prefs.getInt('manual_fragment') ?? 1400).toString();
     });
   }
 
@@ -499,134 +494,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 messenger.showSnackBar(
                                   SnackBar(
                                     content: Text('MTU saved: $value (applied on next connect)'),
-                                    duration: const Duration(seconds: 2),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      Divider(color: isDark ? Colors.white12 : Colors.black12),
-                      const SizedBox(height: 12),
-
-                      // 🧩 Fragment - فرگمنت واقعی بسته‌های PPP (MRU) برای دور زدن فیلترینگ
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.grid_view,
-                            color: _fragmentMode != 'off'
-                                ? (isDark ? const Color(0xFF00FF88) : Colors.blue)
-                                : (isDark ? Colors.white38 : Colors.black38),
-                            size: 22,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Fragment',
-                                  style: TextStyle(
-                                    color: isDark ? Colors.white : Colors.black87,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _fragmentMode == 'auto'
-                                      ? 'Auto: detects best packet size (1280–1500) to split traffic'
-                                      : _fragmentMode == 'manual'
-                                          ? 'Manual: splits PPP packets at your size (1280–1500)'
-                                          : 'Off: no fragmentation. Use to bypass DPI/filtering',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: isDark ? Colors.white38 : Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(value: 'off', label: Text('Off')),
-                          ButtonSegment(value: 'auto', label: Text('Auto')),
-                          ButtonSegment(value: 'manual', label: Text('Manual')),
-                        ],
-                        selected: {_fragmentMode},
-                        showSelectedIcon: false,
-                        onSelectionChanged: (selection) async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          final mode = selection.first;
-                          setState(() {
-                            _fragmentMode = mode;
-                          });
-                          final prefs = await SharedPreferences.getInstance();
-                          await prefs.setString('fragment_mode', mode);
-                          messenger.showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                mode == 'auto'
-                                    ? '🧩 Auto Fragment on — best size detected on connect'
-                                    : mode == 'manual'
-                                        ? '🧩 Manual Fragment on — set your value below'
-                                        : 'Fragment off (no splitting)',
-                              ),
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                      ),
-                      if (_fragmentMode == 'manual') ...[
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _fragmentController,
-                          keyboardType: TextInputType.number,
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: 'Fragment size (1280 – 1500)',
-                            labelStyle: TextStyle(
-                              color: isDark ? Colors.white54 : Colors.black54,
-                            ),
-                            helperText: 'Smaller size splits packets more (harder to detect)',
-                            helperStyle: TextStyle(
-                              fontSize: 11,
-                              color: isDark ? Colors.white38 : Colors.black45,
-                            ),
-                            border: const OutlineInputBorder(),
-                            enabledBorder: OutlineInputBorder(
-                              borderSide: BorderSide(
-                                color: isDark ? Colors.white24 : Colors.black26,
-                              ),
-                            ),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                Icons.save,
-                                color: isDark ? const Color(0xFF00FF88) : Colors.blue,
-                              ),
-                              tooltip: 'Save Fragment',
-                              onPressed: () async {
-                                final messenger = ScaffoldMessenger.of(context);
-                                final parsed =
-                                    int.tryParse(_fragmentController.text.trim());
-                                final value = (parsed ?? 1400).clamp(1280, 1500);
-                                setState(() {
-                                  _fragmentController.text = value.toString();
-                                });
-                                final prefs =
-                                    await SharedPreferences.getInstance();
-                                await prefs.setInt('manual_fragment', value);
-                                messenger.showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                        'Fragment saved: $value (applied on next connect)'),
                                     duration: const Duration(seconds: 2),
                                   ),
                                 );
