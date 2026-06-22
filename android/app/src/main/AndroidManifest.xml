@@ -44,6 +44,42 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- ===== Open .ovpn files (Telegram / file managers / email) ===== -->
+            <!-- 1) VIEW by file:// or content:// with the .ovpn extension.
+                 .ovpn files are usually delivered with a generic/empty MIME
+                 type, so we match by the path pattern. -->
+            <intent-filter android:label="Import to 4win VPN">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\..*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.ovpn" />
+            </intent-filter>
+
+            <!-- 2) VIEW by the OpenVPN MIME type (some senders set this). -->
+            <intent-filter android:label="Import to 4win VPN">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/x-openvpn-profile" />
+            </intent-filter>
+
+            <!-- 3) SEND / "share with" an .ovpn file (e.g. Telegram share menu). -->
+            <intent-filter android:label="Import to 4win VPN">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-openvpn-profile" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
         </activity>
         
         <!-- DNS VPN Service -->

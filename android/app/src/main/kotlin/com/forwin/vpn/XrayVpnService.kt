@@ -8,6 +8,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
+import go.Seq
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
 import libv2ray.Libv2ray
@@ -57,7 +58,16 @@ class XrayVpnService : VpnService() {
         when (intent?.action) {
             ACTION_CONNECT -> {
                 configJson = intent.getStringExtra(EXTRA_CONFIG_JSON)
-                startXray()
+                // Show the foreground notification IMMEDIATELY. The service was
+                // started via startForegroundService(), so Android requires
+                // startForeground() within ~5s or it force-crashes the app.
+                try {
+                    showNotification()
+                } catch (t: Throwable) {
+                    android.util.Log.e(TAG, "showNotification failed: ${t.message}", t)
+                }
+                // Heavy startup (TUN establish + Go core) on a background thread.
+                Thread { startXray() }.start()
             }
             ACTION_DISCONNECT -> stopXray()
         }
@@ -72,10 +82,12 @@ class XrayVpnService : VpnService() {
         val config = configJson
         if (config.isNullOrBlank()) {
             android.util.Log.e(TAG, "No config provided")
-            stopSelf()
+            stopXray()
             return
         }
 
+        // Catch Throwable (not just Exception) so a native UnsatisfiedLinkError
+        // or Go panic surfaced as an Error doesn't crash the whole app.
         try {
             // 1) Build the TUN interface.
             val builder = Builder()
@@ -90,45 +102,56 @@ class XrayVpnService : VpnService() {
             try {
                 builder.addAddress(PRIVATE_VLAN6_CLIENT, 126)
                 builder.addRoute("::", 0)
-            } catch (_: Exception) { /* device without IPv6 */ }
+            } catch (_: Throwable) { /* device without IPv6 */ }
 
             // Keep our own app traffic out of the tunnel to avoid loops.
             try {
                 builder.addDisallowedApplication(packageName)
-            } catch (_: Exception) { }
+            } catch (_: Throwable) { }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.setMetered(false)
             }
 
-            vpnInterface = builder.establish()
-            val tun = vpnInterface
+            val tun = builder.establish()
+            vpnInterface = tun
             if (tun == null) {
                 android.util.Log.e(TAG, "Failed to establish VPN interface")
-                stopSelf()
+                stopXray()
                 return
             }
 
-            // 2) Initialize the core environment (asset path for geoip/geosite).
-            // geoip.dat & geosite.dat are bundled inside libv2ray.aar's assets and are
-            // resolved automatically by the core's asset reader; we still set filesDir
-            // as the env path so any user-supplied assets there take precedence.
+            // 2) Initialize the core environment.
+            //
+            // CRITICAL (this was the reason configs never connected):
+            //  * go.Seq.setContext(applicationContext) MUST be called first. It
+            //    bridges the Android Context into the Go runtime so the core's
+            //    asset reader (mobasset) can open geoip.dat / geosite.dat that are
+            //    bundled inside libv2ray.aar's assets, and so the gVisor TUN /
+            //    socket layer works. Without it the core silently fails to route.
+            //  * initCoreEnv(assetPath, deviceKey) — assetPath is where the core
+            //    looks for asset files on disk; if not found it falls back to the
+            //    Android assets via mobasset (needs the Seq context above).
+            Seq.setContext(applicationContext)
             Libv2ray.initCoreEnv(filesDir.absolutePath, "")
+            android.util.Log.d(TAG, "initCoreEnv done, "
+                + "version=${runCatching { Libv2ray.checkVersionX() }.getOrNull()}")
 
             // 3) Create the core controller and start the loop with the TUN fd.
             val controller = Libv2ray.newCoreController(XrayCallback())
             coreController = controller
 
             val tunFd = tun.fd
+            android.util.Log.d(TAG, "Starting Xray core (tunFd=$tunFd, "
+                + "version=${runCatching { Libv2ray.checkVersionX() }.getOrNull()})")
             controller.startLoop(config, tunFd)
 
             isRunning = true
             isServiceRunning = true
-            showNotification()
 
-            android.util.Log.d(TAG, "Xray core started (version=${runCatching { Libv2ray.checkVersionX() }.getOrNull()})")
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to start Xray: ${e.message}", e)
+            android.util.Log.d(TAG, "Xray core started successfully")
+        } catch (t: Throwable) {
+            android.util.Log.e(TAG, "Failed to start Xray: ${t.message}", t)
             stopXray()
         }
     }

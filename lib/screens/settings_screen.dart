@@ -25,10 +25,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _mtuMode = 'off'; // حالت MTU: off | auto | manual
   final _mtuController = TextEditingController(text: '1400'); // مقدار دستی MTU
 
+  // SSTP fragment (TLS ClientHello fragmentation toggle for SSTP)
+  bool _sstpFragment = false;
+  final _sstpFragSizeController = TextEditingController(text: '1-3');
+  final _sstpFragIntervalController = TextEditingController(text: '10-20');
+
+  // Xray fragment (moved here from the server list)
+  bool _xrayFragment = true;
+  final _xrayFragLengthController = TextEditingController(text: '1-3');
+  final _xrayFragIntervalController = TextEditingController(text: '10-20');
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
+  }
+
+  @override
+  void dispose() {
+    _dnsController.dispose();
+    _customServerController.dispose();
+    _customUsernameController.dispose();
+    _customPasswordController.dispose();
+    _mtuController.dispose();
+    _sstpFragSizeController.dispose();
+    _sstpFragIntervalController.dispose();
+    _xrayFragLengthController.dispose();
+    _xrayFragIntervalController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSettings() async {
@@ -48,7 +72,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _mtuMode = prefs.getString('mtu_mode') ??
           (legacyAuto == true ? 'auto' : 'off');
       _mtuController.text = (prefs.getInt('manual_mtu') ?? 1400).toString();
+      // SSTP fragment
+      _sstpFragment = prefs.getBool('sstp_fragment') ?? false;
+      _sstpFragSizeController.text =
+          prefs.getString('sstp_fragment_size') ?? '1-3';
+      _sstpFragIntervalController.text =
+          prefs.getString('sstp_fragment_interval') ?? '10-20';
+      // Xray fragment
+      _xrayFragment = prefs.getBool('xray_fragment') ?? true;
+      _xrayFragLengthController.text =
+          prefs.getString('xray_fragment_length') ?? '1-3';
+      _xrayFragIntervalController.text =
+          prefs.getString('xray_fragment_interval') ?? '10-20';
     });
+  }
+
+  Future<void> _saveSstpFragment() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('sstp_fragment', _sstpFragment);
+    await prefs.setString(
+        'sstp_fragment_size',
+        _sstpFragSizeController.text.trim().isEmpty
+            ? '1-3'
+            : _sstpFragSizeController.text.trim());
+    await prefs.setString(
+        'sstp_fragment_interval',
+        _sstpFragIntervalController.text.trim().isEmpty
+            ? '10-20'
+            : _sstpFragIntervalController.text.trim());
+  }
+
+  Future<void> _saveXrayFragment() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('xray_fragment', _xrayFragment);
+    await prefs.setString(
+        'xray_fragment_length',
+        _xrayFragLengthController.text.trim().isEmpty
+            ? '1-3'
+            : _xrayFragLengthController.text.trim());
+    await prefs.setString(
+        'xray_fragment_interval',
+        _xrayFragIntervalController.text.trim().isEmpty
+            ? '10-20'
+            : _xrayFragIntervalController.text.trim());
   }
 
   /// Returns the current Custom DNS value if it matches one of the known DNS
@@ -72,9 +138,110 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return 'OpenVPN';
       case 'slowdns':
         return 'Slow DNS';
+      case 'xray':
+        return 'Xray';
       default:
         return protocol;
     }
+  }
+
+  /// Reusable fragment configuration card (used by both SSTP and Xray).
+  Widget _buildFragmentCard({
+    required bool isDark,
+    required Color accent,
+    required bool enabled,
+    required TextEditingController sizeController,
+    required TextEditingController intervalController,
+    required ValueChanged<bool> onToggle,
+    required VoidCallback onChanged,
+    required String sizeLabel,
+    String description =
+        'Splits the TLS ClientHello into small delayed pieces so '
+        'DPI/filtering cannot read the SNI.',
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: enabled
+            ? accent.withValues(alpha: 0.08)
+            : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.03)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: enabled ? accent.withValues(alpha: 0.5) : Colors.transparent,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.call_split, color: enabled ? accent : Colors.grey),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Fragment',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: enabled,
+                activeThumbColor: accent,
+                onChanged: onToggle,
+              ),
+            ],
+          ),
+          if (enabled) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: sizeController,
+                    decoration: InputDecoration(
+                      labelText: sizeLabel,
+                      hintText: '1-3',
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => onChanged(),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: intervalController,
+                    decoration: const InputDecoration(
+                      labelText: 'Interval (ms)',
+                      hintText: '10-20',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => onChanged(),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Future<void> _saveSettings() async {
@@ -506,6 +673,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Divider(color: isDark ? Colors.white12 : Colors.black12),
                       const SizedBox(height: 12),
 
+                      // ✂️ Fragment - فرگمنت اختصاصی پروتکل SSTP
+                      _buildFragmentCard(
+                        isDark: isDark,
+                        accent: const Color(0xFF00C2FF),
+                        enabled: _sstpFragment,
+                        sizeController: _sstpFragSizeController,
+                        intervalController: _sstpFragIntervalController,
+                        sizeLabel: 'Packet size',
+                        description:
+                            'Splits the SSTP handshake/TLS packets into small '
+                            'delayed pieces so DPI/filtering cannot fingerprint the '
+                            'connection. Applied on the next connect.',
+                        onToggle: (value) {
+                          setState(() => _sstpFragment = value);
+                          _saveSstpFragment();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(value
+                                  ? '✂️ SSTP Fragment enabled — applied on next connect'
+                                  : 'SSTP Fragment disabled'),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        onChanged: _saveSstpFragment,
+                      ),
+                      const SizedBox(height: 12),
+                      Divider(color: isDark ? Colors.white12 : Colors.black12),
+                      const SizedBox(height: 12),
+
                       // 🔍 Deep Scan - اسکن عمیق برای اینترنت ضعیف یا محدودیت دولتی
                       Row(
                         children: [
@@ -700,6 +897,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ],
                           ),
                         ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
+                // Xray-specific settings
+                if (provider.selectedProtocol == 'xray') ...[
+                  _SettingsSection(
+                    title: 'Xray Settings',
+                    children: [
+                      Text(
+                        'Manage servers from the Xray Servers screen on the home '
+                        'page. The fragment below applies to the active Xray '
+                        'connection.',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                          fontSize: 13,
+                        ),
+                      ),
+                      // ✂️ Fragment - فرگمنت TLS ClientHello مخصوص Xray
+                      _buildFragmentCard(
+                        isDark: isDark,
+                        accent: const Color(0xFF1DE9B6),
+                        enabled: _xrayFragment,
+                        sizeController: _xrayFragLengthController,
+                        intervalController: _xrayFragIntervalController,
+                        sizeLabel: 'Length',
+                        onToggle: (value) {
+                          setState(() => _xrayFragment = value);
+                          _saveXrayFragment();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(value
+                                  ? '✂️ Xray Fragment enabled — applied on next connect'
+                                  : 'Xray Fragment disabled'),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        onChanged: _saveXrayFragment,
                       ),
                     ],
                   ),

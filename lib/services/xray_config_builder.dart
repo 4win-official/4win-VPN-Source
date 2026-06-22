@@ -34,7 +34,27 @@ class XrayConfigBuilder {
     // 2) If fragmentation is enabled, route the proxy's transport through a
     //    freedom outbound that performs TLS ClientHello fragmentation.
     if (fragmentEnabled) {
-      // The freedom "fragment" dialer.
+      // Tell the proxy outbound to dial through the fragment outbound.
+      final stream = (proxy['streamSettings'] as Map<String, dynamic>?) ??
+          <String, dynamic>{};
+      final sockopt = (stream['sockopt'] as Map<String, dynamic>?) ??
+          <String, dynamic>{};
+      sockopt['dialerProxy'] = 'fragment';
+      stream['sockopt'] = sockopt;
+      proxy['streamSettings'] = stream;
+    }
+
+    // 🔴 IMPORTANT: Xray sends traffic with no matching routing rule to the
+    // FIRST outbound in the list. So "proxy" MUST be first, otherwise all
+    // traffic would leak through the freedom/fragment outbound (i.e. direct,
+    // unprotected). v2rayNG keeps "proxy" as the first outbound for the same
+    // reason.
+    proxy['tag'] = 'proxy';
+    outbounds.add(proxy);
+
+    if (fragmentEnabled) {
+      // The freedom "fragment" dialer — referenced by tag via dialerProxy, so
+      // its position in the list does not affect default routing.
       outbounds.add({
         'tag': 'fragment',
         'protocol': 'freedom',
@@ -53,19 +73,7 @@ class XrayConfigBuilder {
           },
         },
       });
-
-      // Tell the proxy outbound to dial through the fragment outbound.
-      final stream = (proxy['streamSettings'] as Map<String, dynamic>?) ??
-          <String, dynamic>{};
-      final sockopt = (stream['sockopt'] as Map<String, dynamic>?) ??
-          <String, dynamic>{};
-      sockopt['dialerProxy'] = 'fragment';
-      stream['sockopt'] = sockopt;
-      proxy['streamSettings'] = stream;
     }
-
-    proxy['tag'] = 'proxy';
-    outbounds.add(proxy);
 
     // 3) Direct + block fallbacks.
     outbounds.add({
@@ -80,21 +88,27 @@ class XrayConfigBuilder {
     });
 
     final config = <String, dynamic>{
+      'stats': <String, dynamic>{},
       'log': {'loglevel': 'warning'},
-      'dns': {
-        'servers': [
-          '1.1.1.1',
-          '8.8.8.8',
-          {
-            'address': '223.5.5.5',
-            'domains': ['geosite:cn'],
+      'policy': {
+        'levels': {
+          '8': {
+            'handshake': 4,
+            'connIdle': 300,
+            'uplinkOnly': 1,
+            'downlinkOnly': 1,
           },
-        ],
+        },
+        'system': {
+          'statsOutboundUplink': true,
+          'statsOutboundDownlink': true,
+        },
+      },
+      'dns': {
+        'servers': ['1.1.1.1', '8.8.8.8', 'localhost'],
       },
       'inbounds': [
-        // SOCKS inbound the core's built-in tun2socks talks to. The core picks
-        // up the TUN fd from the env var (xray.tun.fd) set by startLoop and
-        // pumps packets through this socks inbound.
+        // SOCKS inbound (kept for proxy-sharing / local apps).
         {
           'tag': 'socks',
           'port': 10808,
@@ -103,27 +117,55 @@ class XrayConfigBuilder {
           'settings': {
             'auth': 'noauth',
             'udp': true,
+            'userLevel': 8,
           },
           'sniffing': {
             'enabled': true,
             'destOverride': ['http', 'tls', 'quic'],
-            'routeOnly': false,
+          },
+        },
+        // 🔴 CRITICAL: the TUN inbound. When startLoop() receives the VpnService
+        // TUN file descriptor, the core's built-in tun inbound binds to that fd
+        // and pumps ALL device traffic through the routing/outbounds below.
+        // Without this inbound the fd is never used and NOTHING is tunnelled —
+        // which is exactly why connections used to "succeed" but pass no data.
+        // This mirrors v2rayNG's assets/v2ray_config_with_tun.json.
+        {
+          'tag': 'tun',
+          'protocol': 'tun',
+          'settings': {
+            'name': 'xray0',
+            'MTU': 1500,
+            'userLevel': 8,
+          },
+          'sniffing': {
+            'enabled': true,
+            'destOverride': ['http', 'tls', 'quic'],
           },
         },
       ],
       'outbounds': outbounds,
       'routing': {
-        'domainStrategy': 'IPIfNonMatch',
+        'domainStrategy': 'AsIs',
         'rules': [
+          // Send private / LAN ranges straight out (don't tunnel local traffic).
+          // Explicit CIDRs are used instead of "geoip:private" so this never
+          // depends on the geoip.dat asset loading correctly.
           {
             'type': 'field',
-            'outboundTag': 'block',
-            'protocol': ['bittorrent'],
-          },
-          {
-            'type': 'field',
-            'outboundTag': 'proxy',
-            'network': 'tcp,udp',
+            'ip': [
+              '0.0.0.0/8',
+              '10.0.0.0/8',
+              '100.64.0.0/10',
+              '127.0.0.0/8',
+              '169.254.0.0/16',
+              '172.16.0.0/12',
+              '192.168.0.0/16',
+              '::1/128',
+              'fc00::/7',
+              'fe80::/10',
+            ],
+            'outboundTag': 'direct',
           },
         ],
       },

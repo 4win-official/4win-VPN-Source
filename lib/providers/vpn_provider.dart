@@ -547,8 +547,28 @@ class VpnProvider with ChangeNotifier {
     //   'off'    : MTU پیش‌فرض (1500)
     //   'manual' : مقدار دستی واردشده توسط کاربر (1280..1500)
     //   'auto'   : تشخیص خودکار واقعی MTU با probe به سرور
-    final String mtuMode = prefs.getString('mtu_mode') ?? 'off';
-    final int manualMtu = (prefs.getInt('manual_mtu') ?? 1400).clamp(1280, 1500);
+    String mtuMode = prefs.getString('mtu_mode') ?? 'off';
+    int manualMtu = (prefs.getInt('manual_mtu') ?? 1400).clamp(1280, 1500);
+
+    // ✂️ SSTP Fragment: SSTP wraps PPP inside TLS, so we cannot fragment the
+    // TLS ClientHello the way Xray does. The genuine, observable way to
+    // "fragment" an SSTP tunnel is to shrink the inner PPP MTU so the wrapped
+    // PPP frames are split into several smaller IP packets — this breaks up the
+    // uniform packet-size fingerprint that some DPI boxes key on. We only apply
+    // it when the user hasn't already chosen an explicit Manual/Auto MTU, so we
+    // never override their MTU choice.
+    final bool sstpFragment = prefs.getBool('sstp_fragment') ?? false;
+    if (sstpFragment && mtuMode == 'off') {
+      // Derive a smaller MTU from the configured fragment size. Larger sizes
+      // -> less aggressive (bigger MTU); smaller sizes -> more aggressive.
+      final String fragSize = prefs.getString('sstp_fragment_size') ?? '1-3';
+      final int firstNum =
+          int.tryParse(fragSize.split('-').first.trim()) ?? 1;
+      // Map fragment "size" 1..6 to an MTU in the 1280..1380 range.
+      final int fragMtu = (1280 + (firstNum.clamp(1, 6) - 1) * 20).clamp(1280, 1500);
+      mtuMode = 'manual';
+      manualMtu = fragMtu;
+    }
 
     // در حالت Deep Scan هر سرور با چند DNS مختلف تست می‌شود (ممکن است یک سرور
     // با DNS گوگل و سرور دیگری با DNS کلادفلر کار کند). در حالت عادی فقط از

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/vpn_provider.dart';
 import '../models/xray_server.dart';
 
@@ -16,47 +15,13 @@ class XrayServersScreen extends StatefulWidget {
 }
 
 class _XrayServersScreenState extends State<XrayServersScreen> {
-  bool _fragmentEnabled = true;
-  final _lengthController = TextEditingController(text: '1-3');
-  final _intervalController = TextEditingController(text: '10-20');
-
   @override
   void initState() {
     super.initState();
-    _loadFragmentSettings();
     // Make sure servers are loaded.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<VpnProvider>().loadXrayServers();
     });
-  }
-
-  @override
-  void dispose() {
-    _lengthController.dispose();
-    _intervalController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadFragmentSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _fragmentEnabled = prefs.getBool('xray_fragment') ?? true;
-      _lengthController.text = prefs.getString('xray_fragment_length') ?? '1-3';
-      _intervalController.text =
-          prefs.getString('xray_fragment_interval') ?? '10-20';
-    });
-  }
-
-  Future<void> _saveFragmentSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('xray_fragment', _fragmentEnabled);
-    await prefs.setString('xray_fragment_length',
-        _lengthController.text.trim().isEmpty ? '1-3' : _lengthController.text.trim());
-    await prefs.setString(
-        'xray_fragment_interval',
-        _intervalController.text.trim().isEmpty
-            ? '10-20'
-            : _intervalController.text.trim());
   }
 
   Future<void> _showAddDialog() async {
@@ -143,7 +108,6 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           final servers = provider.xrayServers;
           return Column(
             children: [
-              _buildFragmentCard(isDark, accent),
               Expanded(
                 child: servers.isEmpty
                     ? _buildEmpty(isDark, accent)
@@ -168,79 +132,6 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         backgroundColor: accent,
         icon: const Icon(Icons.add),
         label: const Text('Add Server'),
-      ),
-    );
-  }
-
-  Widget _buildFragmentCard(bool isDark, Color accent) {
-    return Card(
-      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.call_split, color: accent),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'TLS Fragment',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 15),
-                  ),
-                ),
-                Switch(
-                  value: _fragmentEnabled,
-                  activeThumbColor: accent,
-                  onChanged: (v) {
-                    setState(() => _fragmentEnabled = v);
-                    _saveFragmentSettings();
-                  },
-                ),
-              ],
-            ),
-            const Text(
-              'Splits the TLS ClientHello into small pieces with tiny delays '
-              'so DPI/filtering cannot inspect the SNI. Pieces reassemble at '
-              'the server.',
-              style: TextStyle(fontSize: 12),
-            ),
-            if (_fragmentEnabled) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _lengthController,
-                      decoration: const InputDecoration(
-                        labelText: 'Length (bytes)',
-                        hintText: '1-3',
-                        isDense: true,
-                        border: OutlineInputBorder(),
-                      ),
-                      onChanged: (_) => _saveFragmentSettings(),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _intervalController,
-                      decoration: const InputDecoration(
-                        labelText: 'Interval (ms)',
-                        hintText: '10-20',
-                        isDense: true,
-                        border: OutlineInputBorder(),
-                      ),
-                      onChanged: (_) => _saveFragmentSettings(),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
       ),
     );
   }

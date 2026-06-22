@@ -11,7 +11,17 @@ import '../models/openvpn_config.dart';
 import '../services/openvpn_service.dart';
 
 class OpenVpnConfigsScreen extends StatefulWidget {
-  const OpenVpnConfigsScreen({super.key});
+  /// When opened as a result of the user tapping/sharing an `.ovpn` file, these
+  /// carry the imported file's name and content so the screen can immediately
+  /// offer to add it (no manual file picking needed).
+  final String? initialImportName;
+  final String? initialImportContent;
+
+  const OpenVpnConfigsScreen({
+    super.key,
+    this.initialImportName,
+    this.initialImportContent,
+  });
 
   @override
   State<OpenVpnConfigsScreen> createState() => _OpenVpnConfigsScreenState();
@@ -27,6 +37,40 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
   void initState() {
     super.initState();
     _loadConfigs();
+    // If we were launched from an .ovpn file, kick off the import flow once the
+    // first frame is drawn.
+    final content = widget.initialImportContent;
+    if (content != null && content.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startImportFromContent(
+          widget.initialImportName ?? 'Imported',
+          content,
+        );
+      });
+    }
+  }
+
+  /// Imports an .ovpn whose content we already have (from a VIEW/SEND intent).
+  Future<void> _startImportFromContent(
+      String suggestedName, String configContent) async {
+    String configName = suggestedName
+        .replaceAll('.ovpn', '')
+        .replaceAll('.conf', '')
+        .replaceAll('.open', '')
+        .trim();
+    if (configName.isEmpty) {
+      configName = OpenVpnService.extractConfigName(configContent);
+    }
+
+    final parsedInfo = OpenVpnConfig.parseConfigFile(configContent);
+    final hasEmbeddedCredentials =
+        parsedInfo['username'] != null && parsedInfo['username']!.isNotEmpty;
+
+    if (hasEmbeddedCredentials) {
+      await _showSimpleNameDialog(configName, configContent);
+    } else {
+      await _showCredentialsDialog(configName, configContent);
+    }
   }
 
   Future<void> _loadConfigs() async {

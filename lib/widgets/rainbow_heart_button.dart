@@ -1,16 +1,21 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-/// An attention-grabbing animated donate button.
-/// The heart cycles through a 7-color rainbow gradient while gently
-/// pulsing (scale) to draw the user's attention to support the app.
+/// A polished, eye-catching animated donate button.
+///
+/// The heart is filled with a smoothly rotating rainbow sweep gradient and
+/// performs a gentle "heartbeat" pulse. Kept subtle and graphical rather than
+/// flashy so it looks premium in the app bar.
 class RainbowHeartButton extends StatefulWidget {
   final VoidCallback onPressed;
   final String tooltip;
+  final double size;
 
   const RainbowHeartButton({
     super.key,
     required this.onPressed,
     this.tooltip = 'Support Us',
+    this.size = 26,
   });
 
   @override
@@ -19,89 +24,130 @@ class RainbowHeartButton extends StatefulWidget {
 
 class _RainbowHeartButtonState extends State<RainbowHeartButton>
     with TickerProviderStateMixin {
-  late final AnimationController _colorController;
-  late final AnimationController _pulseController;
+  late final AnimationController _spin;
+  late final AnimationController _beat;
+  late final Animation<double> _beatCurve;
 
-  // The 7 rainbow colors (ROYGBIV) used to tint the heart over time.
   static const List<Color> _rainbow = [
-    Color(0xFFFF1744), // red
-    Color(0xFFFF9100), // orange
-    Color(0xFFFFEA00), // yellow
-    Color(0xFF00E676), // green
-    Color(0xFF2979FF), // blue
-    Color(0xFF651FFF), // indigo
-    Color(0xFFD500F9), // violet
+    Color(0xFFFF3B6B), // pink-red
+    Color(0xFFFF9A3D), // orange
+    Color(0xFFFFE14D), // yellow
+    Color(0xFF4DE38A), // green
+    Color(0xFF38B6FF), // sky blue
+    Color(0xFF7C5CFF), // violet
+    Color(0xFFFF3B6B), // back to start (seamless loop)
   ];
 
   @override
   void initState() {
     super.initState();
-    _colorController = AnimationController(
+    _spin = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 4),
+      duration: const Duration(seconds: 5),
     )..repeat();
-    _pulseController = AnimationController(
+    _beat = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 850),
+      duration: const Duration(milliseconds: 1100),
     )..repeat(reverse: true);
+    _beatCurve = CurvedAnimation(parent: _beat, curve: Curves.easeInOut);
   }
 
   @override
   void dispose() {
-    _colorController.dispose();
-    _pulseController.dispose();
+    _spin.dispose();
+    _beat.dispose();
     super.dispose();
-  }
-
-  Color _currentColor(double t) {
-    // t in [0,1) -> interpolate across the rainbow ring.
-    final scaled = t * _rainbow.length;
-    final index = scaled.floor() % _rainbow.length;
-    final next = (index + 1) % _rainbow.length;
-    final localT = scaled - scaled.floor();
-    return Color.lerp(_rainbow[index], _rainbow[next], localT)!;
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge([_colorController, _pulseController]),
-      builder: (context, child) {
-        final color = _currentColor(_colorController.value);
-        final scale = 1.0 + (_pulseController.value * 0.22);
-        final glow = 4.0 + (_pulseController.value * 8.0);
-        return IconButton(
-          tooltip: widget.tooltip,
-          onPressed: widget.onPressed,
-          icon: Transform.scale(
+    return IconButton(
+      tooltip: widget.tooltip,
+      onPressed: widget.onPressed,
+      icon: AnimatedBuilder(
+        animation: Listenable.merge([_spin, _beatCurve]),
+        builder: (context, _) {
+          final scale = 1.0 + (_beatCurve.value * 0.14);
+          return Transform.scale(
             scale: scale,
-            child: ShaderMask(
-              blendMode: BlendMode.srcIn,
-              shaderCallback: (Rect bounds) {
-                return SweepGradient(
-                  colors: const [
-                    ..._rainbow,
-                    Color(0xFFFF1744),
-                  ],
-                  transform: GradientRotation(
-                    _colorController.value * 6.28318,
-                  ),
-                ).createShader(bounds);
-              },
-              child: Icon(
-                Icons.favorite,
-                color: color,
-                shadows: [
-                  Shadow(
-                    color: color.withValues(alpha: 0.8),
-                    blurRadius: glow,
-                  ),
-                ],
+            child: CustomPaint(
+              size: Size(widget.size, widget.size),
+              painter: _RainbowHeartPainter(
+                angle: _spin.value * 2 * math.pi,
+                colors: _rainbow,
+                glow: _beatCurve.value,
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
+}
+
+class _RainbowHeartPainter extends CustomPainter {
+  final double angle;
+  final List<Color> colors;
+  final double glow;
+
+  _RainbowHeartPainter({
+    required this.angle,
+    required this.colors,
+    required this.glow,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final path = _heartPath(size);
+
+    // Soft glow halo behind the heart.
+    final glowPaint = Paint()
+      ..color = colors.first.withValues(alpha: 0.18 + glow * 0.22)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 3 + glow * 3);
+    canvas.drawPath(path, glowPaint);
+
+    // Rotating rainbow sweep fill.
+    final shader = SweepGradient(
+      colors: colors,
+      transform: GradientRotation(angle),
+    ).createShader(rect);
+    final fillPaint = Paint()
+      ..shader = shader
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+    canvas.drawPath(path, fillPaint);
+
+    // Subtle top highlight for a glossy, graphical look.
+    final highlight = Paint()
+      ..color = Colors.white.withValues(alpha: 0.28)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
+    final hlPath = Path()
+      ..addOval(Rect.fromCircle(
+        center: Offset(size.width * 0.34, size.height * 0.32),
+        radius: size.width * 0.12,
+      ));
+    canvas.save();
+    canvas.clipPath(path);
+    canvas.drawPath(hlPath, highlight);
+    canvas.restore();
+  }
+
+  /// Classic heart shape scaled to [size].
+  Path _heartPath(Size size) {
+    final w = size.width;
+    final h = size.height;
+    final path = Path();
+    path.moveTo(w * 0.5, h * 0.88);
+    // left half
+    path.cubicTo(w * -0.08, h * 0.52, w * 0.14, h * 0.04, w * 0.5, h * 0.30);
+    // right half
+    path.cubicTo(w * 0.86, h * 0.04, w * 1.08, h * 0.52, w * 0.5, h * 0.88);
+    path.close();
+    return path;
+  }
+
+  @override
+  bool shouldRepaint(_RainbowHeartPainter old) =>
+      old.angle != angle || old.glow != glow;
 }

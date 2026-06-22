@@ -3,6 +3,7 @@ package com.forwin.vpn
 import android.content.Context
 import android.content.Intent
 import android.net.TrafficStats
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
@@ -18,8 +19,17 @@ import java.net.Socket
 class MainActivity: FlutterActivity() {
     private val DNS_CHANNEL = "com.forwin.vpn/dns"
     private val XRAY_CHANNEL = "com.forwin.vpn/xray"
+    private val IMPORT_CHANNEL = "com.forwin.vpn/import"
     private val VPN_REQUEST_CODE = 100
     private val XRAY_REQUEST_CODE = 101
+
+    // Holds an .ovpn file that the user opened/shared into the app (via VIEW or
+    // SEND intents) until the Flutter side pulls it with getPendingOvpnImport.
+    private var pendingOvpnName: String? = null
+    private var pendingOvpnContent: String? = null
+    // The import MethodChannel, kept so we can proactively notify Flutter when a
+    // new file arrives while the app is already running (onNewIntent).
+    private var importChannel: MethodChannel? = null
     
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         // OpenVPN permission handler
@@ -156,6 +166,114 @@ class MainActivity: FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // Import Channel — lets Flutter pull an .ovpn file that the user opened
+        // or shared into the app (Telegram, file managers, email, ...).
+        val importCh = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, IMPORT_CHANNEL)
+        importChannel = importCh
+        importCh.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getPendingOvpnImport" -> {
+                    // Parse the launch intent on first request (cold start).
+                    if (pendingOvpnContent == null) {
+                        handleIncomingIntent(intent)
+                    }
+                    val content = pendingOvpnContent
+                    if (content != null) {
+                        val map = HashMap<String, Any>()
+                        map["name"] = pendingOvpnName ?: "Imported"
+                        map["content"] = content
+                        // Consume it so it isn't imported twice.
+                        pendingOvpnName = null
+                        pendingOvpnContent = null
+                        result.success(map)
+                    } else {
+                        result.success(null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // App already running and a new .ovpn was opened/shared.
+        setIntent(intent)
+        if (handleIncomingIntent(intent)) {
+            // Tell Flutter to come pull it.
+            runOnUiThread {
+                importChannel?.invokeMethod("onOvpnImportAvailable", null)
+            }
+        }
+    }
+
+    /**
+     * Inspects an incoming VIEW/SEND intent for an .ovpn file. If one is found,
+     * its content is read and cached in [pendingOvpnContent]/[pendingOvpnName].
+     * Returns true if an .ovpn payload was captured.
+     */
+    private fun handleIncomingIntent(incoming: Intent?): Boolean {
+        if (incoming == null) return false
+        val action = incoming.action
+        val rawUri: Uri? = when (action) {
+            Intent.ACTION_VIEW -> incoming.data
+            Intent.ACTION_SEND -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    incoming.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    incoming.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                }
+            }
+            else -> null
+        }
+        val uri: Uri = rawUri ?: return false
+
+        return try {
+            val content = readUriText(uri) ?: return false
+            // Sanity check: must look like an OpenVPN config.
+            val looksLikeOvpn = content.contains("remote ", ignoreCase = true) ||
+                content.contains("<ca>", ignoreCase = true) ||
+                content.contains("client", ignoreCase = true) ||
+                content.contains("dev tun", ignoreCase = true)
+            if (!looksLikeOvpn) return false
+            pendingOvpnName = guessName(uri)
+            pendingOvpnContent = content
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to read .ovpn: ${e.message}", e)
+            false
+        }
+    }
+
+    /** Reads the text content behind a content:// or file:// URI. */
+    private fun readUriText(uri: Uri): String? {
+        return when (uri.scheme) {
+            "content" -> contentResolver.openInputStream(uri)?.use {
+                it.readBytes().toString(Charsets.UTF_8)
+            }
+            "file" -> uri.path?.let { java.io.File(it).readText(Charsets.UTF_8) }
+            else -> null
+        }
+    }
+
+    /** Best-effort display name (without extension) for an imported file. */
+    private fun guessName(uri: Uri): String {
+        var name = "Imported"
+        try {
+            if (uri.scheme == "content") {
+                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0 && cursor.moveToFirst()) {
+                        name = cursor.getString(idx) ?: name
+                    }
+                }
+            } else {
+                name = uri.lastPathSegment ?: name
+            }
+        } catch (_: Exception) { }
+        return name.substringBeforeLast('.').ifBlank { "Imported" }
     }
 
     /**
