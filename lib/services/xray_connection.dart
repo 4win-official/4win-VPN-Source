@@ -51,6 +51,26 @@ class XrayConnection {
     }
   }
 
+  /// Real delay test (v2rayNG style). Measures the latency of an actual HTTP
+  /// request routed through the proxy described by [configJson] (a proxy-only
+  /// config built by XrayConfigBuilder.buildForDelayTest). Returns latency in
+  /// ms, or -1 if the config does not work / times out.
+  static Future<int> measureDelay(String configJson,
+      {String url = 'https://www.google.com/generate_204'}) async {
+    try {
+      final result = await platform.invokeMethod('measureDelay', {
+        'configJson': configJson,
+        'url': url,
+      });
+      if (result is int) return result;
+      if (result is num) return result.toInt();
+      return -1;
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ Xray measureDelay error: $e');
+      return -1;
+    }
+  }
+
   /// Returns the bundled Xray core version string.
   static Future<String> version() async {
     try {

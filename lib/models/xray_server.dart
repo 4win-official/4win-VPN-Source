@@ -13,6 +13,16 @@ class XrayServer {
   final DateTime addedAt;
   int? ping;
 
+  /// Group this server belongs to. Empty for user-added servers. The built-in
+  /// subscription group uses [freeGroup]; servers in a locked group cannot be
+  /// deleted by the user.
+  final String group;
+
+  /// The free, auto-updated subscription group bundled with the app.
+  static const String freeGroup = '4win Free Servers';
+
+  bool get isLocked => group == freeGroup;
+
   XrayServer({
     required this.id,
     required this.remark,
@@ -22,6 +32,7 @@ class XrayServer {
     required this.port,
     DateTime? addedAt,
     this.ping,
+    this.group = '',
   }) : addedAt = addedAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
@@ -33,6 +44,7 @@ class XrayServer {
         'port': port,
         'addedAt': addedAt.toIso8601String(),
         'ping': ping,
+        'group': group,
       };
 
   factory XrayServer.fromJson(Map<String, dynamic> json) => XrayServer(
@@ -45,26 +57,42 @@ class XrayServer {
         addedAt: DateTime.tryParse(json['addedAt'] as String? ?? '') ??
             DateTime.now(),
         ping: (json['ping'] as num?)?.toInt(),
+        group: json['group'] as String? ?? '',
+      );
+
+  XrayServer copyWith({int? ping, String? group}) => XrayServer(
+        id: id,
+        remark: remark,
+        link: link,
+        protocol: protocol,
+        address: address,
+        port: port,
+        addedAt: addedAt,
+        ping: ping ?? this.ping,
+        group: group ?? this.group,
       );
 
   String get fullAddress => '$address:$port';
 
   /// Parse a share link into a [XrayServer]. Throws [FormatException] on
   /// unsupported / malformed links.
-  factory XrayServer.fromLink(String raw) {
+  factory XrayServer.fromLink(String raw, {String group = ''}) {
     final link = raw.trim();
     final lower = link.toLowerCase();
+    XrayServer s;
     if (lower.startsWith('vmess://')) {
-      return _parseVmess(link);
+      s = _parseVmess(link);
     } else if (lower.startsWith('vless://')) {
-      return _parseUriStyle(link, 'vless');
+      s = _parseUriStyle(link, 'vless');
     } else if (lower.startsWith('trojan://')) {
-      return _parseUriStyle(link, 'trojan');
+      s = _parseUriStyle(link, 'trojan');
     } else if (lower.startsWith('ss://')) {
-      return _parseShadowsocks(link);
+      s = _parseShadowsocks(link);
+    } else {
+      throw const FormatException(
+          'Unsupported link. Use vless://, vmess://, trojan:// or ss://');
     }
-    throw const FormatException(
-        'Unsupported link. Use vless://, vmess://, trojan:// or ss://');
+    return group.isEmpty ? s : s.copyWith(group: group);
   }
 
   static String _genId(String link) =>

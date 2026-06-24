@@ -174,6 +174,56 @@ class XrayConfigBuilder {
     return const JsonEncoder.withIndent('  ').convert(config);
   }
 
+  /// Builds a minimal proxy-only config used by the core's
+  /// measureOutboundDelay (the "real delay" test). It has just the proxy
+  /// outbound (optionally through the fragment dialer) — no inbounds/tun.
+  static String buildForDelayTest(
+    XrayServer server, {
+    bool fragmentEnabled = true,
+    String fragmentPackets = 'tlshello',
+    String fragmentLength = '1-3',
+    String fragmentInterval = '10-20',
+  }) {
+    final proxy = _buildProxyOutbound(server);
+    final outbounds = <Map<String, dynamic>>[];
+
+    if (fragmentEnabled) {
+      final stream = (proxy['streamSettings'] as Map<String, dynamic>?) ??
+          <String, dynamic>{};
+      final sockopt = (stream['sockopt'] as Map<String, dynamic>?) ??
+          <String, dynamic>{};
+      sockopt['dialerProxy'] = 'fragment';
+      stream['sockopt'] = sockopt;
+      proxy['streamSettings'] = stream;
+    }
+    proxy['tag'] = 'proxy';
+    outbounds.add(proxy);
+
+    if (fragmentEnabled) {
+      outbounds.add({
+        'tag': 'fragment',
+        'protocol': 'freedom',
+        'settings': {
+          'domainStrategy': 'UseIP',
+          'fragment': {
+            'packets': fragmentPackets,
+            'length': fragmentLength,
+            'interval': fragmentInterval,
+          },
+        },
+        'streamSettings': {
+          'sockopt': {'tcpNoDelay': true},
+        },
+      });
+    }
+
+    final config = <String, dynamic>{
+      'log': {'loglevel': 'none'},
+      'outbounds': outbounds,
+    };
+    return const JsonEncoder.withIndent('  ').convert(config);
+  }
+
   /// Build the main proxy outbound from the server's share link.
   static Map<String, dynamic> _buildProxyOutbound(XrayServer server) {
     switch (server.protocol) {

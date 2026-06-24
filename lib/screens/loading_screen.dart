@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -41,7 +42,16 @@ class _LoadingScreenState extends State<LoadingScreen> {
     
     // درخواست اجازه نوتیفیکیشن
     await _requestNotificationPermission();
-    
+
+    // لود سرورهای Xray در کنار سرورهای SSTP (بدون بلاک کردن ناوبری).
+    // ابتدا سرورهای ذخیره‌شده، سپس به‌روزرسانی گروه رایگان (با throttle داخلی).
+    unawaited(() async {
+      try {
+        await provider.loadXrayServers();
+        await provider.refreshXrayFreeGroup();
+      } catch (_) {}
+    }());
+
     // Wait for servers to load and test
     await Future.delayed(const Duration(milliseconds: 500));
     

@@ -34,6 +34,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _xrayFragment = true;
   final _xrayFragLengthController = TextEditingController(text: '1-3');
   final _xrayFragIntervalController = TextEditingController(text: '10-20');
+  // Xray concurrent delay-test count (how many configs tested at once).
+  int _xrayConcurrentTests = 30;
 
   @override
   void initState() {
@@ -84,7 +86,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getString('xray_fragment_length') ?? '1-3';
       _xrayFragIntervalController.text =
           prefs.getString('xray_fragment_interval') ?? '10-20';
+      _xrayConcurrentTests =
+          (prefs.getInt('xray_concurrent_tests') ?? 30).clamp(1, 300);
     });
+  }
+
+  Future<void> _saveXrayConcurrentTests() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('xray_concurrent_tests', _xrayConcurrentTests);
   }
 
   Future<void> _saveSstpFragment() async {
@@ -938,6 +947,104 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           );
                         },
                         onChanged: _saveXrayFragment,
+                      ),
+                      const SizedBox(height: 16),
+                      // 🧪 Concurrent delay-test count (default 30, up to 300)
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF1DE9B6)
+                                .withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.speed,
+                                    color: Color(0xFF1DE9B6), size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Concurrent Delay Test',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1DE9B6)
+                                        .withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '$_xrayConcurrentTests',
+                                    style: const TextStyle(
+                                      color: Color(0xFF1DE9B6),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'How many configs to ping-test at the same time '
+                              'when testing a group. Higher = faster but needs '
+                              'a more powerful phone. Default 30, max 300.',
+                              style: TextStyle(
+                                color:
+                                    isDark ? Colors.white60 : Colors.black54,
+                                fontSize: 12,
+                              ),
+                            ),
+                            Slider(
+                              value: _xrayConcurrentTests.toDouble(),
+                              min: 1,
+                              max: 300,
+                              divisions: 299,
+                              activeColor: const Color(0xFF1DE9B6),
+                              label: '$_xrayConcurrentTests',
+                              onChanged: (v) {
+                                setState(
+                                    () => _xrayConcurrentTests = v.round());
+                              },
+                              onChangeEnd: (v) => _saveXrayConcurrentTests(),
+                            ),
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('1',
+                                    style: TextStyle(
+                                        color: isDark
+                                            ? Colors.white38
+                                            : Colors.black38,
+                                        fontSize: 11)),
+                                Text('300',
+                                    style: TextStyle(
+                                        color: isDark
+                                            ? Colors.white38
+                                            : Colors.black38,
+                                        fontSize: 11)),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),

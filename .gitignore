@@ -24,3 +24,4 @@ Thumbs.db
 
 # Keep lib/ directory for source code!
 
+build_log.txt

@@ -33,7 +33,7 @@ class VpnProvider with ChangeNotifier {
   VpnService get vpnService => _vpnService;
   
   // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', or 'xray'
-  String _selectedProtocol = 'sstp';
+  String _selectedProtocol = 'xray';
   String get selectedProtocol => _selectedProtocol;
 
   // Xray (real Xray core / v2rayNG) servers
@@ -41,6 +41,13 @@ class VpnProvider with ChangeNotifier {
   XrayServer? _selectedXrayServer;
   List<XrayServer> get xrayServers => _xrayServers;
   XrayServer? get selectedXrayServer => _selectedXrayServer;
+  // ids of servers currently being delay-tested (for spinner UI)
+  final Set<String> _xrayTestingIds = {};
+  Set<String> get xrayTestingIds => _xrayTestingIds;
+  bool _xrayGroupTesting = false;
+  bool get xrayGroupTesting => _xrayGroupTesting;
+  bool _xrayRefreshing = false;
+  bool get xrayRefreshing => _xrayRefreshing;
   
   // Slow DNS configs
   List<SlowDnsConfig> _slowDnsConfigs = [];
@@ -896,6 +903,127 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Refresh the locked free subscription group from the server.
+  /// [force] ignores the throttle window. Returns number of free servers.
+  Future<int> refreshXrayFreeGroup({bool force = false}) async {
+    _xrayRefreshing = true;
+    notifyListeners();
+    try {
+      final count = await _xrayService.refreshFreeGroup(
+        minInterval: force ? null : const Duration(hours: 6),
+      );
+      await loadXrayServers();
+      return count;
+    } finally {
+      _xrayRefreshing = false;
+      notifyListeners();
+    }
+  }
+
+  /// Read the concurrent delay-test count from settings (default 30, max 300).
+  Future<int> getXrayConcurrentTests() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getInt('xray_concurrent_tests') ?? 30;
+    return v.clamp(1, 300);
+  }
+
+  Future<String> _buildDelayConfig(XrayServer server) async {
+    final prefs = await SharedPreferences.getInstance();
+    final fragEnabled = prefs.getBool('xray_fragment') ?? true;
+    final fragLength = prefs.getString('xray_fragment_length') ?? '1-3';
+    final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
+    return XrayConfigBuilder.buildForDelayTest(
+      server,
+      fragmentEnabled: fragEnabled,
+      fragmentLength: fragLength,
+      fragmentInterval: fragInterval,
+    );
+  }
+
+  /// Real-delay test (v2rayNG style) for a single server. Returns ms or -1.
+  /// Persists the measured ping and updates the in-memory list.
+  Future<int> measureXrayDelay(XrayServer server) async {
+    _xrayTestingIds.add(server.id);
+    notifyListeners();
+    try {
+      final config = await _buildDelayConfig(server);
+      final delay = await XrayConnection.measureDelay(config);
+      await _xrayService.updatePing(server.id, delay >= 0 ? delay : -1);
+      _applyPing(server.id, delay >= 0 ? delay : -1);
+      return delay;
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ measureXrayDelay: $e');
+      return -1;
+    } finally {
+      _xrayTestingIds.remove(server.id);
+      notifyListeners();
+    }
+  }
+
+  void _applyPing(String id, int? ping) {
+    final idx = _xrayServers.indexWhere((s) => s.id == id);
+    if (idx >= 0) _xrayServers[idx] = _xrayServers[idx].copyWith(ping: ping);
+  }
+
+  /// Concurrently delay-test a list of servers in batches sized by the
+  /// user's concurrent-test setting (default 30, up to 300). Updates pings
+  /// live so the UI reflects results as they arrive.
+  Future<void> testXrayServers(List<XrayServer> servers) async {
+    if (servers.isEmpty || _xrayGroupTesting) return;
+    _xrayGroupTesting = true;
+    notifyListeners();
+    try {
+      final batchSize = await getXrayConcurrentTests();
+      final results = <String, int?>{};
+      for (var i = 0; i < servers.length; i += batchSize) {
+        final batch = servers.sublist(
+            i, (i + batchSize).clamp(0, servers.length));
+        for (final s in batch) {
+          _xrayTestingIds.add(s.id);
+        }
+        notifyListeners();
+        await Future.wait(batch.map((s) async {
+          try {
+            final config = await _buildDelayConfig(s);
+            final delay = await XrayConnection.measureDelay(config);
+            final ping = delay >= 0 ? delay : -1;
+            results[s.id] = ping;
+            _applyPing(s.id, ping);
+          } catch (_) {
+            results[s.id] = -1;
+            _applyPing(s.id, -1);
+          } finally {
+            _xrayTestingIds.remove(s.id);
+          }
+        }));
+        notifyListeners();
+      }
+      await _xrayService.updatePings(results);
+    } finally {
+      _xrayGroupTesting = false;
+      notifyListeners();
+    }
+  }
+
+  /// Test the whole locked free group concurrently.
+  Future<void> testXrayFreeGroup() async {
+    final group = _xrayServers.where((s) => s.isLocked).toList();
+    await testXrayServers(group);
+  }
+
+  /// Concurrently test the locked free group and return the fastest working
+  /// server (lowest positive ping). Returns null if none respond.
+  Future<XrayServer?> _pickFastestFreeServer() async {
+    final group = _xrayServers.where((s) => s.isLocked).toList();
+    if (group.isEmpty) return null;
+    await testXrayServers(group);
+    final working = _xrayServers
+        .where((s) => s.isLocked && (s.ping ?? -1) > 0)
+        .toList()
+      ..sort((a, b) => (a.ping ?? 999999).compareTo(b.ping ?? 999999));
+    return working.isNotEmpty ? working.first : null;
+  }
+
   /// Connect using the real Xray core (libv2ray / v2rayNG) with TLS
   /// ClientHello fragmentation enabled.
   Future<void> _connectXray() async {
@@ -909,6 +1037,16 @@ class VpnProvider with ChangeNotifier {
     try {
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
+
+      // If the selected server belongs to the locked free group, test the
+      // group concurrently and pick the fastest working one before connecting.
+      if (_selectedXrayServer!.isLocked) {
+        final fastest = await _pickFastestFreeServer();
+        if (fastest != null) {
+          _selectedXrayServer = fastest;
+          await _xrayService.setSelectedId(fastest.id);
+        }
+      }
 
       // Read fragment settings (default ON).
       final prefs = await SharedPreferences.getInstance();

@@ -163,6 +163,19 @@ class MainActivity: FlutterActivity() {
                         runCatching { libv2ray.Libv2ray.checkVersionX() }.getOrDefault("unknown")
                     )
                 }
+                "measureDelay" -> {
+                    // REAL delay test (like v2rayNG's "real delay"): builds a
+                    // proxy-only config from the share link and times an HTTP
+                    // request to an international URL (Google generate_204)
+                    // through the proxy. Returns ms, or -1 on failure.
+                    val configJson = call.argument<String>("configJson") ?: ""
+                    val url = call.argument<String>("url")
+                        ?: "https://www.google.com/generate_204"
+                    Thread {
+                        val delay = measureXrayDelay(configJson, url)
+                        runOnUiThread { result.success(delay) }
+                    }.start()
+                }
                 else -> result.notImplemented()
             }
         }
@@ -244,6 +257,29 @@ class MainActivity: FlutterActivity() {
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Failed to read .ovpn: ${e.message}", e)
             false
+        }
+    }
+
+    // Ensures the Xray core env is initialized exactly once for delay tests.
+    @Volatile private var xrayEnvReady = false
+
+    /**
+     * Measures real proxy delay for [configJson] against [url] using the Xray
+     * core's measureOutboundDelay (same mechanism v2rayNG uses for "real
+     * delay"). Returns delay in ms, or -1 on failure / unreachable.
+     */
+    private fun measureXrayDelay(configJson: String, url: String): Long {
+        if (configJson.isBlank()) return -1L
+        return try {
+            if (!xrayEnvReady) {
+                go.Seq.setContext(applicationContext)
+                libv2ray.Libv2ray.initCoreEnv(filesDir.absolutePath, "")
+                xrayEnvReady = true
+            }
+            libv2ray.Libv2ray.measureOutboundDelay(configJson, url)
+        } catch (t: Throwable) {
+            android.util.Log.e("MainActivity", "measureDelay failed: ${t.message}")
+            -1L
         }
     }
 
