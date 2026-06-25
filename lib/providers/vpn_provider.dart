@@ -41,6 +41,10 @@ class VpnProvider with ChangeNotifier {
   XrayServer? _selectedXrayServer;
   List<XrayServer> get xrayServers => _xrayServers;
   XrayServer? get selectedXrayServer => _selectedXrayServer;
+  // وقتی کاربر «گروه رایگان» را به‌عنوان مقصد انتخاب کرده (بدون انتخاب یک سرور
+  // مشخص). در این حالت موقع اتصال، گروه تست و به بهترین سرور وصل می‌شویم.
+  bool _xrayFreeGroupSelected = false;
+  bool get xrayFreeGroupSelected => _xrayFreeGroupSelected;
   // ids of servers currently being delay-tested (for spinner UI)
   final Set<String> _xrayTestingIds = {};
   Set<String> get xrayTestingIds => _xrayTestingIds;
@@ -878,6 +882,8 @@ class VpnProvider with ChangeNotifier {
   Future<void> loadXrayServers() async {
     _xrayServers = await _xrayService.loadServers();
     _selectedXrayServer = await _xrayService.getSelectedServer();
+    final prefs = await SharedPreferences.getInstance();
+    _xrayFreeGroupSelected = prefs.getBool('xray_free_group_selected') ?? false;
     notifyListeners();
   }
 
@@ -896,10 +902,26 @@ class VpnProvider with ChangeNotifier {
     await loadXrayServers();
   }
 
-  /// Select an Xray server (for connecting).
+  /// Select an Xray server (for connecting). Picking a specific server clears
+  /// the "free group" selection.
   Future<void> selectXrayServer(XrayServer server) async {
     _selectedXrayServer = server;
+    _xrayFreeGroupSelected = false;
     await _xrayService.setSelectedId(server.id);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('xray_free_group_selected', false);
+    notifyListeners();
+  }
+
+  /// Select the locked free group as the connection target (no specific
+  /// server). On connect, the group is delay-tested and the fastest working
+  /// server is used automatically.
+  Future<void> selectXrayFreeGroup() async {
+    _xrayFreeGroupSelected = true;
+    _selectedXrayServer = null;
+    await _xrayService.setSelectedId(null);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('xray_free_group_selected', true);
     notifyListeners();
   }
 
@@ -1027,7 +1049,8 @@ class VpnProvider with ChangeNotifier {
   /// Connect using the real Xray core (libv2ray / v2rayNG) with TLS
   /// ClientHello fragmentation enabled.
   Future<void> _connectXray() async {
-    if (_selectedXrayServer == null) {
+    final hasFreeGroup = _xrayServers.any((s) => s.isLocked);
+    if (_selectedXrayServer == null && !(_xrayFreeGroupSelected && hasFreeGroup)) {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Please add and select an Xray server first';
       notifyListeners();
@@ -1038,13 +1061,19 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
 
-      // If the selected server belongs to the locked free group, test the
-      // group concurrently and pick the fastest working one before connecting.
-      if (_selectedXrayServer!.isLocked) {
+      // If the free group is selected (or the selected server is a locked
+      // free-group server), test the whole group concurrently and pick the
+      // fastest working one before connecting.
+      if (_xrayFreeGroupSelected || (_selectedXrayServer?.isLocked ?? false)) {
         final fastest = await _pickFastestFreeServer();
         if (fastest != null) {
           _selectedXrayServer = fastest;
           await _xrayService.setSelectedId(fastest.id);
+        } else if (_selectedXrayServer == null) {
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'No working free server found. Try again later.';
+          notifyListeners();
+          return;
         }
       }
 

@@ -139,32 +139,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         backgroundColor: Colors.transparent, // شفاف - یکپارچه
         elevation: 0,
-        title: Text(
-          '4win VPN',
-          style: TextStyle(
-            color: textColor,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '4win VPN',
+              style: TextStyle(
+                color: textColor,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 4),
+            // Help / Guide Button — کنار عنوان تا بالای صفحه خلوت بماند
+            IconButton(
+              icon: Icon(
+                Icons.help_outline,
+                color: iconColor,
+                size: 22,
+              ),
+              tooltip: 'Quick Guide',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const GuideScreen(),
+                  ),
+                );
+              },
+            ),
+          ],
         ),
         actions: [
-          // Help / Guide Button
-          IconButton(
-            icon: Icon(
-              Icons.help_outline,
-              color: iconColor,
-            ),
-            tooltip: 'Quick Guide',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const GuideScreen(),
-                ),
-              );
-            },
-          ),
-
           // Theme Selection Button
           IconButton(
             icon: Icon(

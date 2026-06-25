@@ -5,10 +5,12 @@ import '../providers/vpn_provider.dart';
 import '../models/xray_server.dart';
 
 /// Server list screen for the Xray protocol (real Xray core / v2rayNG).
-/// Shows the locked free subscription group (cannot be deleted) plus the
-/// user's own servers. Users can paste vless:// / vmess:// / trojan:// / ss://
-/// share links, ping-test (real delay) individually or a whole group, and
-/// pick one to connect.
+/// Servers are shown in collapsible groups: the locked free subscription
+/// group ("4win Free Servers", cannot be deleted) and the user's own servers.
+/// Tapping a group header selects the whole group as the connection target
+/// (the app will delay-test it and pick the fastest on connect). Tapping the
+/// down-arrow expands/collapses the group in place. Users can also paste
+/// vless:// / vmess:// / trojan:// / ss:// share links and ping-test servers.
 class XrayServersScreen extends StatefulWidget {
   const XrayServersScreen({super.key});
 
@@ -17,13 +19,17 @@ class XrayServersScreen extends StatefulWidget {
 }
 
 class _XrayServersScreenState extends State<XrayServersScreen> {
+  // Which groups are currently expanded. Free group starts collapsed so the
+  // list stays tidy; "My Servers" starts expanded.
+  bool _freeExpanded = false;
+  bool _userExpanded = true;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = context.read<VpnProvider>();
       await provider.loadXrayServers();
-      // Auto-refresh the free group (throttled to every 6h inside the service).
       await provider.refreshXrayFreeGroup();
     });
   }
@@ -123,8 +129,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     )
                   : const Icon(Icons.cloud_download_outlined),
               tooltip: 'Update free servers',
-              onPressed:
-                  provider.xrayRefreshing ? null : _refreshFreeGroup,
+              onPressed: provider.xrayRefreshing ? null : _refreshFreeGroup,
             ),
           ),
           IconButton(
@@ -137,10 +142,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
       body: Consumer<VpnProvider>(
         builder: (context, provider, _) {
           final all = provider.xrayServers;
-          final freeServers =
-              all.where((s) => s.isLocked).toList();
-          final userServers =
-              all.where((s) => !s.isLocked).toList();
+          final freeServers = all.where((s) => s.isLocked).toList();
+          final userServers = all.where((s) => !s.isLocked).toList();
 
           if (all.isEmpty) {
             return RefreshIndicator(
@@ -161,39 +164,30 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             child: ListView(
               padding: const EdgeInsets.all(12),
               children: [
-                if (freeServers.isNotEmpty) ...[
-                  _buildGroupHeader(
-                    provider,
-                    isDark,
-                    accent,
-                    XrayServer.freeGroup,
-                    freeServers,
+                if (freeServers.isNotEmpty)
+                  _buildGroup(
+                    provider: provider,
+                    isDark: isDark,
+                    accent: accent,
+                    title: XrayServer.freeGroup,
+                    servers: freeServers,
                     locked: true,
+                    expanded: _freeExpanded,
+                    onToggleExpand: () =>
+                        setState(() => _freeExpanded = !_freeExpanded),
                   ),
-                  ...freeServers.map((s) => _buildServerTile(
-                      provider,
-                      s,
-                      provider.selectedXrayServer?.id == s.id,
-                      isDark,
-                      accent)),
-                  const SizedBox(height: 16),
-                ],
-                if (userServers.isNotEmpty) ...[
-                  _buildGroupHeader(
-                    provider,
-                    isDark,
-                    accent,
-                    'My Servers',
-                    userServers,
+                if (userServers.isNotEmpty)
+                  _buildGroup(
+                    provider: provider,
+                    isDark: isDark,
+                    accent: accent,
+                    title: 'My Servers',
+                    servers: userServers,
                     locked: false,
+                    expanded: _userExpanded,
+                    onToggleExpand: () =>
+                        setState(() => _userExpanded = !_userExpanded),
                   ),
-                  ...userServers.map((s) => _buildServerTile(
-                      provider,
-                      s,
-                      provider.selectedXrayServer?.id == s.id,
-                      isDark,
-                      accent)),
-                ],
               ],
             ),
           );
@@ -208,42 +202,139 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     );
   }
 
-  Widget _buildGroupHeader(VpnProvider provider, bool isDark, Color accent,
-      String title, List<XrayServer> servers,
-      {required bool locked}) {
+  /// A collapsible group: header (tap = select group, arrow = expand) plus the
+  /// server tiles when expanded.
+  Widget _buildGroup({
+    required VpnProvider provider,
+    required bool isDark,
+    required Color accent,
+    required String title,
+    required List<XrayServer> servers,
+    required bool locked,
+    required bool expanded,
+    required VoidCallback onToggleExpand,
+  }) {
     final testing = provider.xrayGroupTesting;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8, top: 4, left: 4, right: 4),
-      child: Row(
+    // The free group can be selected as a whole; a specific selected server in
+    // this group also counts as "this group active".
+    final groupSelected = locked && provider.xrayFreeGroupSelected;
+    final aServerInGroupSelected = servers
+        .any((s) => provider.selectedXrayServer?.id == s.id);
+    final highlight = groupSelected || aServerInGroupSelected;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : Colors.black.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: highlight ? accent : Colors.transparent,
+          width: 2,
+        ),
+      ),
+      child: Column(
         children: [
-          Icon(locked ? Icons.lock : Icons.folder,
-              size: 18, color: accent),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              '$title (${servers.length})',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
+          // ---- Header ----
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: locked
+                ? () => provider.selectXrayFreeGroup()
+                : onToggleExpand,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(locked ? Icons.lock : Icons.folder,
+                      size: 20, color: accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$title (${servers.length})',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        if (locked)
+                          Text(
+                            groupSelected
+                                ? 'Selected — connects to the fastest server'
+                                : 'Tap to select • auto-picks fastest',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: groupSelected
+                                  ? accent
+                                  : (isDark
+                                      ? Colors.white54
+                                      : Colors.black45),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  // Selected indicator for the whole free group
+                  if (groupSelected)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(Icons.check_circle, color: accent),
+                    ),
+                  // Test-all button
+                  IconButton(
+                    tooltip: 'Test all',
+                    icon: testing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(Icons.speed, color: accent),
+                    onPressed: testing
+                        ? null
+                        : () => provider.testXrayServers(servers),
+                  ),
+                  // Expand / collapse arrow
+                  IconButton(
+                    tooltip: expanded ? 'Collapse' : 'Expand',
+                    icon: AnimatedRotation(
+                      turns: expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(Icons.keyboard_arrow_down,
+                          color: isDark ? Colors.white70 : Colors.black54),
+                    ),
+                    onPressed: onToggleExpand,
+                  ),
+                ],
               ),
             ),
           ),
-          TextButton.icon(
-            onPressed: testing
-                ? null
-                : () async {
-                    await provider.testXrayServers(servers);
-                  },
-            icon: testing
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.speed, size: 18),
-            label: Text(testing ? 'Testing…' : 'Test all'),
-            style: TextButton.styleFrom(foregroundColor: accent),
+          // ---- Body (animated expand) ----
+          AnimatedCrossFade(
+            firstChild: const SizedBox(width: double.infinity, height: 0),
+            secondChild: Column(
+              children: [
+                const Divider(height: 1),
+                ...servers.map((s) => _buildServerTile(
+                      provider,
+                      s,
+                      provider.selectedXrayServer?.id == s.id,
+                      isDark,
+                      accent,
+                    )),
+                const SizedBox(height: 6),
+              ],
+            ),
+            crossFadeState: expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 220),
           ),
         ],
       ),
@@ -301,92 +392,78 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   Widget _buildServerTile(VpnProvider provider, XrayServer s, bool selected,
       bool isDark, Color accent) {
     final testing = provider.xrayTestingIds.contains(s.id);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: selected ? accent : Colors.transparent,
-          width: 2,
-        ),
+    return ListTile(
+      dense: true,
+      leading: CircleAvatar(
+        radius: 18,
+        backgroundColor: accent.withValues(alpha: 0.15),
+        child: Icon(Icons.dns, color: accent, size: 18),
       ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: accent.withValues(alpha: 0.15),
-          child: Icon(Icons.dns, color: accent),
-        ),
-        title: Text(
-          s.remark.isEmpty ? s.address : s.remark,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${s.protocol.toUpperCase()} • ${s.fullAddress}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+      title: Text(
+        s.remark.isEmpty ? s.address : s.remark,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+      ),
+      subtitle: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '${s.protocol.toUpperCase()} • ${s.fullAddress}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: _pingColor(s.ping).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _pingLabel(s.ping),
+              style: TextStyle(
+                color: _pingColor(s.ping),
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(width: 6),
-            // Real-delay (ping) badge
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: _pingColor(s.ping).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _pingLabel(s.ping),
-                style: TextStyle(
-                  color: _pingColor(s.ping),
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Real-delay test button (v2rayNG style)
+          ),
+        ],
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Real delay test',
+            icon: testing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(Icons.speed, color: accent),
+            onPressed: testing ? null : () => provider.measureXrayDelay(s),
+          ),
+          if (selected)
+            Icon(Icons.check_circle, color: accent)
+          else
+            const Icon(Icons.radio_button_unchecked, color: Colors.grey),
+          if (!s.isLocked)
             IconButton(
-              tooltip: 'Real delay test',
-              icon: testing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(Icons.speed, color: accent),
-              onPressed:
-                  testing ? null : () => provider.measureXrayDelay(s),
+              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              onPressed: () => provider.removeXrayServer(s.id),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.only(left: 8, right: 8),
+              child: Icon(Icons.lock_outline, color: Colors.grey, size: 18),
             ),
-            if (selected)
-              Icon(Icons.check_circle, color: accent)
-            else
-              const Icon(Icons.radio_button_unchecked, color: Colors.grey),
-            // Locked servers cannot be deleted.
-            if (!s.isLocked)
-              IconButton(
-                icon: const Icon(Icons.delete_outline,
-                    color: Colors.redAccent),
-                onPressed: () => provider.removeXrayServer(s.id),
-              )
-            else
-              const Padding(
-                padding: EdgeInsets.only(left: 8, right: 8),
-                child: Icon(Icons.lock_outline,
-                    color: Colors.grey, size: 18),
-              ),
-          ],
-        ),
-        onTap: () => provider.selectXrayServer(s),
+        ],
       ),
+      onTap: () => provider.selectXrayServer(s),
     );
   }
 }
