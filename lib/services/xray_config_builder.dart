@@ -35,10 +35,13 @@ class XrayConfigBuilder {
     //    freedom outbound that performs TLS ClientHello fragmentation.
     if (fragmentEnabled) {
       // Tell the proxy outbound to dial through the fragment outbound.
-      final stream = (proxy['streamSettings'] as Map<String, dynamic>?) ??
-          <String, dynamic>{};
-      final sockopt = (stream['sockopt'] as Map<String, dynamic>?) ??
-          <String, dynamic>{};
+      // NOTE: rebuild the maps as <String, dynamic> — outbound builders may
+      // return map literals that Dart infers as Map<String,String>, which
+      // would throw when we insert non-String values (e.g. nested maps).
+      final stream = Map<String, dynamic>.from(
+          (proxy['streamSettings'] as Map?) ?? const {});
+      final sockopt = Map<String, dynamic>.from(
+          (stream['sockopt'] as Map?) ?? const {});
       sockopt['dialerProxy'] = 'fragment';
       stream['sockopt'] = sockopt;
       proxy['streamSettings'] = stream;
@@ -188,10 +191,10 @@ class XrayConfigBuilder {
     final outbounds = <Map<String, dynamic>>[];
 
     if (fragmentEnabled) {
-      final stream = (proxy['streamSettings'] as Map<String, dynamic>?) ??
-          <String, dynamic>{};
-      final sockopt = (stream['sockopt'] as Map<String, dynamic>?) ??
-          <String, dynamic>{};
+      final stream = Map<String, dynamic>.from(
+          (proxy['streamSettings'] as Map?) ?? const {});
+      final sockopt = Map<String, dynamic>.from(
+          (stream['sockopt'] as Map?) ?? const {});
       sockopt['dialerProxy'] = 'fragment';
       stream['sockopt'] = sockopt;
       proxy['streamSettings'] = stream;
@@ -381,7 +384,7 @@ class XrayConfigBuilder {
           }
         ],
       },
-      'streamSettings': {
+      'streamSettings': <String, dynamic>{
         'network': 'tcp',
       },
     };
