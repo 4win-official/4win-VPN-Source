@@ -30,7 +30,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = context.read<VpnProvider>();
       await provider.loadXrayServers();
-      await provider.refreshXrayFreeGroup();
+      await provider.refreshXrayFreeGroup(force: true);
     });
   }
 

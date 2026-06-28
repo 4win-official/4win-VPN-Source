@@ -31,11 +31,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _sstpFragIntervalController = TextEditingController(text: '10-20');
 
   // Xray fragment (moved here from the server list)
-  bool _xrayFragment = true;
+  bool _xrayFragment = false;
   final _xrayFragLengthController = TextEditingController(text: '1-3');
   final _xrayFragIntervalController = TextEditingController(text: '10-20');
   // Xray concurrent delay-test count (how many configs tested at once).
-  int _xrayConcurrentTests = 30;
+  int _xrayConcurrentTests = 300;
 
   @override
   void initState() {
@@ -81,13 +81,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _sstpFragIntervalController.text =
           prefs.getString('sstp_fragment_interval') ?? '10-20';
       // Xray fragment
-      _xrayFragment = prefs.getBool('xray_fragment') ?? true;
+      _xrayFragment = prefs.getBool('xray_fragment') ?? false;
       _xrayFragLengthController.text =
           prefs.getString('xray_fragment_length') ?? '1-3';
       _xrayFragIntervalController.text =
           prefs.getString('xray_fragment_interval') ?? '10-20';
       _xrayConcurrentTests =
-          (prefs.getInt('xray_concurrent_tests') ?? 30).clamp(1, 300);
+          (prefs.getInt('xray_concurrent_tests') ?? 300).clamp(1, 300);
     });
   }
 

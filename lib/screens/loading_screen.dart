@@ -48,7 +48,8 @@ class _LoadingScreenState extends State<LoadingScreen> {
     unawaited(() async {
       try {
         await provider.loadXrayServers();
-        await provider.refreshXrayFreeGroup();
+        // همیشه در هر بار باز شدن اپ، سرورهای Xray از لینک آپدیت شوند.
+        await provider.refreshXrayFreeGroup(force: true);
       } catch (_) {}
     }());
 

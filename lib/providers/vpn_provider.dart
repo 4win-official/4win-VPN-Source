@@ -945,13 +945,13 @@ class VpnProvider with ChangeNotifier {
   /// Read the concurrent delay-test count from settings (default 30, max 300).
   Future<int> getXrayConcurrentTests() async {
     final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getInt('xray_concurrent_tests') ?? 30;
+    final v = prefs.getInt('xray_concurrent_tests') ?? 300;
     return v.clamp(1, 300);
   }
 
   Future<String> _buildDelayConfig(XrayServer server) async {
     final prefs = await SharedPreferences.getInstance();
-    final fragEnabled = prefs.getBool('xray_fragment') ?? true;
+    final fragEnabled = prefs.getBool('xray_fragment') ?? false;
     final fragLength = prefs.getString('xray_fragment_length') ?? '1-3';
     final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
     return XrayConfigBuilder.buildForDelayTest(
@@ -1061,15 +1061,15 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
 
-      // If the free group is selected (or the selected server is a locked
-      // free-group server), test the whole group concurrently and pick the
-      // fastest working one before connecting.
-      if (_xrayFreeGroupSelected || (_selectedXrayServer?.isLocked ?? false)) {
+      // Only when the WHOLE free group is selected (not a specific server),
+      // test the group concurrently and connect to the fastest. If the user
+      // manually picked a specific server, connect to exactly that one.
+      if (_xrayFreeGroupSelected && _selectedXrayServer == null) {
         final fastest = await _pickFastestFreeServer();
         if (fastest != null) {
           _selectedXrayServer = fastest;
           await _xrayService.setSelectedId(fastest.id);
-        } else if (_selectedXrayServer == null) {
+        } else {
           _status = VpnConnectionStatus.error;
           _errorMessage = 'No working free server found. Try again later.';
           notifyListeners();
@@ -1077,9 +1077,9 @@ class VpnProvider with ChangeNotifier {
         }
       }
 
-      // Read fragment settings (default ON).
+      // Read fragment settings (default OFF).
       final prefs = await SharedPreferences.getInstance();
-      final fragEnabled = prefs.getBool('xray_fragment') ?? true;
+      final fragEnabled = prefs.getBool('xray_fragment') ?? false;
       final fragLength = prefs.getString('xray_fragment_length') ?? '1-3';
       final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
 
