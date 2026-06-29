@@ -95,9 +95,12 @@ class XrayServer {
     return group.isEmpty ? s : s.copyWith(group: group);
   }
 
+  // Deterministic id derived ONLY from the link, so a server keeps the same id
+  // across subscription refreshes (otherwise the user's selection would be lost
+  // every time the free group is re-fetched).
   static String _genId(String link) =>
-      '${link.hashCode.toUnsigned(32).toRadixString(16)}'
-      '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+      'x${link.hashCode.toUnsigned(32).toRadixString(16)}'
+      '${link.length.toRadixString(16)}';
 
   // ---- VMess (base64 JSON payload) ----
   static XrayServer _parseVmess(String link) {

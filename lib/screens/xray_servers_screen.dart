@@ -285,6 +285,24 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                       padding: const EdgeInsets.only(right: 4),
                       child: Icon(Icons.check_circle, color: accent),
                     ),
+                  // Next server (only when the whole group is selected)
+                  if (groupSelected)
+                    IconButton(
+                      tooltip: 'Next server',
+                      icon: Icon(Icons.skip_next, color: accent),
+                      onPressed: () async {
+                        await provider.selectNextFreeServer();
+                        final s = provider.selectedXrayServer;
+                        if (!mounted || s == null) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                                'Next: ${s.remark.isEmpty ? s.address : s.remark}'),
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                    ),
                   // Test-all button
                   IconButton(
                     tooltip: 'Test all',

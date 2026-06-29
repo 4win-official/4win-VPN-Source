@@ -11,10 +11,59 @@ class XrayServerService {
   static const String _storageKey = 'xray_servers';
   static const String _selectedKey = 'selected_xray_server';
   static const String _subUpdatedKey = 'xray_sub_updated_at';
+  static const String _subUrlsKey = 'xray_sub_urls';
 
-  /// Our free subscription (one share link per line).
+  /// Our built-in free subscription (one share link per line).
   static const String subscriptionUrl =
       'https://raw.githubusercontent.com/4win-official/sub/refs/heads/main/config.txt';
+
+  /// User-added subscription links (in addition to the built-in one).
+  Future<List<String>> getSubUrls() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_subUrlsKey) ?? [];
+  }
+
+  /// Add a subscription URL. Returns false if empty/duplicate/invalid.
+  Future<bool> addSubUrl(String url) async {
+    final u = url.trim();
+    if (u.isEmpty || !u.startsWith('http')) return false;
+    final prefs = await SharedPreferences.getInstance();
+    final urls = prefs.getStringList(_subUrlsKey) ?? [];
+    if (urls.contains(u)) return false;
+    urls.add(u);
+    await prefs.setStringList(_subUrlsKey, urls);
+    return true;
+  }
+
+  Future<void> removeSubUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    final urls = prefs.getStringList(_subUrlsKey) ?? [];
+    urls.remove(url);
+    await prefs.setStringList(_subUrlsKey, urls);
+  }
+
+  Future<List<String>> _fetchLinks(String url) async {
+    try {
+      final res = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode != 200) return [];
+      var body = res.body.trim();
+      if (body.isEmpty) return [];
+      if (!body.contains('://')) {
+        try {
+          body = utf8.decode(base64.decode(_padBase64(body)));
+        } catch (_) {/* not base64 */}
+      }
+      return body
+          .split(RegExp(r'[\r\n]+'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty && e.contains('://'))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
 
   Future<List<XrayServer>> loadServers() async {
     try {
@@ -92,26 +141,13 @@ class XrayServerService {
         }
       }
 
-      final res = await http
-          .get(Uri.parse(subscriptionUrl))
-          .timeout(const Duration(seconds: 20));
-      if (res.statusCode != 200) return 0;
-
-      var body = res.body.trim();
-      if (body.isEmpty) return 0;
-
-      // Subscriptions are sometimes base64-encoded as a whole; detect & decode.
-      if (!body.contains('://')) {
-        try {
-          body = utf8.decode(base64.decode(_padBase64(body)));
-        } catch (_) {/* not base64, use as-is */}
+      // Fetch the built-in subscription plus any user-added ones.
+      final urls = <String>[subscriptionUrl, ...await getSubUrls()];
+      final lines = <String>[];
+      for (final u in urls) {
+        lines.addAll(await _fetchLinks(u));
       }
-
-      final lines = body
-          .split(RegExp(r'[\r\n]+'))
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty && e.contains('://'))
-          .toList();
+      if (lines.isEmpty) return 0;
 
       final freeServers = <XrayServer>[];
       final seenLinks = <String>{};

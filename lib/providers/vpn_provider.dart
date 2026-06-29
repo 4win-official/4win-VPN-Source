@@ -925,6 +925,20 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Subscription URL management (Xray settings).
+  Future<List<String>> getXraySubUrls() => _xrayService.getSubUrls();
+
+  Future<bool> addXraySubUrl(String url) async {
+    final ok = await _xrayService.addSubUrl(url);
+    if (ok) await refreshXrayFreeGroup(force: true);
+    return ok;
+  }
+
+  Future<void> removeXraySubUrl(String url) async {
+    await _xrayService.removeSubUrl(url);
+    await refreshXrayFreeGroup(force: true);
+  }
+
   /// Refresh the locked free subscription group from the server.
   /// [force] ignores the throttle window. Returns number of free servers.
   Future<int> refreshXrayFreeGroup({bool force = false}) async {
@@ -1021,16 +1035,55 @@ class VpnProvider with ChangeNotifier {
         notifyListeners();
       }
       await _xrayService.updatePings(results);
+      await _sortXrayByPing();
     } finally {
       _xrayGroupTesting = false;
       notifyListeners();
     }
   }
 
+  /// Sort servers so that lower (better) ping comes first within each group.
+  /// Ordering key: working pings ascending, then untested, then failed last.
+  /// The new order is persisted so "next server" walks best -> worst.
+  Future<void> _sortXrayByPing() async {
+    int rank(XrayServer s) {
+      final p = s.ping;
+      if (p == null) return 1; // untested -> middle
+      if (p < 0) return 2; // failed -> last
+      return 0; // working -> first
+    }
+
+    _xrayServers.sort((a, b) {
+      // Keep the locked free group above user servers.
+      if (a.isLocked != b.isLocked) return a.isLocked ? -1 : 1;
+      final ra = rank(a), rb = rank(b);
+      if (ra != rb) return ra.compareTo(rb);
+      return (a.ping ?? 999999).compareTo(b.ping ?? 999999);
+    });
+    await _xrayService.saveServers(_xrayServers);
+    notifyListeners();
+  }
+
   /// Test the whole locked free group concurrently.
   Future<void> testXrayFreeGroup() async {
     final group = _xrayServers.where((s) => s.isLocked).toList();
     await testXrayServers(group);
+  }
+
+  /// "Next server": when the whole free group is selected, move the selection
+  /// to the next server in the (ping-sorted) free list and connect to it.
+  /// Does nothing if a specific server was picked manually.
+  Future<void> selectNextFreeServer() async {
+    if (!_xrayFreeGroupSelected) return;
+    final group = _xrayServers.where((s) => s.isLocked).toList();
+    if (group.isEmpty) return;
+    final curId = _selectedXrayServer?.id;
+    var idx = group.indexWhere((s) => s.id == curId);
+    idx = (idx + 1) % group.length; // wrap around; -1 -> 0
+    final next = group[idx];
+    _selectedXrayServer = next;
+    await _xrayService.setSelectedId(next.id);
+    notifyListeners();
   }
 
   /// Concurrently test the locked free group and return the fastest working

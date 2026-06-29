@@ -154,6 +154,131 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// Subscription links card: list user-added sub URLs + add/remove.
+  Widget _buildSubLinksCard(bool isDark, VpnProvider provider) {
+    const accent = Color(0xFF1DE9B6);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.link, color: accent, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Subscription Links',
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _addSubLinkDialog(provider),
+                icon: const Icon(Icons.add, size: 18, color: accent),
+                label: const Text('Add', style: TextStyle(color: accent)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Add subscription URLs. Their servers are merged into the free '
+            'group and refreshed on every app launch.',
+            style: TextStyle(
+              color: isDark ? Colors.white60 : Colors.black54,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 8),
+          FutureBuilder<List<String>>(
+            future: provider.getXraySubUrls(),
+            builder: (context, snap) {
+              final urls = snap.data ?? [];
+              if (urls.isEmpty) {
+                return Text(
+                  'No custom links added.',
+                  style: TextStyle(
+                    color: isDark ? Colors.white38 : Colors.black38,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                );
+              }
+              return Column(
+                children: urls
+                    .map((u) => ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.cloud_outlined,
+                              size: 18, color: accent),
+                          title: Text(u,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12)),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline,
+                                color: Colors.redAccent, size: 20),
+                            onPressed: () async {
+                              await provider.removeXraySubUrl(u);
+                              if (mounted) setState(() {});
+                            },
+                          ),
+                        ))
+                    .toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addSubLinkDialog(VpnProvider provider) async {
+    final controller = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Subscription Link'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'https://example.com/sub.txt',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('Add')),
+        ],
+      ),
+    );
+    if (url == null || url.trim().isEmpty) return;
+    final ok = await provider.addXraySubUrl(url.trim());
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Subscription added & refreshed' : 'Invalid or duplicate link'),
+        backgroundColor: ok ? Colors.green : Colors.red,
+      ),
+    );
+  }
+
   /// Reusable fragment configuration card (used by both SSTP and Xray).
   Widget _buildFragmentCard({
     required bool isDark,
@@ -1046,6 +1171,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      // 🔗 Subscription links
+                      _buildSubLinksCard(isDark, provider),
                     ],
                   ),
                   const SizedBox(height: 24),
