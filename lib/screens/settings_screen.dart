@@ -248,12 +248,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final url = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Subscription Link'),
+        title: const Text('Add Subscription / Link'),
         content: TextField(
           controller: controller,
           autofocus: true,
+          maxLines: 3,
           decoration: const InputDecoration(
-            hintText: 'https://example.com/sub.txt',
+            hintText: 'https://example.com/sub.txt\nor vless:// , vmess:// , trojan:// , ss://',
             border: OutlineInputBorder(),
           ),
         ),

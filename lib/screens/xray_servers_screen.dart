@@ -28,9 +28,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final provider = context.read<VpnProvider>();
-      await provider.loadXrayServers();
-      await provider.refreshXrayFreeGroup(force: true);
+      // فقط لود از حافظه؛ آپدیت از لینک یک‌بار موقع باز شدن اپ انجام می‌شود.
+      await context.read<VpnProvider>().loadXrayServers();
     });
   }
 
@@ -284,24 +283,6 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     Padding(
                       padding: const EdgeInsets.only(right: 4),
                       child: Icon(Icons.check_circle, color: accent),
-                    ),
-                  // Next server (only when the whole group is selected)
-                  if (groupSelected)
-                    IconButton(
-                      tooltip: 'Next server',
-                      icon: Icon(Icons.skip_next, color: accent),
-                      onPressed: () async {
-                        await provider.selectNextFreeServer();
-                        final s = provider.selectedXrayServer;
-                        if (!mounted || s == null) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                                'Next: ${s.remark.isEmpty ? s.address : s.remark}'),
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      },
                     ),
                   // Test-all button
                   IconButton(

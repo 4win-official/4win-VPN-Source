@@ -669,31 +669,91 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   
                   // Xray: Always show "Xray Servers" button
                   if (provider.selectedProtocol == 'xray') {
-                    return SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const XrayServersScreen(),
+                    return Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const XrayServersScreen(),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.rocket_launch),
+                            label: const Text(
+                              'Xray Servers',
+                              style: TextStyle(fontSize: 16),
                             ),
-                          );
-                        },
-                        icon: const Icon(Icons.rocket_launch),
-                        label: const Text(
-                          'Xray Servers',
-                          style: TextStyle(fontSize: 16),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          backgroundColor: Colors.tealAccent.shade700,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            style: ElevatedButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 16),
+                              backgroundColor: Colors.tealAccent.shade700,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                        // Next server – only when the free group is selected.
+                        if (provider.xrayFreeGroupSelected) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: provider.isConnecting
+                                  ? null
+                                  : () async {
+                                      await provider.selectNextFreeServer();
+                                      final s = provider.selectedXrayServer;
+                                      if (!context.mounted || s == null) {
+                                        return;
+                                      }
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                              'Next: ${s.remark.isEmpty ? s.address : s.remark}'),
+                                          duration:
+                                              const Duration(seconds: 1),
+                                        ),
+                                      );
+                                    },
+                              icon: Icon(
+                                Icons.skip_next,
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.black87,
+                              ),
+                              label: Text(
+                                'Next Server',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 16),
+                                side: BorderSide(
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.black12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     );
                   }
 

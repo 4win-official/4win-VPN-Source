@@ -928,10 +928,12 @@ class VpnProvider with ChangeNotifier {
   /// Subscription URL management (Xray settings).
   Future<List<String>> getXraySubUrls() => _xrayService.getSubUrls();
 
+  /// Accepts an http subscription URL OR raw share link(s). Returns true if
+  /// anything was added. Refreshes so the new entries show in the list.
   Future<bool> addXraySubUrl(String url) async {
-    final ok = await _xrayService.addSubUrl(url);
-    if (ok) await refreshXrayFreeGroup(force: true);
-    return ok;
+    final added = await _xrayService.addSubInput(url);
+    if (added > 0) await refreshXrayFreeGroup(force: true);
+    return added > 0;
   }
 
   Future<void> removeXraySubUrl(String url) async {

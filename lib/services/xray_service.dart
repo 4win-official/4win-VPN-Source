@@ -35,6 +35,50 @@ class XrayServerService {
     return true;
   }
 
+  /// Adds whatever the user pasted in the Xray sub-link box. Accepts EITHER
+  /// an http(s) subscription URL (stored and merged into the free group on
+  /// every refresh) OR one/more raw share links (vless/vmess/trojan/ss),
+  /// which are added immediately as locked free-group servers so they show
+  /// up in the server list right away. Returns count added (>0 = success).
+  Future<int> addSubInput(String raw) async {
+    final text = raw.trim();
+    if (text.isEmpty) return 0;
+
+    // Lines that look like share links go straight into the free group.
+    final shareLines = text
+        .split(RegExp(r'[\r\n]+'))
+        .map((e) => e.trim())
+        .where((e) => e.contains('://') && !e.startsWith('http'))
+        .toList();
+
+    int added = 0;
+
+    if (shareLines.isNotEmpty) {
+      final all = await loadServers();
+      for (final line in shareLines) {
+        try {
+          final s = XrayServer.fromLink(line, group: XrayServer.freeGroup);
+          if (all.any((x) => x.link == s.link)) continue;
+          all.add(s);
+          added++;
+        } catch (_) {/* skip bad link */}
+      }
+      if (added > 0) await saveServers(all);
+    }
+
+    // Anything that is an http(s) URL is treated as a subscription link.
+    final urlLines = text
+        .split(RegExp(r'[\r\n]+'))
+        .map((e) => e.trim())
+        .where((e) => e.startsWith('http'))
+        .toList();
+    for (final u in urlLines) {
+      if (await addSubUrl(u)) added++;
+    }
+
+    return added;
+  }
+
   Future<void> removeSubUrl(String url) async {
     final prefs = await SharedPreferences.getInstance();
     final urls = prefs.getStringList(_subUrlsKey) ?? [];
