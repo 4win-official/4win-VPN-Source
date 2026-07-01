@@ -13,15 +13,18 @@ class XrayServer {
   final DateTime addedAt;
   int? ping;
 
-  /// Group this server belongs to. Empty for user-added servers. The built-in
-  /// subscription group uses [freeGroup]; servers in a locked group cannot be
-  /// deleted by the user.
+  /// Group this server belongs to. Empty for user-added individual servers.
+  /// The built-in subscription uses [freeGroup]; each user-added subscription
+  /// link gets its OWN group name. Any server in a (non-empty) group is
+  /// "locked" — it comes from a subscription and cannot be deleted directly.
   final String group;
 
   /// The free, auto-updated subscription group bundled with the app.
   static const String freeGroup = '4win Free Servers';
 
-  bool get isLocked => group == freeGroup;
+  /// A server is locked (subscription-managed, non-deletable) when it belongs
+  /// to any named group. Individual user servers have an empty group.
+  bool get isLocked => group.isNotEmpty;
 
   XrayServer({
     required this.id,

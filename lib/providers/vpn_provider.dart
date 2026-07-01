@@ -41,13 +41,19 @@ class VpnProvider with ChangeNotifier {
   XrayServer? _selectedXrayServer;
   List<XrayServer> get xrayServers => _xrayServers;
   XrayServer? get selectedXrayServer => _selectedXrayServer;
-  // وقتی کاربر «گروه رایگان» را به‌عنوان مقصد انتخاب کرده (بدون انتخاب یک سرور
-  // مشخص). در این حالت موقع اتصال، گروه تست و به بهترین سرور وصل می‌شویم.
-  bool _xrayFreeGroupSelected = false;
-  bool get xrayFreeGroupSelected => _xrayFreeGroupSelected;
+  // نام گروهی که کاربر به‌عنوان مقصد انتخاب کرده (بدون انتخاب یک سرور مشخص).
+  // در این حالت موقع اتصال، آن گروه تست و به بهترین سرورش وصل می‌شویم.
+  String? _selectedXrayGroup;
+  String? get selectedXrayGroup => _selectedXrayGroup;
+  bool get xrayFreeGroupSelected => _selectedXrayGroup != null;
+  bool xrayGroupSelectedFor(String group) => _selectedXrayGroup == group;
   // ids of servers currently being delay-tested (for spinner UI)
   final Set<String> _xrayTestingIds = {};
   Set<String> get xrayTestingIds => _xrayTestingIds;
+  // group names currently running a delay test (per-group spinner)
+  final Set<String> _xrayTestingGroups = {};
+  bool xrayGroupTestingFor(String group) =>
+      _xrayTestingGroups.contains(group);
   bool _xrayGroupTesting = false;
   bool get xrayGroupTesting => _xrayGroupTesting;
   bool _xrayRefreshing = false;
@@ -883,7 +889,13 @@ class VpnProvider with ChangeNotifier {
     _xrayServers = await _xrayService.loadServers();
     _selectedXrayServer = await _xrayService.getSelectedServer();
     final prefs = await SharedPreferences.getInstance();
-    _xrayFreeGroupSelected = prefs.getBool('xray_free_group_selected') ?? false;
+    _selectedXrayGroup = prefs.getString('xray_selected_group');
+    // If the selected group no longer exists, drop the selection.
+    if (_selectedXrayGroup != null &&
+        !_xrayServers.any((s) => s.group == _selectedXrayGroup)) {
+      _selectedXrayGroup = null;
+      await prefs.remove('xray_selected_group');
+    }
     notifyListeners();
   }
 
@@ -903,27 +915,30 @@ class VpnProvider with ChangeNotifier {
   }
 
   /// Select an Xray server (for connecting). Picking a specific server clears
-  /// the "free group" selection.
+  /// the group selection.
   Future<void> selectXrayServer(XrayServer server) async {
     _selectedXrayServer = server;
-    _xrayFreeGroupSelected = false;
+    _selectedXrayGroup = null;
     await _xrayService.setSelectedId(server.id);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('xray_free_group_selected', false);
+    await prefs.remove('xray_selected_group');
     notifyListeners();
   }
 
-  /// Select the locked free group as the connection target (no specific
-  /// server). On connect, the group is delay-tested and the fastest working
-  /// server is used automatically.
-  Future<void> selectXrayFreeGroup() async {
-    _xrayFreeGroupSelected = true;
+  /// Select a whole group as the connection target (no specific server). On
+  /// connect, that group is delay-tested and the fastest working server used.
+  Future<void> selectXrayGroup(String group) async {
+    _selectedXrayGroup = group;
     _selectedXrayServer = null;
     await _xrayService.setSelectedId(null);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('xray_free_group_selected', true);
+    await prefs.setString('xray_selected_group', group);
     notifyListeners();
   }
+
+  /// Backwards-compatible helper: select the built-in free group.
+  Future<void> selectXrayFreeGroup() =>
+      selectXrayGroup(XrayServer.freeGroup);
 
   /// Subscription URL management (Xray settings).
   Future<List<String>> getXraySubUrls() => _xrayService.getSubUrls();
@@ -1009,6 +1024,10 @@ class VpnProvider with ChangeNotifier {
   Future<void> testXrayServers(List<XrayServer> servers) async {
     if (servers.isEmpty || _xrayGroupTesting) return;
     _xrayGroupTesting = true;
+    // Mark only the group(s) these servers belong to as "testing" so the
+    // spinner shows on the tapped group only, not every group.
+    final groups = servers.map((s) => s.group).toSet();
+    _xrayTestingGroups.addAll(groups);
     notifyListeners();
     try {
       final batchSize = await getXrayConcurrentTests();
@@ -1040,6 +1059,7 @@ class VpnProvider with ChangeNotifier {
       await _sortXrayByPing();
     } finally {
       _xrayGroupTesting = false;
+      _xrayTestingGroups.removeAll(groups);
       notifyListeners();
     }
   }
@@ -1055,9 +1075,16 @@ class VpnProvider with ChangeNotifier {
       return 0; // working -> first
     }
 
+    // Preserve group ordering; only sort servers WITHIN the same group.
+    final order = <String, int>{};
+    var next = 0;
+    for (final s in _xrayServers) {
+      order.putIfAbsent(s.group, () => next++);
+    }
     _xrayServers.sort((a, b) {
-      // Keep the locked free group above user servers.
-      if (a.isLocked != b.isLocked) return a.isLocked ? -1 : 1;
+      if (a.group != b.group) {
+        return order[a.group]!.compareTo(order[b.group]!);
+      }
       final ra = rank(a), rb = rank(b);
       if (ra != rb) return ra.compareTo(rb);
       return (a.ping ?? 999999).compareTo(b.ping ?? 999999);
@@ -1066,18 +1093,18 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Test the whole locked free group concurrently.
-  Future<void> testXrayFreeGroup() async {
-    final group = _xrayServers.where((s) => s.isLocked).toList();
-    await testXrayServers(group);
+  /// Servers of the currently selected group (empty if none selected).
+  List<XrayServer> _selectedGroupServers() {
+    final g = _selectedXrayGroup;
+    if (g == null) return const [];
+    return _xrayServers.where((s) => s.group == g).toList();
   }
 
-  /// "Next server": when the whole free group is selected, move the selection
-  /// to the next server in the (ping-sorted) free list and connect to it.
-  /// Does nothing if a specific server was picked manually.
+  /// "Next server": when a whole group is selected, move the selection to the
+  /// next server in that (ping-sorted) group. No-op if a specific server was
+  /// picked manually.
   Future<void> selectNextFreeServer() async {
-    if (!_xrayFreeGroupSelected) return;
-    final group = _xrayServers.where((s) => s.isLocked).toList();
+    final group = _selectedGroupServers();
     if (group.isEmpty) return;
     final curId = _selectedXrayServer?.id;
     var idx = group.indexWhere((s) => s.id == curId);
@@ -1088,14 +1115,15 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Concurrently test the locked free group and return the fastest working
+  /// Concurrently test the selected group and return its fastest working
   /// server (lowest positive ping). Returns null if none respond.
   Future<XrayServer?> _pickFastestFreeServer() async {
-    final group = _xrayServers.where((s) => s.isLocked).toList();
+    final group = _selectedGroupServers();
     if (group.isEmpty) return null;
     await testXrayServers(group);
+    final g = _selectedXrayGroup;
     final working = _xrayServers
-        .where((s) => s.isLocked && (s.ping ?? -1) > 0)
+        .where((s) => s.group == g && (s.ping ?? -1) > 0)
         .toList()
       ..sort((a, b) => (a.ping ?? 999999).compareTo(b.ping ?? 999999));
     return working.isNotEmpty ? working.first : null;
@@ -1104,8 +1132,9 @@ class VpnProvider with ChangeNotifier {
   /// Connect using the real Xray core (libv2ray / v2rayNG) with TLS
   /// ClientHello fragmentation enabled.
   Future<void> _connectXray() async {
-    final hasFreeGroup = _xrayServers.any((s) => s.isLocked);
-    if (_selectedXrayServer == null && !(_xrayFreeGroupSelected && hasFreeGroup)) {
+    final groupHasServers = _selectedXrayGroup != null &&
+        _xrayServers.any((s) => s.group == _selectedXrayGroup);
+    if (_selectedXrayServer == null && !groupHasServers) {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Please add and select an Xray server first';
       notifyListeners();
@@ -1116,17 +1145,17 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
 
-      // Only when the WHOLE free group is selected (not a specific server),
-      // test the group concurrently and connect to the fastest. If the user
-      // manually picked a specific server, connect to exactly that one.
-      if (_xrayFreeGroupSelected && _selectedXrayServer == null) {
+      // Only when a WHOLE group is selected (not a specific server), test that
+      // group concurrently and connect to its fastest. If the user manually
+      // picked a specific server, connect to exactly that one.
+      if (_selectedXrayServer == null && groupHasServers) {
         final fastest = await _pickFastestFreeServer();
         if (fastest != null) {
           _selectedXrayServer = fastest;
           await _xrayService.setSelectedId(fastest.id);
         } else {
           _status = VpnConnectionStatus.error;
-          _errorMessage = 'No working free server found. Try again later.';
+          _errorMessage = 'No working server found in this group. Try again.';
           notifyListeners();
           return;
         }

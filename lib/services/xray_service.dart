@@ -23,6 +23,17 @@ class XrayServerService {
     return prefs.getStringList(_subUrlsKey) ?? [];
   }
 
+  /// A stable, human-friendly group name for a user subscription URL. Each
+  /// sub link is shown as its OWN group in the server list.
+  String groupNameForUrl(String url) {
+    try {
+      final host = Uri.parse(url).host;
+      if (host.isNotEmpty) return host;
+    } catch (_) {/* fall through */}
+    final u = url.replaceAll(RegExp(r'^https?://'), '');
+    return u.length > 24 ? '${u.substring(0, 24)}…' : u;
+  }
+
   /// Add a subscription URL. Returns false if empty/duplicate/invalid.
   Future<bool> addSubUrl(String url) async {
     final u = url.trim();
@@ -36,15 +47,17 @@ class XrayServerService {
   }
 
   /// Adds whatever the user pasted in the Xray sub-link box. Accepts EITHER
-  /// an http(s) subscription URL (stored and merged into the free group on
-  /// every refresh) OR one/more raw share links (vless/vmess/trojan/ss),
-  /// which are added immediately as locked free-group servers so they show
-  /// up in the server list right away. Returns count added (>0 = success).
+  /// an http(s) subscription URL (stored and shown as its own group in the
+  /// server list) OR one/more raw share links (vless/vmess/trojan/ss), which
+  /// are added immediately as their own "My Sub Links" group so they show up
+  /// right away. Returns count added (>0 = success).
+  static const String userLinksGroup = 'My Sub Links';
+
   Future<int> addSubInput(String raw) async {
     final text = raw.trim();
     if (text.isEmpty) return 0;
 
-    // Lines that look like share links go straight into the free group.
+    // Lines that look like share links become their own user group.
     final shareLines = text
         .split(RegExp(r'[\r\n]+'))
         .map((e) => e.trim())
@@ -57,7 +70,7 @@ class XrayServerService {
       final all = await loadServers();
       for (final line in shareLines) {
         try {
-          final s = XrayServer.fromLink(line, group: XrayServer.freeGroup);
+          final s = XrayServer.fromLink(line, group: userLinksGroup);
           if (all.any((x) => x.link == s.link)) continue;
           all.add(s);
           added++;
@@ -84,6 +97,11 @@ class XrayServerService {
     final urls = prefs.getStringList(_subUrlsKey) ?? [];
     urls.remove(url);
     await prefs.setStringList(_subUrlsKey, urls);
+    // Drop that subscription's group from the stored server list too.
+    final group = groupNameForUrl(url);
+    final all = await loadServers();
+    final remaining = all.where((s) => s.group != group).toList();
+    if (remaining.length != all.length) await saveServers(remaining);
   }
 
   Future<List<String>> _fetchLinks(String url) async {
@@ -167,71 +185,82 @@ class XrayServerService {
     return added;
   }
 
-  /// Fetches the free subscription and rebuilds the locked free group.
-  /// User servers and selection are preserved. Returns the number of free
-  /// servers loaded (0 on failure, leaving existing data untouched).
+  /// Fetches every subscription (built-in + user-added) and rebuilds each as
+  /// its OWN group. The built-in one uses [XrayServer.freeGroup]; each user
+  /// sub URL becomes its own group named after the URL host. Servers the user
+  /// added by pasting raw links ([userLinksGroup]) and individual (group-less)
+  /// servers are preserved. Returns total subscription servers loaded.
   Future<int> refreshFreeGroup({Duration? minInterval}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // Optional throttle so we don't hammer the URL on every screen open.
+      // Optional throttle so we don't hammer the URLs on every screen open.
       if (minInterval != null) {
         final last = prefs.getInt(_subUpdatedKey) ?? 0;
         final age = DateTime.now().millisecondsSinceEpoch - last;
         if (age < minInterval.inMilliseconds) {
-          // Return current count without refetching.
           final existing = await loadServers();
           return existing.where((s) => s.isLocked).length;
         }
       }
 
-      // Fetch the built-in subscription plus any user-added ones.
-      final urls = <String>[subscriptionUrl, ...await getSubUrls()];
-      final lines = <String>[];
-      for (final u in urls) {
-        lines.addAll(await _fetchLinks(u));
-      }
-      if (lines.isEmpty) return 0;
-
-      final freeServers = <XrayServer>[];
-      final seenLinks = <String>{};
-      for (final line in lines) {
-        try {
-          final s = XrayServer.fromLink(line, group: XrayServer.freeGroup);
-          if (seenLinks.add(s.link)) freeServers.add(s);
-        } catch (_) {/* skip bad line */}
-      }
-      if (freeServers.isEmpty) return 0;
-
-      // Keep the user's non-free servers, replace the free group entirely.
       final all = await loadServers();
-      final userServers = all.where((s) => !s.isLocked).toList();
-      // Carry over previously measured pings for unchanged free links.
-      final oldPings = <String, int?>{
-        for (final s in all.where((s) => s.isLocked)) s.link: s.ping
+      // Preserve old pings by link so re-fetch keeps measured latency.
+      final oldPings = <String, int?>{for (final s in all) s.link: s.ping};
+
+      // Build each subscription group. Map keeps insertion order (built-in
+      // first, then user subs in their stored order).
+      final userUrls = await getSubUrls();
+      final subUrls = <String, String>{
+        subscriptionUrl: XrayServer.freeGroup,
+        for (final u in userUrls) u: groupNameForUrl(u),
       };
-      for (var i = 0; i < freeServers.length; i++) {
-        final p = oldPings[freeServers[i].link];
-        if (p != null) freeServers[i] = freeServers[i].copyWith(ping: p);
+
+      final subServers = <XrayServer>[];
+      final seenLinks = <String>{};
+      var fetchedAny = false;
+      for (final entry in subUrls.entries) {
+        final lines = await _fetchLinks(entry.key);
+        if (lines.isNotEmpty) fetchedAny = true;
+        for (final line in lines) {
+          try {
+            final s = XrayServer.fromLink(line, group: entry.value);
+            if (!seenLinks.add(s.link)) continue;
+            final p = oldPings[s.link];
+            subServers.add(p != null ? s.copyWith(ping: p) : s);
+          } catch (_) {/* skip bad line */}
+        }
       }
 
-      await saveServers([...freeServers, ...userServers]);
+      // If nothing could be fetched at all, leave existing data untouched.
+      if (!fetchedAny) return all.where((s) => s.isLocked).length;
+
+      // Keep user-pasted links group + individual user servers as-is.
+      final keep = all
+          .where((s) => s.group.isEmpty || s.group == userLinksGroup)
+          .toList();
+
+      await saveServers([...subServers, ...keep]);
       await prefs.setInt(
           _subUpdatedKey, DateTime.now().millisecondsSinceEpoch);
-      return freeServers.length;
+      return subServers.length;
     } catch (e) {
       if (kDebugMode) debugPrint('❌ refreshFreeGroup: $e');
       return 0;
     }
   }
 
-  /// Removes a server by id. Locked (free group) servers cannot be removed.
-  /// Returns false if the server is locked or not found.
+  /// Removes a server by id. Subscription-managed servers cannot be removed
+  /// individually (delete the whole subscription instead), except the
+  /// user-pasted [userLinksGroup] and group-less individual servers.
+  /// Returns false if the server is protected or not found.
   Future<bool> removeServer(String id) async {
     final servers = await loadServers();
     final idx = servers.indexWhere((s) => s.id == id);
     if (idx < 0) return false;
-    if (servers[idx].isLocked) return false; // protected group
+    final g = servers[idx].group;
+    final deletable = g.isEmpty || g == userLinksGroup;
+    if (!deletable) return false; // protected subscription group
     servers.removeAt(idx);
     final selected = await getSelectedId();
     if (selected == id) await setSelectedId(null);

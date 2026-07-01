@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../models/xray_server.dart';
+import '../services/xray_service.dart';
 
 /// Server list screen for the Xray protocol (real Xray core / v2rayNG).
 /// Servers are shown in collapsible groups: the locked free subscription
@@ -19,10 +20,9 @@ class XrayServersScreen extends StatefulWidget {
 }
 
 class _XrayServersScreenState extends State<XrayServersScreen> {
-  // Which groups are currently expanded. Free group starts collapsed so the
-  // list stays tidy; "My Servers" starts expanded.
-  bool _freeExpanded = false;
-  bool _userExpanded = true;
+  // Which groups are currently expanded (by group name / title). Groups start
+  // collapsed so the list stays tidy.
+  final Set<String> _expandedGroups = {};
 
   @override
   void initState() {
@@ -31,6 +31,10 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
       // فقط لود از حافظه؛ آپدیت از لینک یک‌بار موقع باز شدن اپ انجام می‌شود.
       await context.read<VpnProvider>().loadXrayServers();
     });
+  }
+
+  void _toggleExpanded(String key) {
+    if (!_expandedGroups.remove(key)) _expandedGroups.add(key);
   }
 
   Future<void> _showAddDialog() async {
@@ -141,8 +145,6 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
       body: Consumer<VpnProvider>(
         builder: (context, provider, _) {
           final all = provider.xrayServers;
-          final freeServers = all.where((s) => s.isLocked).toList();
-          final userServers = all.where((s) => !s.isLocked).toList();
 
           if (all.isEmpty) {
             return RefreshIndicator(
@@ -158,36 +160,48 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             );
           }
 
+          // Group servers by their group name, preserving list order. Empty
+          // group (individual user servers) is shown last as "My Servers".
+          final groups = <String, List<XrayServer>>{};
+          for (final s in all) {
+            groups.putIfAbsent(s.group, () => []).add(s);
+          }
+          final individual = groups.remove('') ?? [];
+
+          final children = <Widget>[
+            for (final entry in groups.entries)
+              _buildGroup(
+                provider: provider,
+                isDark: isDark,
+                accent: accent,
+                title: entry.key,
+                groupKey: entry.key,
+                servers: entry.value,
+                // Every named group is a selectable subscription group.
+                locked: true,
+                expanded: _expandedGroups.contains(entry.key),
+                onToggleExpand: () => setState(() =>
+                    _toggleExpanded(entry.key)),
+              ),
+            if (individual.isNotEmpty)
+              _buildGroup(
+                provider: provider,
+                isDark: isDark,
+                accent: accent,
+                title: 'My Servers',
+                groupKey: '',
+                servers: individual,
+                locked: false,
+                expanded: _expandedGroups.contains(''),
+                onToggleExpand: () => setState(() => _toggleExpanded('')),
+              ),
+          ];
+
           return RefreshIndicator(
             onRefresh: _refreshFreeGroup,
             child: ListView(
               padding: const EdgeInsets.all(12),
-              children: [
-                if (freeServers.isNotEmpty)
-                  _buildGroup(
-                    provider: provider,
-                    isDark: isDark,
-                    accent: accent,
-                    title: XrayServer.freeGroup,
-                    servers: freeServers,
-                    locked: true,
-                    expanded: _freeExpanded,
-                    onToggleExpand: () =>
-                        setState(() => _freeExpanded = !_freeExpanded),
-                  ),
-                if (userServers.isNotEmpty)
-                  _buildGroup(
-                    provider: provider,
-                    isDark: isDark,
-                    accent: accent,
-                    title: 'My Servers',
-                    servers: userServers,
-                    locked: false,
-                    expanded: _userExpanded,
-                    onToggleExpand: () =>
-                        setState(() => _userExpanded = !_userExpanded),
-                  ),
-              ],
+              children: children,
             ),
           );
         },
@@ -208,15 +222,18 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     required bool isDark,
     required Color accent,
     required String title,
+    required String groupKey,
     required List<XrayServer> servers,
     required bool locked,
     required bool expanded,
     required VoidCallback onToggleExpand,
   }) {
-    final testing = provider.xrayGroupTesting;
-    // The free group can be selected as a whole; a specific selected server in
+    // Only this group's spinner shows while this group is being tested.
+    final testing = provider.xrayGroupTestingFor(groupKey);
+    final anyTesting = provider.xrayGroupTesting;
+    // A named group can be selected as a whole; a specific selected server in
     // this group also counts as "this group active".
-    final groupSelected = locked && provider.xrayFreeGroupSelected;
+    final groupSelected = locked && provider.xrayGroupSelectedFor(groupKey);
     final aServerInGroupSelected = servers
         .any((s) => provider.selectedXrayServer?.id == s.id);
     final highlight = groupSelected || aServerInGroupSelected;
@@ -239,15 +256,21 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           InkWell(
             borderRadius: BorderRadius.circular(14),
             onTap: locked
-                ? () => provider.selectXrayFreeGroup()
+                ? () => provider.selectXrayGroup(groupKey)
                 : onToggleExpand,
             child: Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
                 children: [
-                  Icon(locked ? Icons.lock : Icons.folder,
-                      size: 20, color: accent),
+                  Icon(
+                      !locked
+                          ? Icons.folder
+                          : (groupKey == XrayServer.freeGroup
+                              ? Icons.lock
+                              : Icons.cloud_outlined),
+                      size: 20,
+                      color: accent),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
@@ -295,7 +318,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                                 CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Icon(Icons.speed, color: accent),
-                    onPressed: testing
+                    onPressed: anyTesting
                         ? null
                         : () => provider.testXrayServers(servers),
                   ),
@@ -450,7 +473,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             Icon(Icons.check_circle, color: accent)
           else
             const Icon(Icons.radio_button_unchecked, color: Colors.grey),
-          if (!s.isLocked)
+          if (s.group.isEmpty || s.group == XrayServerService.userLinksGroup)
             IconButton(
               icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
               onPressed: () => provider.removeXrayServer(s.id),
