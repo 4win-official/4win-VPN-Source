@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:openvpn_flutter/openvpn_flutter.dart';
@@ -915,7 +916,8 @@ class VpnProvider with ChangeNotifier {
   }
 
   /// Select an Xray server (for connecting). Picking a specific server clears
-  /// the group selection.
+  /// the group selection. If the VPN is already connected via Xray, cleanly
+  /// switch: fully disconnect, then reconnect to the new server.
   Future<void> selectXrayServer(XrayServer server) async {
     _selectedXrayServer = server;
     _selectedXrayGroup = null;
@@ -923,6 +925,25 @@ class VpnProvider with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('xray_selected_group');
     notifyListeners();
+    await _reconnectXrayIfActive();
+  }
+
+  /// When Xray is the active protocol and currently connected/connecting,
+  /// cleanly tear down the tunnel and bring it back up on the newly-selected
+  /// server. No-op otherwise.
+  Future<void> _reconnectXrayIfActive() async {
+    if (_selectedProtocol != 'xray') return;
+    if (_status != VpnConnectionStatus.connected &&
+        _status != VpnConnectionStatus.connecting) {
+      return;
+    }
+    if (_selectedXrayServer == null) return;
+    // Full clean disconnect first.
+    await disconnect();
+    // Small settle delay so the old tunnel/core fully tears down.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    // Bring it back up on the new server.
+    await connect();
   }
 
   /// Select a whole group as the connection target (no specific server). On
@@ -973,9 +994,17 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  /// Read the concurrent delay-test count from settings (default 30, max 300).
+  /// Read the concurrent delay-test count. When "auto" is on, pick a value
+  /// from the device's CPU cores so stronger phones test more in parallel;
+  /// otherwise use the user's manual slider value. Capped at 1..300.
   Future<int> getXrayConcurrentTests() async {
     final prefs = await SharedPreferences.getInstance();
+    final auto = prefs.getBool('xray_auto_concurrent') ?? true;
+    if (auto) {
+      // ~24 parallel tests per CPU core (I/O-bound network probes), clamped.
+      final cores = Platform.numberOfProcessors;
+      return (cores * 24).clamp(30, 300);
+    }
     final v = prefs.getInt('xray_concurrent_tests') ?? 300;
     return v.clamp(1, 300);
   }
@@ -983,13 +1012,17 @@ class VpnProvider with ChangeNotifier {
   Future<String> _buildDelayConfig(XrayServer server) async {
     final prefs = await SharedPreferences.getInstance();
     final fragEnabled = prefs.getBool('xray_fragment') ?? false;
-    final fragLength = prefs.getString('xray_fragment_length') ?? '1-3';
+    final fragPackets = prefs.getString('xray_fragment_packets') ?? 'tlshello';
+    final fragLength = prefs.getString('xray_fragment_length') ?? '10-20';
     final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
+    final fragHost = prefs.getString('xray_fragment_host') ?? '';
     return XrayConfigBuilder.buildForDelayTest(
       server,
       fragmentEnabled: fragEnabled,
+      fragmentPackets: fragPackets,
       fragmentLength: fragLength,
       fragmentInterval: fragInterval,
+      fragmentHost: fragHost,
     );
   }
 
@@ -1064,6 +1097,13 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
+  /// Delay-test EVERY server across ALL groups at once.
+  Future<void> testAllXrayGroups() async {
+    if (_xrayGroupTesting) return;
+    final all = List<XrayServer>.from(_xrayServers);
+    await testXrayServers(all);
+  }
+
   /// Sort servers so that lower (better) ping comes first within each group.
   /// Ordering key: working pings ascending, then untested, then failed last.
   /// The new order is persisted so "next server" walks best -> worst.
@@ -1113,6 +1153,8 @@ class VpnProvider with ChangeNotifier {
     _selectedXrayServer = next;
     await _xrayService.setSelectedId(next.id);
     notifyListeners();
+    // If connected, cleanly switch the live tunnel to the new server.
+    await _reconnectXrayIfActive();
   }
 
   /// Concurrently test the selected group and return its fastest working
@@ -1164,8 +1206,10 @@ class VpnProvider with ChangeNotifier {
       // Read fragment settings (default OFF).
       final prefs = await SharedPreferences.getInstance();
       final fragEnabled = prefs.getBool('xray_fragment') ?? false;
-      final fragLength = prefs.getString('xray_fragment_length') ?? '1-3';
+      final fragPackets = prefs.getString('xray_fragment_packets') ?? 'tlshello';
+      final fragLength = prefs.getString('xray_fragment_length') ?? '10-20';
       final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
+      final fragHost = prefs.getString('xray_fragment_host') ?? '';
 
       // Request VPN permission.
       final granted = await XrayConnection.requestPermission();
@@ -1180,8 +1224,10 @@ class VpnProvider with ChangeNotifier {
       final configJson = XrayConfigBuilder.build(
         _selectedXrayServer!,
         fragmentEnabled: fragEnabled,
+        fragmentPackets: fragPackets,
         fragmentLength: fragLength,
         fragmentInterval: fragInterval,
+        fragmentHost: fragHost,
       );
 
       if (kDebugMode) {

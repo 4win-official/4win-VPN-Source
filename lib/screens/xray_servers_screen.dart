@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -35,6 +36,64 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
 
   void _toggleExpanded(String key) {
     if (!_expandedGroups.remove(key)) _expandedGroups.add(key);
+  }
+
+  /// Export one or more servers, exactly matching the import format:
+  /// plain share links, one per line. Offers copying the raw links or a
+  /// base64-encoded subscription blob (same as many providers use).
+  Future<void> _exportServers(List<XrayServer> servers, String title) async {
+    if (servers.isEmpty) return;
+    final plain = servers.map((s) => s.link).join('\n');
+    final b64 = base64.encode(utf8.encode(plain));
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'Export "$title" (${servers.length})',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.link),
+              title: const Text('Copy share links'),
+              subtitle: const Text('Plain text, one link per line'),
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: plain));
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                _toast('${servers.length} link(s) copied');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.data_object),
+              title: const Text('Copy as subscription (base64)'),
+              subtitle: const Text('Paste into other apps as a sub blob'),
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: b64));
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                _toast('Subscription (base64) copied');
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
   }
 
   Future<void> _showAddDialog() async {
@@ -133,6 +192,24 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   : const Icon(Icons.cloud_download_outlined),
               tooltip: 'Update free servers',
               onPressed: provider.xrayRefreshing ? null : _refreshFreeGroup,
+            ),
+          ),
+          Consumer<VpnProvider>(
+            builder: (context, provider, _) => IconButton(
+              icon: provider.xrayGroupTesting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.speed),
+              tooltip: 'Test all groups',
+              onPressed: provider.xrayGroupTesting
+                  ? null
+                  : () {
+                      provider.testAllXrayGroups();
+                      _toast('Testing all servers…');
+                    },
             ),
           ),
           IconButton(
@@ -307,6 +384,12 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                       padding: const EdgeInsets.only(right: 4),
                       child: Icon(Icons.check_circle, color: accent),
                     ),
+                  // Export whole group (copy all links to clipboard)
+                  IconButton(
+                    tooltip: 'Export group',
+                    icon: Icon(Icons.copy_all, color: accent),
+                    onPressed: () => _exportServers(servers, title),
+                  ),
                   // Test-all button
                   IconButton(
                     tooltip: 'Test all',
@@ -458,6 +541,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          IconButton(
+            tooltip: 'Copy link',
+            icon: Icon(Icons.copy, color: accent, size: 18),
+            onPressed: () => _exportServers([s], s.remark),
+          ),
           IconButton(
             tooltip: 'Real delay test',
             icon: testing

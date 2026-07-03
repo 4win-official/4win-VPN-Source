@@ -32,10 +32,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // Xray fragment (moved here from the server list)
   bool _xrayFragment = false;
-  final _xrayFragLengthController = TextEditingController(text: '1-3');
+  final _xrayFragPacketsController = TextEditingController(text: 'tlshello');
+  final _xrayFragLengthController = TextEditingController(text: '10-20');
   final _xrayFragIntervalController = TextEditingController(text: '10-20');
+  final _xrayFakeHostController = TextEditingController();
   // Xray concurrent delay-test count (how many configs tested at once).
   int _xrayConcurrentTests = 300;
+  // When on, the concurrent count is chosen automatically from the device's
+  // CPU cores so stronger phones test more in parallel.
+  bool _xrayAutoConcurrent = true;
 
   @override
   void initState() {
@@ -52,8 +57,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _mtuController.dispose();
     _sstpFragSizeController.dispose();
     _sstpFragIntervalController.dispose();
+    _xrayFragPacketsController.dispose();
     _xrayFragLengthController.dispose();
     _xrayFragIntervalController.dispose();
+    _xrayFakeHostController.dispose();
     super.dispose();
   }
 
@@ -82,18 +89,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getString('sstp_fragment_interval') ?? '10-20';
       // Xray fragment
       _xrayFragment = prefs.getBool('xray_fragment') ?? false;
+      _xrayFragPacketsController.text =
+          prefs.getString('xray_fragment_packets') ?? 'tlshello';
       _xrayFragLengthController.text =
-          prefs.getString('xray_fragment_length') ?? '1-3';
+          prefs.getString('xray_fragment_length') ?? '10-20';
       _xrayFragIntervalController.text =
           prefs.getString('xray_fragment_interval') ?? '10-20';
+      _xrayFakeHostController.text =
+          prefs.getString('xray_fragment_host') ?? '';
       _xrayConcurrentTests =
           (prefs.getInt('xray_concurrent_tests') ?? 300).clamp(1, 300);
+      _xrayAutoConcurrent = prefs.getBool('xray_auto_concurrent') ?? true;
     });
   }
 
   Future<void> _saveXrayConcurrentTests() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('xray_concurrent_tests', _xrayConcurrentTests);
+  }
+
+  Future<void> _saveXrayAutoConcurrent() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('xray_auto_concurrent', _xrayAutoConcurrent);
   }
 
   Future<void> _saveSstpFragment() async {
@@ -115,15 +132,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('xray_fragment', _xrayFragment);
     await prefs.setString(
+        'xray_fragment_packets',
+        _xrayFragPacketsController.text.trim().isEmpty
+            ? 'tlshello'
+            : _xrayFragPacketsController.text.trim());
+    await prefs.setString(
         'xray_fragment_length',
         _xrayFragLengthController.text.trim().isEmpty
-            ? '1-3'
+            ? '10-20'
             : _xrayFragLengthController.text.trim());
     await prefs.setString(
         'xray_fragment_interval',
         _xrayFragIntervalController.text.trim().isEmpty
             ? '10-20'
             : _xrayFragIntervalController.text.trim());
+    await prefs.setString(
+        'xray_fragment_host', _xrayFakeHostController.text.trim());
   }
 
   /// Returns the current Custom DNS value if it matches one of the known DNS
@@ -369,6 +393,132 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (_) => onChanged(),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Dedicated Xray fragment card with the REAL Xray freedom-fragment fields:
+  /// Fakehost (fake SNI), Packets (tlshello / 1-3), Length, Interval.
+  Widget _buildXrayFragmentCard(bool isDark) {
+    const accent = Color(0xFF1DE9B6);
+    final enabled = _xrayFragment;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: enabled
+            ? accent.withValues(alpha: 0.08)
+            : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.03)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: enabled ? accent.withValues(alpha: 0.5) : Colors.transparent,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.call_split, color: enabled ? accent : Colors.grey),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Fragment',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      'Real Xray TLS fragmentation (freedom + fragment). '
+                      'Splits the ClientHello so DPI cannot read the SNI.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: enabled,
+                activeThumbColor: accent,
+                onChanged: (value) {
+                  setState(() => _xrayFragment = value);
+                  _saveXrayFragment();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(value
+                          ? '✂️ Xray Fragment enabled — applied on next connect'
+                          : 'Xray Fragment disabled'),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          if (enabled) ...[
+            const SizedBox(height: 12),
+            // Fakehost (fake SNI) — overrides the TLS serverName.
+            TextField(
+              controller: _xrayFakeHostController,
+              decoration: const InputDecoration(
+                labelText: 'Fakehost (fake SNI, optional)',
+                hintText: 'cloudflare.com',
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => _saveXrayFragment(),
+            ),
+            const SizedBox(height: 10),
+            // Packets: tlshello or a write-range like 1-3.
+            TextField(
+              controller: _xrayFragPacketsController,
+              decoration: const InputDecoration(
+                labelText: 'Packets',
+                hintText: 'tlshello  (or 1-3)',
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => _saveXrayFragment(),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _xrayFragLengthController,
+                    decoration: const InputDecoration(
+                      labelText: 'Length (byte)',
+                      hintText: '10-20',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => _saveXrayFragment(),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _xrayFragIntervalController,
+                    decoration: const InputDecoration(
+                      labelText: 'Interval (ms)',
+                      hintText: '10-20',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => _saveXrayFragment(),
                   ),
                 ),
               ],
@@ -1052,27 +1202,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           fontSize: 13,
                         ),
                       ),
-                      // ✂️ Fragment - فرگمنت TLS ClientHello مخصوص Xray
-                      _buildFragmentCard(
-                        isDark: isDark,
-                        accent: const Color(0xFF1DE9B6),
-                        enabled: _xrayFragment,
-                        sizeController: _xrayFragLengthController,
-                        intervalController: _xrayFragIntervalController,
-                        sizeLabel: 'Length',
-                        onToggle: (value) {
-                          setState(() => _xrayFragment = value);
-                          _saveXrayFragment();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(value
-                                  ? '✂️ Xray Fragment enabled — applied on next connect'
-                                  : 'Xray Fragment disabled'),
-                              duration: const Duration(seconds: 2),
+                      // ✂️ Fragment - فرگمنت واقعی TLS ClientHello مخصوص Xray
+                      _buildXrayFragmentCard(isDark),
+                      const SizedBox(height: 16),
+                      // ⚙️ Auto concurrent: pick the count from device power.
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _xrayAutoConcurrent
+                              ? const Color(0xFF1DE9B6).withValues(alpha: 0.10)
+                              : (isDark
+                                  ? Colors.white.withValues(alpha: 0.05)
+                                  : Colors.black.withValues(alpha: 0.03)),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF1DE9B6)
+                                .withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.auto_awesome,
+                                color: Color(0xFF1DE9B6), size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Auto (by device power)',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Automatically choose how many configs to '
+                                    'test at once based on your phone\'s CPU. '
+                                    'Stronger phones test more in parallel.',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.black54,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          );
-                        },
-                        onChanged: _saveXrayFragment,
+                            Switch(
+                              value: _xrayAutoConcurrent,
+                              activeThumbColor: const Color(0xFF1DE9B6),
+                              onChanged: (v) {
+                                setState(() => _xrayAutoConcurrent = v);
+                                _saveXrayAutoConcurrent();
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 16),
                       // 🧪 Concurrent delay-test count (default 30, up to 300)
@@ -1145,11 +1337,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               divisions: 299,
                               activeColor: const Color(0xFF1DE9B6),
                               label: '$_xrayConcurrentTests',
-                              onChanged: (v) {
-                                setState(
-                                    () => _xrayConcurrentTests = v.round());
-                              },
-                              onChangeEnd: (v) => _saveXrayConcurrentTests(),
+                              onChanged: _xrayAutoConcurrent
+                                  ? null
+                                  : (v) {
+                                      setState(() =>
+                                          _xrayConcurrentTests = v.round());
+                                    },
+                              onChangeEnd: _xrayAutoConcurrent
+                                  ? null
+                                  : (v) => _saveXrayConcurrentTests(),
                             ),
                             Row(
                               mainAxisAlignment:

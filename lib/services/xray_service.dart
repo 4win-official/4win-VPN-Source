@@ -53,6 +53,10 @@ class XrayServerService {
   /// right away. Returns count added (>0 = success).
   static const String userLinksGroup = 'My Sub Links';
 
+  /// Max servers stored per subscription group. Prevents a giant subscription
+  /// (thousands of configs) from freezing the app / bloating storage.
+  static const int maxServersPerGroup = 500;
+
   Future<int> addSubInput(String raw) async {
     final text = raw.trim();
     if (text.isEmpty) return 0;
@@ -68,12 +72,15 @@ class XrayServerService {
 
     if (shareLines.isNotEmpty) {
       final all = await loadServers();
+      var inGroup = all.where((s) => s.group == userLinksGroup).length;
       for (final line in shareLines) {
+        if (inGroup >= maxServersPerGroup) break;
         try {
           final s = XrayServer.fromLink(line, group: userLinksGroup);
           if (all.any((x) => x.link == s.link)) continue;
           all.add(s);
           added++;
+          inGroup++;
         } catch (_) {/* skip bad link */}
       }
       if (added > 0) await saveServers(all);
@@ -222,14 +229,22 @@ class XrayServerService {
       for (final entry in subUrls.entries) {
         final lines = await _fetchLinks(entry.key);
         if (lines.isNotEmpty) fetchedAny = true;
+        // Cap servers PER subscription so a huge (1000s) list can't freeze the
+        // UI or bloat SharedPreferences.
+        var takenForGroup = 0;
         for (final line in lines) {
+          if (takenForGroup >= maxServersPerGroup) break;
           try {
             final s = XrayServer.fromLink(line, group: entry.value);
             if (!seenLinks.add(s.link)) continue;
             final p = oldPings[s.link];
             subServers.add(p != null ? s.copyWith(ping: p) : s);
+            takenForGroup++;
           } catch (_) {/* skip bad line */}
         }
+        // Yield to the event loop between subscriptions so the UI stays
+        // responsive while parsing many links.
+        await Future<void>.delayed(Duration.zero);
       }
 
       // If nothing could be fetched at all, leave existing data untouched.

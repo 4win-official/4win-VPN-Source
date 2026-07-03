@@ -401,6 +401,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
+                        // Active Xray config name (under the status text).
+                        if (provider.selectedProtocol == 'xray' &&
+                            provider.selectedXrayServer != null) ...[
+                          const SizedBox(height: 6),
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 24),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.dns,
+                                    size: 15,
+                                    color: isDark
+                                        ? Colors.white54
+                                        : Colors.black45),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    provider.selectedXrayServer!.remark.isEmpty
+                                        ? provider
+                                            .selectedXrayServer!.address
+                                        : provider
+                                            .selectedXrayServer!.remark,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 40),
                         
                         // Connect Button

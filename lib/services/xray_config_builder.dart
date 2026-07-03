@@ -23,13 +23,20 @@ class XrayConfigBuilder {
     XrayServer server, {
     bool fragmentEnabled = true,
     String fragmentPackets = 'tlshello',
-    String fragmentLength = '1-3',
+    String fragmentLength = '10-20',
     String fragmentInterval = '10-20',
+    String fragmentHost = '',
   }) {
     final outbounds = <Map<String, dynamic>>[];
 
     // 1) Main proxy outbound parsed from the share link.
     final proxy = _buildProxyOutbound(server);
+
+    // Optional Fakehost: override the TLS SNI (serverName) so the ClientHello
+    // that DPI sees carries a benign domain instead of the real destination.
+    if (fragmentEnabled && fragmentHost.trim().isNotEmpty) {
+      _applyFakeHost(proxy, fragmentHost.trim());
+    }
 
     // 2) If fragmentation is enabled, route the proxy's transport through a
     //    freedom outbound that performs TLS ClientHello fragmentation.
@@ -184,10 +191,14 @@ class XrayConfigBuilder {
     XrayServer server, {
     bool fragmentEnabled = true,
     String fragmentPackets = 'tlshello',
-    String fragmentLength = '1-3',
+    String fragmentLength = '10-20',
     String fragmentInterval = '10-20',
+    String fragmentHost = '',
   }) {
     final proxy = _buildProxyOutbound(server);
+    if (fragmentEnabled && fragmentHost.trim().isNotEmpty) {
+      _applyFakeHost(proxy, fragmentHost.trim());
+    }
     final outbounds = <Map<String, dynamic>>[];
 
     if (fragmentEnabled) {
@@ -225,6 +236,34 @@ class XrayConfigBuilder {
       'outbounds': outbounds,
     };
     return const JsonEncoder.withIndent('  ').convert(config);
+  }
+
+  /// Overrides the TLS SNI (serverName) with a fake host so the ClientHello
+  /// carries a benign domain. Mutates the proxy outbound's streamSettings.
+  static void _applyFakeHost(Map<String, dynamic> proxy, String host) {
+    final stream = Map<String, dynamic>.from(
+        (proxy['streamSettings'] as Map?) ?? const {});
+    final security = (stream['security'] ?? '').toString();
+    if (security == 'tls') {
+      final tls = Map<String, dynamic>.from(
+          (stream['tlsSettings'] as Map?) ?? const {});
+      tls['serverName'] = host;
+      stream['tlsSettings'] = tls;
+    } else if (security == 'reality') {
+      final r = Map<String, dynamic>.from(
+          (stream['realitySettings'] as Map?) ?? const {});
+      r['serverName'] = host;
+      stream['realitySettings'] = r;
+    } else {
+      // No TLS layer: still add a tls layer with the fake SNI so fragmentation
+      // has a ClientHello to slice.
+      stream['security'] = 'tls';
+      stream['tlsSettings'] = <String, dynamic>{
+        'serverName': host,
+        'allowInsecure': true,
+      };
+    }
+    proxy['streamSettings'] = stream;
   }
 
   /// Build the main proxy outbound from the server's share link.
