@@ -47,6 +47,32 @@ class XrayVpnService : VpnService() {
         @Volatile
         var isServiceRunning = false
             private set
+
+        // Reference to the live core controller so the Flutter side can poll
+        // outbound traffic stats (uplink/downlink) exactly like v2rayNG does.
+        @Volatile
+        private var activeController: CoreController? = null
+
+        /**
+         * Query cumulative outbound traffic for the proxy since connect.
+         * Returns a LongArray of [uplinkBytes, downlinkBytes]. Zeros if not running.
+         * queryStats is destructive (resets the counter) in the core, so we keep
+         * running totals here and return the accumulated value.
+         */
+        @Volatile private var totalUplink = 0L
+        @Volatile private var totalDownlink = 0L
+
+        fun queryTrafficStats(): LongArray {
+            val controller = activeController ?: return longArrayOf(totalUplink, totalDownlink)
+            try {
+                // queryStats returns the delta since the last call and resets it.
+                val up = controller.queryStats("proxy", "uplink")
+                val down = controller.queryStats("proxy", "downlink")
+                if (up > 0) totalUplink += up
+                if (down > 0) totalDownlink += down
+            } catch (_: Throwable) { }
+            return longArrayOf(totalUplink, totalDownlink)
+        }
     }
 
     override fun onCreate() {
@@ -148,6 +174,9 @@ class XrayVpnService : VpnService() {
 
             isRunning = true
             isServiceRunning = true
+            activeController = controller
+            totalUplink = 0L
+            totalDownlink = 0L
 
             android.util.Log.d(TAG, "Xray core started successfully")
         } catch (t: Throwable) {
@@ -160,6 +189,9 @@ class XrayVpnService : VpnService() {
         try {
             isRunning = false
             isServiceRunning = false
+            activeController = null
+            totalUplink = 0L
+            totalDownlink = 0L
 
             try {
                 coreController?.stopLoop()

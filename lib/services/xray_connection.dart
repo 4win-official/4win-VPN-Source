@@ -71,6 +71,25 @@ class XrayConnection {
     }
   }
 
+  /// Cumulative outbound traffic since connect: {'uplink': bytes, 'downlink': bytes}.
+  /// Polled while connected to display data usage on the home screen.
+  static Future<Map<String, int>> queryStats() async {
+    try {
+      final result = await platform.invokeMethod('queryXrayStats');
+      if (result is Map) {
+        final up = result['uplink'];
+        final down = result['downlink'];
+        return {
+          'uplink': up is int ? up : (up is num ? up.toInt() : 0),
+          'downlink': down is int ? down : (down is num ? down.toInt() : 0),
+        };
+      }
+      return {'uplink': 0, 'downlink': 0};
+    } catch (e) {
+      return {'uplink': 0, 'downlink': 0};
+    }
+  }
+
   /// Returns the bundled Xray core version string.
   static Future<String> version() async {
     try {

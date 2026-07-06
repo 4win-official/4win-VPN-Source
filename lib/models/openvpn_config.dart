@@ -105,89 +105,52 @@ class OpenVpnConfig {
     return password ?? embeddedPassword;
   }
   
-  /// Get normalized config with fixes for common issues
+  /// Get normalized config.
+  ///
+  /// IMPORTANT: The official OpenVPN Connect app succeeds with a huge number of
+  /// configs precisely because it feeds them to the core essentially UNCHANGED.
+  /// Our earlier normalizer was too aggressive — it force-injected DNS
+  /// (dhcp-option DNS), persist-key/persist-tun/nobind/resolv-retry, and (worst
+  /// of all) `connect-retry-max 3`, which makes the client give up after only a
+  /// few attempts. Those injections conflict with directives the server pushes
+  /// and are the reason many configs that work in the official app failed here.
+  ///
+  /// We now do ONLY the two minimal, universally-safe fixes:
+  ///   1. `proto tcp`  → `proto tcp-client` (the core requires the -client form)
+  ///   2. inject an `<auth-user-pass>` block ONLY when the user supplied
+  ///      credentials AND the config has no auth directive of its own.
+  /// Everything else is left exactly as the user imported it.
   String get normalizedConfig {
     String normalized = config;
-    
-    // ✅ Fix 1: Convert "proto tcp" to "proto tcp-client"
-    // OpenVPN requires tcp-client for client configs, not just tcp
-    normalized = normalized.replaceAll(RegExp(r'\bproto\s+tcp\b'), 'proto tcp-client');
-    
-    // ✅ Fix 2: Ensure auth-user-pass is present if credentials are provided
+
+    // Fix 1: `proto tcp` → `proto tcp-client`. Match only whole-line proto
+    // directives so we don't touch tokens inside comments or blocks.
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'^(\s*proto\s+)tcp\s*$', multiLine: true),
+      (m) => '${m.group(1)}tcp-client',
+    );
+
+    // Fix 2: add credentials ONLY if the user provided them and the config has
+    // no auth-user-pass of its own. Never touch configs that already carry auth.
     final hasAuthBlock = normalized.contains('<auth-user-pass>');
-    final hasAuthLine = normalized.contains(RegExp(r'\bauth-user-pass\b'));
-    
+    final hasAuthLine =
+        normalized.contains(RegExp(r'^\s*auth-user-pass\b', multiLine: true));
+
     if (!hasAuthBlock && !hasAuthLine) {
-      // اگر credentials داریم ولی auth-user-pass در config نیست
       final user = effectiveUsername;
       final pass = effectivePassword;
-      
       if (user != null && user.isNotEmpty) {
-        // اضافه کردن auth block
         final authBlock = '\n<auth-user-pass>\n$user\n${pass ?? ""}\n</auth-user-pass>\n';
-        
-        // اضافه کردن قبل از خطوط cert یا key
         if (normalized.contains('<ca>')) {
           normalized = normalized.replaceFirst('<ca>', '$authBlock<ca>');
         } else if (normalized.contains('<cert>')) {
           normalized = normalized.replaceFirst('<cert>', '$authBlock<cert>');
         } else {
-          // اضافه کردن به انتها
           normalized = normalized + authBlock;
         }
       }
     }
-    
-    // ✅ Fix 3: Add essential OpenVPN settings if missing
-    final lines = normalized.split('\n');
-    final essentialSettings = <String>[];
-    
-    // Check if using TCP protocol
-    final isTcp = normalized.contains('proto tcp');
-    
-    // DNS Settings - اضافه کردن اگر وجود ندارد
-    if (!normalized.contains('dhcp-option DNS')) {
-      essentialSettings.add('# DNS Servers (Google DNS)');
-      essentialSettings.add('dhcp-option DNS 8.8.8.8');
-      essentialSettings.add('dhcp-option DNS 8.8.4.4');
-    }
-    
-    // Ensure these critical settings exist
-    if (!normalized.contains('persist-key')) {
-      essentialSettings.add('persist-key');
-    }
-    if (!normalized.contains('persist-tun')) {
-      essentialSettings.add('persist-tun');
-    }
-    if (!normalized.contains('nobind')) {
-      essentialSettings.add('nobind');
-    }
-    if (!normalized.contains('resolv-retry infinite')) {
-      essentialSettings.add('resolv-retry infinite');
-    }
-    
-    // TCP-specific settings
-    if (isTcp) {
-      if (!normalized.contains('connect-retry-max')) {
-        essentialSettings.add('connect-retry-max 3');
-      }
-      if (!normalized.contains('connect-retry')) {
-        essentialSettings.add('connect-retry 5');
-      }
-    }
-    
-    // اضافه کردن تنظیمات ضروری به ابتدای config (بعد از remote)
-    if (essentialSettings.isNotEmpty) {
-      final remoteLineIndex = lines.indexWhere((line) => line.trim().startsWith('remote '));
-      if (remoteLineIndex != -1) {
-        lines.insertAll(remoteLineIndex + 1, essentialSettings);
-        normalized = lines.join('\n');
-      } else {
-        // اگر remote نیست، به ابتدا اضافه کن
-        normalized = '${essentialSettings.join('\n')}\n$normalized';
-      }
-    }
-    
+
     return normalized;
   }
   

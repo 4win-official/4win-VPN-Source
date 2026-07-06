@@ -4,6 +4,58 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/xray_server.dart';
 
+/// Payload passed to the background isolate for parsing subscriptions.
+class _ParseJob {
+  final List<List<String>> bodies; // raw lines per subscription (already fetched)
+  final List<String> groups; // group name for each subscription (same order)
+  final Map<String, int?> oldPings; // preserve measured latency by link
+  final int cap; // max servers per group
+  _ParseJob(this.bodies, this.groups, this.oldPings, this.cap);
+}
+
+/// Runs on a background isolate (via [compute]) so parsing hundreds/thousands
+/// of share links + JSON-encoding them never blocks the UI thread. Returns the
+/// list of encoded JSON strings ready to store in SharedPreferences.
+List<String> _parseSubscriptionsIsolate(_ParseJob job) {
+  final seenLinks = <String>{};
+  final encoded = <String>[];
+  for (var i = 0; i < job.bodies.length; i++) {
+    final lines = job.bodies[i];
+    final group = job.groups[i];
+    var taken = 0;
+    for (final line in lines) {
+      if (taken >= job.cap) break;
+      try {
+        final s = XrayServer.fromLink(line, group: group);
+        if (!seenLinks.add(s.link)) continue;
+        final p = job.oldPings[s.link];
+        if (p != null) s.ping = p;
+        encoded.add(jsonEncode(s.toJson()));
+        taken++;
+      } catch (_) {/* skip bad line */}
+    }
+  }
+  return encoded;
+}
+
+/// Decodes a list of stored JSON strings into XrayServer objects on a
+/// background isolate so loading a large stored list doesn't jank the UI.
+List<XrayServer> _decodeServersIsolate(List<String> raw) {
+  final out = <XrayServer>[];
+  for (final j in raw) {
+    try {
+      out.add(XrayServer.fromJson(jsonDecode(j) as Map<String, dynamic>));
+    } catch (_) {}
+  }
+  return out;
+}
+
+/// Encodes a list of XrayServer objects into JSON strings on a background
+/// isolate for large lists.
+List<String> _encodeServersIsolate(List<XrayServer> servers) {
+  return servers.map((s) => jsonEncode(s.toJson())).toList();
+}
+
 /// Manages persisted Xray servers + the currently selected one, plus the
 /// built-in free subscription group ([XrayServer.freeGroup]) that the user
 /// cannot delete and that we keep refreshed from our subscription URL.
@@ -53,9 +105,10 @@ class XrayServerService {
   /// right away. Returns count added (>0 = success).
   static const String userLinksGroup = 'My Sub Links';
 
-  /// Max servers stored per subscription group. Prevents a giant subscription
-  /// (thousands of configs) from freezing the app / bloating storage.
-  static const int maxServersPerGroup = 500;
+  /// Max servers stored per subscription group. Parsing/encoding now runs on a
+  /// background isolate, so large subscriptions no longer freeze the UI; this
+  /// cap only guards against pathological (tens of thousands) storage bloat.
+  static const int maxServersPerGroup = 2000;
 
   Future<int> addSubInput(String raw) async {
     final text = raw.trim();
@@ -72,18 +125,31 @@ class XrayServerService {
 
     if (shareLines.isNotEmpty) {
       final all = await loadServers();
-      var inGroup = all.where((s) => s.group == userLinksGroup).length;
-      for (final line in shareLines) {
-        if (inGroup >= maxServersPerGroup) break;
-        try {
-          final s = XrayServer.fromLink(line, group: userLinksGroup);
-          if (all.any((x) => x.link == s.link)) continue;
-          all.add(s);
-          added++;
-          inGroup++;
-        } catch (_) {/* skip bad link */}
+      final existingLinks = all.map((s) => s.link).toSet();
+      final room =
+          maxServersPerGroup - all.where((s) => s.group == userLinksGroup).length;
+      if (room > 0) {
+        // Parse the pasted links on a BACKGROUND isolate so pasting a huge
+        // (1000+) block of raw links never freezes the UI.
+        final parsed = await compute(
+          _parseSubscriptionsIsolate,
+          _ParseJob([shareLines], [userLinksGroup], const <String, int?>{}, room),
+        );
+        final toAdd = <XrayServer>[];
+        for (final j in parsed) {
+          try {
+            final s = XrayServer.fromJson(jsonDecode(j) as Map<String, dynamic>);
+            if (existingLinks.contains(s.link)) continue;
+            existingLinks.add(s.link);
+            toAdd.add(s);
+          } catch (_) {}
+        }
+        if (toAdd.isNotEmpty) {
+          all.addAll(toAdd);
+          added += toAdd.length;
+          await saveServers(all);
+        }
       }
-      if (added > 0) await saveServers(all);
     }
 
     // Anything that is an http(s) URL is treated as a subscription link.
@@ -138,16 +204,18 @@ class XrayServerService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final list = prefs.getStringList(_storageKey) ?? [];
-      return list
-          .map((j) {
-            try {
-              return XrayServer.fromJson(jsonDecode(j) as Map<String, dynamic>);
-            } catch (e) {
-              return null;
-            }
-          })
-          .whereType<XrayServer>()
-          .toList();
+      if (list.isEmpty) return [];
+      // For large stored lists, decode off the UI isolate to avoid jank.
+      if (list.length > 60) {
+        return await compute(_decodeServersIsolate, list);
+      }
+      final out = <XrayServer>[];
+      for (final j in list) {
+        try {
+          out.add(XrayServer.fromJson(jsonDecode(j) as Map<String, dynamic>));
+        } catch (_) {}
+      }
+      return out;
     } catch (e) {
       if (kDebugMode) debugPrint('❌ load xray servers: $e');
       return [];
@@ -157,10 +225,14 @@ class XrayServerService {
   Future<bool> saveServers(List<XrayServer> servers) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(
-        _storageKey,
-        servers.map((s) => jsonEncode(s.toJson())).toList(),
-      );
+      // Encode off the UI isolate for large lists.
+      final List<String> encoded;
+      if (servers.length > 60) {
+        encoded = await compute(_encodeServersIsolate, servers);
+      } else {
+        encoded = servers.map((s) => jsonEncode(s.toJson())).toList();
+      }
+      await prefs.setStringList(_storageKey, encoded);
       return true;
     } catch (e) {
       if (kDebugMode) debugPrint('❌ save xray servers: $e');
@@ -223,42 +295,42 @@ class XrayServerService {
         for (final u in userUrls) u: groupNameForUrl(u),
       };
 
-      final subServers = <XrayServer>[];
-      final seenLinks = <String>{};
+      // 1) Fetch every subscription body on the UI isolate (network only —
+      //    cheap). Collect the raw link lines + their group names.
+      final bodies = <List<String>>[];
+      final groups = <String>[];
       var fetchedAny = false;
       for (final entry in subUrls.entries) {
         final lines = await _fetchLinks(entry.key);
         if (lines.isNotEmpty) fetchedAny = true;
-        // Cap servers PER subscription so a huge (1000s) list can't freeze the
-        // UI or bloat SharedPreferences.
-        var takenForGroup = 0;
-        for (final line in lines) {
-          if (takenForGroup >= maxServersPerGroup) break;
-          try {
-            final s = XrayServer.fromLink(line, group: entry.value);
-            if (!seenLinks.add(s.link)) continue;
-            final p = oldPings[s.link];
-            subServers.add(p != null ? s.copyWith(ping: p) : s);
-            takenForGroup++;
-          } catch (_) {/* skip bad line */}
-        }
-        // Yield to the event loop between subscriptions so the UI stays
-        // responsive while parsing many links.
-        await Future<void>.delayed(Duration.zero);
+        bodies.add(lines);
+        groups.add(entry.value);
       }
 
       // If nothing could be fetched at all, leave existing data untouched.
       if (!fetchedAny) return all.where((s) => s.isLocked).length;
 
-      // Keep user-pasted links group + individual user servers as-is.
+      // 2) Parse + JSON-encode ALL links on a BACKGROUND isolate. This is the
+      //    heavy part that used to freeze the app with big (1000+) subs.
+      final encodedSub = await compute(
+        _parseSubscriptionsIsolate,
+        _ParseJob(bodies, groups, oldPings, maxServersPerGroup),
+      );
+
+      // Keep user-pasted links group + individual user servers as-is (encode
+      // them too so we store one flat string list without re-decoding subs).
       final keep = all
           .where((s) => s.group.isEmpty || s.group == userLinksGroup)
           .toList();
+      final encodedKeep = keep.length > 60
+          ? await compute(_encodeServersIsolate, keep)
+          : keep.map((s) => jsonEncode(s.toJson())).toList();
 
-      await saveServers([...subServers, ...keep]);
+      // 3) Store the merged encoded list directly (no extra decode/encode).
+      await prefs.setStringList(_storageKey, [...encodedSub, ...encodedKeep]);
       await prefs.setInt(
           _subUpdatedKey, DateTime.now().millisecondsSinceEpoch);
-      return subServers.length;
+      return encodedSub.length;
     } catch (e) {
       if (kDebugMode) debugPrint('❌ refreshFreeGroup: $e');
       return 0;

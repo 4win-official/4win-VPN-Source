@@ -103,6 +103,9 @@ class VpnProvider with ChangeNotifier {
   bool _pingFailed = false; // تایم‌اوت 3 ثانیه برای پینگ
   Timer? _pingTimer;
 
+  // Xray traffic polling (proxy uplink/downlink from the core)
+  Timer? _xrayTrafficTimer;
+
   // Getters
   List<VpnServer> get servers => _servers;
   VpnServer? get selectedServer => _selectedServer;
@@ -262,6 +265,31 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
+  // Xray traffic: poll cumulative proxy up/down bytes from the running core
+  // (same source v2rayNG uses) and feed the shared data-usage counters.
+  void _startXrayTraffic() {
+    _stopXrayTraffic();
+    _totalDownloadBytes = 0;
+    _totalUploadBytes = 0;
+    _xrayTrafficTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      if (!isConnected || _selectedProtocol != 'xray') {
+        timer.cancel();
+        return;
+      }
+      try {
+        final stats = await XrayConnection.queryStats();
+        _totalUploadBytes = stats['uplink'] ?? 0;
+        _totalDownloadBytes = stats['downlink'] ?? 0;
+        notifyListeners();
+      } catch (_) {}
+    });
+  }
+
+  void _stopXrayTraffic() {
+    _xrayTrafficTimer?.cancel();
+    _xrayTrafficTimer = null;
+  }
+
   // Ping timer - every 3 seconds
   void _startPingTimer() {
     _stopPingTimer();
@@ -281,6 +309,38 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> _updateCurrentPing() async {
+    // Xray mode: real delay through the active proxy config (v2rayNG style),
+    // measured against gstatic's generate_204 like the v2ray app uses.
+    if (_selectedProtocol == 'xray') {
+      final server = _selectedXrayServer;
+      if (server == null) {
+        _currentPing = null;
+        _pingFailed = true;
+        notifyListeners();
+        return;
+      }
+      try {
+        _pingFailed = false;
+        final config = await _buildDelayConfig(server);
+        final delay = await XrayConnection.measureDelay(
+          config,
+          url: 'https://www.gstatic.com/generate_204',
+        ).timeout(const Duration(seconds: 6), onTimeout: () => -1);
+        if (delay >= 0) {
+          _currentPing = delay;
+          _pingFailed = false;
+        } else {
+          _currentPing = null;
+          _pingFailed = true;
+        }
+      } catch (_) {
+        _currentPing = null;
+        _pingFailed = true;
+      }
+      notifyListeners();
+      return;
+    }
+
     // DNS mode: پینگ به سرور DNS متصل‌شده (هر ۳ ثانیه، مثل دستور ping ترموکس)
     if (_selectedProtocol == 'direct_dns' && _selectedDnsServer != null) {
       final dnsIp = _selectedDnsServer!.primaryDns;
@@ -1241,6 +1301,8 @@ class VpnProvider with ChangeNotifier {
         _connectedServer = null; // Xray mode
         _errorMessage = null;
         _startDurationTimer();
+        _startPingTimer(); // real ping via gstatic generate_204
+        _startXrayTraffic(); // poll proxy up/down bytes from the core
       } else {
         _status = VpnConnectionStatus.error;
         _errorMessage = 'Failed to start Xray core';
@@ -1288,8 +1350,12 @@ class VpnProvider with ChangeNotifier {
         }
       } else if (_selectedProtocol == 'xray') {
         await XrayConnection.disconnect();
+        _stopPingTimer();
         _stopDurationTimer();
+        _stopXrayTraffic();
         _connectionDuration = Duration.zero;
+        _totalDownloadBytes = 0;
+        _totalUploadBytes = 0;
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting Xray...');
         }
@@ -1579,6 +1645,7 @@ class VpnProvider with ChangeNotifier {
     _statusSubscription?.cancel();
     _stopDurationTimer();
     _stopPingTimer();
+    _stopXrayTraffic();
     _vpnService.dispose();
     super.dispose();
   }

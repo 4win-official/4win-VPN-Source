@@ -509,10 +509,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         
                         const SizedBox(height: 40),
                         
-                        // Data Usage Info (برای SSTP و Direct DNS)
+                        // Data Usage Info (SSTP، Direct DNS و Xray)
                         if (provider.isConnected &&
                             (provider.selectedProtocol == 'sstp' ||
-                                provider.selectedProtocol == 'direct_dns'))
+                                provider.selectedProtocol == 'direct_dns' ||
+                                provider.selectedProtocol == 'xray'))
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 32),
                             child: Text(

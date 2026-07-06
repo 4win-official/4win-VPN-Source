@@ -158,6 +158,15 @@ class MainActivity: FlutterActivity() {
                 "isXrayRunning" -> {
                     result.success(XrayVpnService.isServiceRunning)
                 }
+                "queryXrayStats" -> {
+                    // Returns cumulative proxy traffic [uplinkBytes, downlinkBytes]
+                    // since connect, polled by Flutter to show data usage.
+                    val stats = XrayVpnService.queryTrafficStats()
+                    val map = HashMap<String, Any>()
+                    map["uplink"] = stats[0]
+                    map["downlink"] = stats[1]
+                    result.success(map)
+                }
                 "getXrayVersion" -> {
                     result.success(
                         runCatching { libv2ray.Libv2ray.checkVersionX() }.getOrDefault("unknown")

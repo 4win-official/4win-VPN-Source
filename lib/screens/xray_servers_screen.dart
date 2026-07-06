@@ -426,13 +426,28 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             secondChild: Column(
               children: [
                 const Divider(height: 1),
-                ...servers.map((s) => _buildServerTile(
+                // Render at most 200 tiles to keep huge groups (1000+ servers)
+                // smooth. The whole group is still used when connecting/testing
+                // (fastest across ALL servers is picked); this only limits the
+                // visible list.
+                ...servers.take(200).map((s) => _buildServerTile(
                       provider,
                       s,
                       provider.selectedXrayServer?.id == s.id,
                       isDark,
                       accent,
                     )),
+                if (servers.length > 200)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      '…and ${servers.length - 200} more servers',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 6),
               ],
             ),
