@@ -151,6 +151,12 @@ class OpenVpnConfig {
       }
     }
 
+    // Always end on a newline. Some cores (and plugin quirks that append text)
+    // corrupt the last directive if the file doesn't end cleanly.
+    if (!normalized.endsWith('\n')) {
+      normalized = '$normalized\n';
+    }
+
     return normalized;
   }
   

@@ -10,6 +10,12 @@ import 'services/ovpn_import_service.dart';
 /// outside the widget tree (e.g. when an .ovpn file is opened/shared).
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+/// Set to true by LoadingScreen once it has replaced itself with HomeScreen.
+/// Used by the .ovpn cold-start import flow to avoid pushing the import screen
+/// before the loading screen's pushReplacement wipes the navigation stack.
+bool _homeReady = false;
+void markHomeReady() => _homeReady = true;
+
 void main() {
   runApp(const MyApp());
 }
@@ -49,9 +55,15 @@ class _MyAppState extends State<MyApp> {
       final pending = await OvpnImportService.instance.checkPending();
       if (pending == null) return;
 
+      // CRITICAL FIX: on a cold start the app first shows LoadingScreen and then
+      // does Navigator.pushReplacement(HomeScreen). If we push the import screen
+      // BEFORE that replacement, the replacement wipes the whole stack and our
+      // import screen (and its dialog) vanish in a flash. So we wait until the
+      // app has settled on the home screen (i.e. no more pushReplacement is
+      // pending) before pushing the import screen on top of it.
+      await _waitUntilHomeReady();
+
       // Switch the active protocol to OpenVPN so the imported config is usable.
-      // ctx is the root Navigator's context (from a persistent GlobalKey), so
-      // it remains valid across the await above.
       try {
         // ignore: use_build_context_synchronously
         await Provider.of<VpnProvider>(ctx, listen: false)
@@ -60,7 +72,9 @@ class _MyAppState extends State<MyApp> {
         // Provider not ready yet; the import screen still works standalone.
       }
 
-      nav.push(
+      final currentNav = navigatorKey.currentState;
+      if (currentNav == null) return;
+      currentNav.push(
         MaterialPageRoute(
           builder: (_) => OpenVpnConfigsScreen(
             initialImportName: pending.name,
@@ -70,6 +84,16 @@ class _MyAppState extends State<MyApp> {
       );
     } finally {
       _handlingImport = false;
+    }
+  }
+
+  /// Waits until the app is no longer on the transient LoadingScreen so the
+  /// pushed import screen isn't destroyed by LoadingScreen's pushReplacement.
+  Future<void> _waitUntilHomeReady() async {
+    for (var i = 0; i < 60; i++) {
+      // ~60 * 200ms = 12s max
+      if (_homeReady) return;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
     }
   }
 

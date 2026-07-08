@@ -264,6 +264,75 @@ class XrayServerService {
     return added;
   }
 
+  /// Wipes the stored ping value on every server. Called on app launch so
+  /// stale (previous-session) ping results are never shown; a fresh test must
+  /// be run again this session.
+  Future<void> clearAllPings() async {
+    try {
+      final servers = await loadServers();
+      if (servers.isEmpty) return;
+      var changed = false;
+      for (final s in servers) {
+        if (s.ping != null) {
+          s.ping = null;
+          changed = true;
+        }
+      }
+      if (changed) await saveServers(servers);
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ clearAllPings: $e');
+    }
+  }
+
+  /// Refreshes a SINGLE subscription group: clears that group's servers and
+  /// re-downloads + re-parses them from the group's source URL. [groupKey] is
+  /// the displayed group name — either [XrayServer.freeGroup] (built-in) or a
+  /// user sub URL's host (see [groupNameForUrl]). Returns servers loaded, or
+  /// -1 if the group isn't a URL-backed subscription (e.g. user-pasted links).
+  Future<int> refreshOneGroup(String groupKey) async {
+    try {
+      // Resolve the source URL for this group.
+      String? url;
+      if (groupKey == XrayServer.freeGroup) {
+        url = subscriptionUrl;
+      } else {
+        final userUrls = await getSubUrls();
+        for (final u in userUrls) {
+          if (groupNameForUrl(u) == groupKey) {
+            url = u;
+            break;
+          }
+        }
+      }
+      if (url == null) return -1; // not a URL-backed group
+
+      final lines = await _fetchLinks(url);
+      if (lines.isEmpty) return -1; // fetch failed — keep existing untouched
+
+      final all = await loadServers();
+      final oldPings = <String, int?>{for (final s in all) s.link: s.ping};
+
+      // Parse this group's links on a background isolate.
+      final encodedGroup = await compute(
+        _parseSubscriptionsIsolate,
+        _ParseJob([lines], [groupKey], oldPings, maxServersPerGroup),
+      );
+
+      // Keep everything EXCEPT this group's old servers, then append fresh ones.
+      final keep = all.where((s) => s.group != groupKey).toList();
+      final encodedKeep = keep.length > 60
+          ? await compute(_encodeServersIsolate, keep)
+          : keep.map((s) => jsonEncode(s.toJson())).toList();
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_storageKey, [...encodedKeep, ...encodedGroup]);
+      return encodedGroup.length;
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ refreshOneGroup: $e');
+      return -1;
+    }
+  }
+
   /// Fetches every subscription (built-in + user-added) and rebuilds each as
   /// its OWN group. The built-in one uses [XrayServer.freeGroup]; each user
   /// sub URL becomes its own group named after the URL host. Servers the user

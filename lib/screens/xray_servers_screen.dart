@@ -172,6 +172,22 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     );
   }
 
+  /// Update a SINGLE subscription group: clears its servers and re-downloads
+  /// them from that sub link's URL.
+  Future<void> _refreshOneGroup(
+      VpnProvider provider, String groupKey, String title) async {
+    final count = await provider.refreshXrayOneGroup(groupKey);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(count >= 0
+            ? '"$title" updated ($count configs)'
+            : 'Could not update "$title"'),
+        backgroundColor: count >= 0 ? Colors.green : Colors.orange,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -314,6 +330,12 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final aServerInGroupSelected = servers
         .any((s) => provider.selectedXrayServer?.id == s.id);
     final highlight = groupSelected || aServerInGroupSelected;
+    // A group is refreshable only if it's backed by a subscription URL — the
+    // built-in free group or a user sub-link group. The user-pasted links
+    // group ("My Sub Links") and individual servers have no source URL.
+    final isRefreshable =
+        locked && groupKey != XrayServerService.userLinksGroup;
+    final refreshing = provider.xrayGroupRefreshingFor(groupKey);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -383,6 +405,21 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     Padding(
                       padding: const EdgeInsets.only(right: 4),
                       child: Icon(Icons.check_circle, color: accent),
+                    ),
+                  // Refresh this subscription link (clear + re-download).
+                  if (isRefreshable)
+                    IconButton(
+                      tooltip: 'Update this sub link',
+                      icon: refreshing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(Icons.refresh, color: accent),
+                      onPressed: refreshing
+                          ? null
+                          : () => _refreshOneGroup(provider, groupKey, title),
                     ),
                   // Export whole group (copy all links to clipboard)
                   IconButton(

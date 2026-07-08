@@ -59,6 +59,11 @@ class VpnProvider with ChangeNotifier {
   bool get xrayGroupTesting => _xrayGroupTesting;
   bool _xrayRefreshing = false;
   bool get xrayRefreshing => _xrayRefreshing;
+
+  // Per-group refresh spinner (updating a single subscription link).
+  final Set<String> _xrayRefreshingGroups = {};
+  bool xrayGroupRefreshingFor(String group) =>
+      _xrayRefreshingGroups.contains(group);
   
   // Slow DNS configs
   List<SlowDnsConfig> _slowDnsConfigs = [];
@@ -160,8 +165,39 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
     });
     
-    // IMPORTANT: Always refresh and test servers on app startup
-    _loadAndTestServers();
+    // Apply the desired Xray default settings + wipe any stale ping results
+    // from a previous session, THEN load/test servers (awaited so the ping
+    // wipe finishes before anything reloads the stored servers).
+    _applyXrayStartupState().whenComplete(_loadAndTestServers);
+  }
+
+  /// On every app launch: (1) force the intended Xray defaults — auto
+  /// concurrent testing ON and fragment OFF — and (2) clear any pings that were
+  /// persisted from a previous session so the user never sees stale results.
+  /// Pings are only meaningful for the current session/connection.
+  Future<void> _applyXrayStartupState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // (1) One-time default enforcement (both new and existing users). Runs
+      // once per install unless the flag is missing.
+      final applied = prefs.getBool('xray_defaults_v146') ?? false;
+      if (!applied) {
+        await prefs.setBool('xray_auto_concurrent', true); // auto-detect ON
+        await prefs.setBool('xray_fragment', false); // fragment OFF
+        await prefs.setBool('xray_defaults_v146', true);
+      }
+
+      // (2) Clear persisted pings so old (days-old) results don't linger. A
+      // fresh test must be taken again this session. ping is mutable, so set it
+      // directly (copyWith can't null it out).
+      await _xrayService.clearAllPings();
+      for (final s in _xrayServers) {
+        s.ping = null;
+      }
+      _currentPing = null;
+      notifyListeners();
+    } catch (_) {}
   }
   
   Future<void> _loadAndTestServers() async {
@@ -175,7 +211,9 @@ class VpnProvider with ChangeNotifier {
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       // برای direct_dns و slowdns سرویس SSTP فعال نیست و getConnectionDuration
       // مقدار null برمی‌گرداند؛ پس مدت‌زمان را خودمان به‌صورت دستی می‌شماریم.
-      if (_selectedProtocol == 'direct_dns' || _selectedProtocol == 'slowdns') {
+      if (_selectedProtocol == 'direct_dns' ||
+          _selectedProtocol == 'slowdns' ||
+          _selectedProtocol == 'xray') {
         _connectionDuration += const Duration(seconds: 1);
         notifyListeners();
         return;
@@ -1050,6 +1088,23 @@ class VpnProvider with ChangeNotifier {
       return count;
     } finally {
       _xrayRefreshing = false;
+      notifyListeners();
+    }
+  }
+
+  /// Refresh a SINGLE subscription group: wipe its servers and re-download +
+  /// re-parse them from that sub link's URL. Returns servers loaded, or -1 if
+  /// the group can't be refreshed (not URL-backed / fetch failed).
+  Future<int> refreshXrayOneGroup(String groupKey) async {
+    if (_xrayRefreshingGroups.contains(groupKey)) return -1;
+    _xrayRefreshingGroups.add(groupKey);
+    notifyListeners();
+    try {
+      final count = await _xrayService.refreshOneGroup(groupKey);
+      await loadXrayServers();
+      return count;
+    } finally {
+      _xrayRefreshingGroups.remove(groupKey);
       notifyListeners();
     }
   }

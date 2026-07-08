@@ -115,13 +115,27 @@ class OpenVpnConnection {
       }
       
       // ✅ Connect after permission granted با normalizedConfig
+      //
+      // 🔴 CRITICAL: openvpn_flutter 1.3.4 has a nasty quirk — when
+      // certIsRequired == false it does:  config += "client-cert-not-required";
+      // i.e. it APPENDS the raw text "client-cert-not-required" to the end of
+      // the config *without a newline*, gluing it onto the last line (often
+      // right after </ca> / </cert>) AND injecting an obsolete directive that
+      // modern OpenVPN cores reject. The result: the config fails to parse and
+      // the connection silently times out — exactly the "connects to nothing"
+      // symptom. The official OpenVPN app never mangles the config like this.
+      //
+      // We therefore pass certIsRequired == true so the plugin leaves the
+      // config UNTOUCHED. To keep configs that genuinely have no client cert
+      // working, we make sure the directive is present ourselves, cleanly on
+      // its own line, inside normalizedConfig when appropriate.
       _openvpn.connect(
-        normalizedConfigContent, // استفاده از normalized config
+        normalizedConfigContent,
         config.name,
         username: username,
         password: password,
-        certIsRequired: false, // برای جلوگیری از stuck شدن در iOS
-        bypassPackages: [], // لیست اپ‌هایی که نباید از VPN استفاده کنند
+        certIsRequired: true, // don't let the plugin append a broken directive
+        bypassPackages: [],
       );
       
       _connectedConfigName = config.name;

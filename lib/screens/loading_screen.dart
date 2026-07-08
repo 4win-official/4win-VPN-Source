@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../providers/vpn_provider.dart';
+import '../main.dart' show markHomeReady;
 import 'home_screen.dart';
 
 class LoadingScreen extends StatefulWidget {
@@ -67,6 +68,9 @@ class _LoadingScreenState extends State<LoadingScreen> {
         context,
         MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
+      // Signal the .ovpn import flow that the stack has settled on Home, so it
+      // can safely push the import screen without it being wiped.
+      markHomeReady();
     }
   }
 

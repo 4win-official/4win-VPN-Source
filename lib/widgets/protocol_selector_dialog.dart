@@ -86,7 +86,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                               ),
                             ),
                             child: Text(
-                              'VLESS/VMess',
+                              'Recommended',
                               style: TextStyle(
                                 color: Colors.tealAccent.shade700,
                                 fontSize: 11,
