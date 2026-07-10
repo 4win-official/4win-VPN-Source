@@ -22,6 +22,12 @@ class XrayServer {
   /// The free, auto-updated subscription group bundled with the app.
   static const String freeGroup = '4win Free Servers';
 
+  /// The premium "Plus" subscription group bundled with the app (gold framed).
+  static const String plusGroup = 'Plus';
+
+  /// Built-in groups are always present, cached, and pinned to the top.
+  static bool isBuiltInGroup(String g) => g == freeGroup || g == plusGroup;
+
   /// A server is locked (subscription-managed, non-deletable) when it belongs
   /// to any named group. Individual user servers have an empty group.
   bool get isLocked => group.isNotEmpty;

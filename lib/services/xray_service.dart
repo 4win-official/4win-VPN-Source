@@ -69,6 +69,16 @@ class XrayServerService {
   static const String subscriptionUrl =
       'https://raw.githubusercontent.com/4win-official/sub/refs/heads/main/config.txt';
 
+  /// Second built-in subscription — the premium "Plus" group (gold framed).
+  static const String plusSubscriptionUrl =
+      'https://raw.githubusercontent.com/4win-official/sub/refs/heads/main/XPlus.txt';
+
+  /// Built-in subscriptions in display order (always first in the list).
+  static const Map<String, String> builtInSubs = {
+    subscriptionUrl: XrayServer.freeGroup,
+    plusSubscriptionUrl: XrayServer.plusGroup,
+  };
+
   /// User-added subscription links (in addition to the built-in one).
   Future<List<String>> getSubUrls() async {
     final prefs = await SharedPreferences.getInstance();
@@ -293,9 +303,14 @@ class XrayServerService {
     try {
       // Resolve the source URL for this group.
       String? url;
-      if (groupKey == XrayServer.freeGroup) {
-        url = subscriptionUrl;
-      } else {
+      // Built-in groups first (free + plus).
+      for (final e in builtInSubs.entries) {
+        if (e.value == groupKey) {
+          url = e.key;
+          break;
+        }
+      }
+      if (url == null) {
         final userUrls = await getSubUrls();
         for (final u in userUrls) {
           if (groupNameForUrl(u) == groupKey) {
@@ -307,7 +322,8 @@ class XrayServerService {
       if (url == null) return -1; // not a URL-backed group
 
       final lines = await _fetchLinks(url);
-      if (lines.isEmpty) return -1; // fetch failed — keep existing untouched
+      // Fetch failed — keep existing servers untouched (esp. cached built-ins).
+      if (lines.isEmpty) return -1;
 
       final all = await loadServers();
       final oldPings = <String, int?>{for (final s in all) s.link: s.ping};
@@ -356,38 +372,54 @@ class XrayServerService {
       // Preserve old pings by link so re-fetch keeps measured latency.
       final oldPings = <String, int?>{for (final s in all) s.link: s.ping};
 
-      // Build each subscription group. Map keeps insertion order (built-in
-      // first, then user subs in their stored order).
+      // Build each subscription group. Map keeps insertion order: the two
+      // built-in groups first (Free, then Plus), then user subs.
       final userUrls = await getSubUrls();
       final subUrls = <String, String>{
-        subscriptionUrl: XrayServer.freeGroup,
+        ...builtInSubs,
         for (final u in userUrls) u: groupNameForUrl(u),
       };
 
-      // 1) Fetch every subscription body on the UI isolate (network only —
-      //    cheap). Collect the raw link lines + their group names.
+      // 1) Fetch every subscription body (network only). A built-in group whose
+      //    fetch FAILS is cached — we re-use its previously stored servers so
+      //    the default groups are ALWAYS present, even offline.
       final bodies = <List<String>>[];
       final groups = <String>[];
+      final cachedBuiltIn = <XrayServer>[]; // failed built-ins reused from store
       var fetchedAny = false;
       for (final entry in subUrls.entries) {
         final lines = await _fetchLinks(entry.key);
+        final groupName = entry.value;
+        if (lines.isEmpty && XrayServer.isBuiltInGroup(groupName)) {
+          // Keep the last known servers for this built-in group (cache).
+          cachedBuiltIn.addAll(all.where((s) => s.group == groupName));
+          continue;
+        }
         if (lines.isNotEmpty) fetchedAny = true;
         bodies.add(lines);
-        groups.add(entry.value);
+        groups.add(groupName);
       }
 
       // If nothing could be fetched at all, leave existing data untouched.
-      if (!fetchedAny) return all.where((s) => s.isLocked).length;
+      if (!fetchedAny && cachedBuiltIn.isEmpty) {
+        return all.where((s) => s.isLocked).length;
+      }
 
-      // 2) Parse + JSON-encode ALL links on a BACKGROUND isolate. This is the
-      //    heavy part that used to freeze the app with big (1000+) subs.
-      final encodedSub = await compute(
-        _parseSubscriptionsIsolate,
-        _ParseJob(bodies, groups, oldPings, maxServersPerGroup),
-      );
+      // 2) Parse + JSON-encode the freshly-fetched links on a BACKGROUND
+      //    isolate (the heavy part that used to freeze on big subs).
+      final encodedSub = bodies.isEmpty
+          ? <String>[]
+          : await compute(
+              _parseSubscriptionsIsolate,
+              _ParseJob(bodies, groups, oldPings, maxServersPerGroup),
+            );
 
-      // Keep user-pasted links group + individual user servers as-is (encode
-      // them too so we store one flat string list without re-decoding subs).
+      // Encode cached built-in servers (from failed fetches) so they persist.
+      final encodedCached = cachedBuiltIn
+          .map((s) => jsonEncode(s.toJson()))
+          .toList();
+
+      // Keep user-pasted links group + individual user servers as-is.
       final keep = all
           .where((s) => s.group.isEmpty || s.group == userLinksGroup)
           .toList();
@@ -395,11 +427,12 @@ class XrayServerService {
           ? await compute(_encodeServersIsolate, keep)
           : keep.map((s) => jsonEncode(s.toJson())).toList();
 
-      // 3) Store the merged encoded list directly (no extra decode/encode).
-      await prefs.setStringList(_storageKey, [...encodedSub, ...encodedKeep]);
+      // 3) Store the merged encoded list directly.
+      await prefs.setStringList(
+          _storageKey, [...encodedSub, ...encodedCached, ...encodedKeep]);
       await prefs.setInt(
           _subUpdatedKey, DateTime.now().millisecondsSinceEpoch);
-      return encodedSub.length;
+      return encodedSub.length + encodedCached.length;
     } catch (e) {
       if (kDebugMode) debugPrint('❌ refreshFreeGroup: $e');
       return 0;

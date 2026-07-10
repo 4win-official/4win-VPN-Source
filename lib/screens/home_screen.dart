@@ -403,7 +403,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                         // Active Xray config name (under the status text).
                         if (provider.selectedProtocol == 'xray' &&
-                            provider.selectedXrayServer != null) ...[
+                            provider.activeXrayServer != null) ...[
                           const SizedBox(height: 6),
                           Padding(
                             padding:
@@ -419,11 +419,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 const SizedBox(width: 6),
                                 Flexible(
                                   child: Text(
-                                    provider.selectedXrayServer!.remark.isEmpty
+                                    provider.activeXrayServer!.remark.isEmpty
                                         ? provider
-                                            .selectedXrayServer!.address
+                                            .activeXrayServer!.address
                                         : provider
-                                            .selectedXrayServer!.remark,
+                                            .activeXrayServer!.remark,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     textAlign: TextAlign.center,

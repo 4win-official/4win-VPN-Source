@@ -261,26 +261,37 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           }
           final individual = groups.remove('') ?? [];
 
+          // Pin built-in default groups (Free, then Plus) FIRST — always on top
+          // of the list — then the remaining (user) groups in their order.
+          // A built-in group with NO servers simply isn't a key here, so an
+          // empty Plus subscription is not shown at all.
+          final orderedKeys = <String>[
+            if (groups.containsKey(XrayServer.freeGroup)) XrayServer.freeGroup,
+            if (groups.containsKey(XrayServer.plusGroup)) XrayServer.plusGroup,
+            for (final k in groups.keys)
+              if (!XrayServer.isBuiltInGroup(k)) k,
+          ];
+
           final children = <Widget>[
-            for (final entry in groups.entries)
+            for (final key in orderedKeys)
               _buildGroup(
                 provider: provider,
                 isDark: isDark,
-                accent: accent,
-                title: entry.key,
-                groupKey: entry.key,
-                servers: entry.value,
+                accentIn: accent,
+                title: key,
+                groupKey: key,
+                servers: groups[key]!,
                 // Every named group is a selectable subscription group.
                 locked: true,
-                expanded: _expandedGroups.contains(entry.key),
+                expanded: _expandedGroups.contains(key),
                 onToggleExpand: () => setState(() =>
-                    _toggleExpanded(entry.key)),
+                    _toggleExpanded(key)),
               ),
             if (individual.isNotEmpty)
               _buildGroup(
                 provider: provider,
                 isDark: isDark,
-                accent: accent,
+                accentIn: accent,
                 title: 'My Servers',
                 groupKey: '',
                 servers: individual,
@@ -313,7 +324,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   Widget _buildGroup({
     required VpnProvider provider,
     required bool isDark,
-    required Color accent,
+    required Color accentIn,
     required String title,
     required String groupKey,
     required List<XrayServer> servers,
@@ -321,6 +332,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     required bool expanded,
     required VoidCallback onToggleExpand,
   }) {
+    // The Plus built-in group gets a distinctive GOLD frame; everything else
+    // uses the passed-in (green) accent.
+    final Color accent = groupKey == XrayServer.plusGroup
+        ? const Color(0xFFE6B800)
+        : accentIn;
     // Only this group's spinner shows while this group is being tested.
     final testing = provider.xrayGroupTestingFor(groupKey);
     final anyTesting = provider.xrayGroupTesting;
@@ -365,9 +381,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   Icon(
                       !locked
                           ? Icons.folder
-                          : (groupKey == XrayServer.freeGroup
-                              ? Icons.lock
-                              : Icons.cloud_outlined),
+                          : (groupKey == XrayServer.plusGroup
+                              ? Icons.workspace_premium
+                              : (groupKey == XrayServer.freeGroup
+                                  ? Icons.lock
+                                  : Icons.cloud_outlined)),
                       size: 20,
                       color: accent),
                   const SizedBox(width: 8),

@@ -46,6 +46,12 @@ class VpnProvider with ChangeNotifier {
   // در این حالت موقع اتصال، آن گروه تست و به بهترین سرورش وصل می‌شویم.
   String? _selectedXrayGroup;
   String? get selectedXrayGroup => _selectedXrayGroup;
+
+  // The server actually in use this session (for a group target it's the one
+  // picked as fastest; for a manual pick it equals _selectedXrayServer). Used
+  // for the home "active config" label and session ping — NOT persisted.
+  XrayServer? _activeXrayServer;
+  XrayServer? get activeXrayServer => _activeXrayServer ?? _selectedXrayServer;
   bool get xrayFreeGroupSelected => _selectedXrayGroup != null;
   bool xrayGroupSelectedFor(String group) => _selectedXrayGroup == group;
   // ids of servers currently being delay-tested (for spinner UI)
@@ -350,7 +356,7 @@ class VpnProvider with ChangeNotifier {
     // Xray mode: real delay through the active proxy config (v2rayNG style),
     // measured against gstatic's generate_204 like the v2ray app uses.
     if (_selectedProtocol == 'xray') {
-      final server = _selectedXrayServer;
+      final server = activeXrayServer;
       if (server == null) {
         _currentPing = null;
         _pingFailed = true;
@@ -986,7 +992,6 @@ class VpnProvider with ChangeNotifier {
   /// Load persisted Xray servers + currently selected one.
   Future<void> loadXrayServers() async {
     _xrayServers = await _xrayService.loadServers();
-    _selectedXrayServer = await _xrayService.getSelectedServer();
     final prefs = await SharedPreferences.getInstance();
     _selectedXrayGroup = prefs.getString('xray_selected_group');
     // If the selected group no longer exists, drop the selection.
@@ -994,6 +999,14 @@ class VpnProvider with ChangeNotifier {
         !_xrayServers.any((s) => s.group == _selectedXrayGroup)) {
       _selectedXrayGroup = null;
       await prefs.remove('xray_selected_group');
+    }
+    // When a whole GROUP is the target, there must be NO fixed selected server:
+    // each connect re-tests the group and picks the current fastest. A specific
+    // server is only remembered when the user manually chose one.
+    if (_selectedXrayGroup != null) {
+      _selectedXrayServer = null;
+    } else {
+      _selectedXrayServer = await _xrayService.getSelectedServer();
     }
     notifyListeners();
   }
@@ -1302,14 +1315,15 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
 
-      // Only when a WHOLE group is selected (not a specific server), test that
-      // group concurrently and connect to its fastest. If the user manually
-      // picked a specific server, connect to exactly that one.
+      // The server we actually build the config for. For a GROUP target we pick
+      // the fastest fresh each connect WITHOUT persisting it as the selected
+      // server, so disconnect+reconnect always re-tests. For a manually-picked
+      // server we use exactly that one.
+      XrayServer? serverToConnect = _selectedXrayServer;
       if (_selectedXrayServer == null && groupHasServers) {
         final fastest = await _pickFastestFreeServer();
         if (fastest != null) {
-          _selectedXrayServer = fastest;
-          await _xrayService.setSelectedId(fastest.id);
+          serverToConnect = fastest; // session-only, NOT persisted
         } else {
           _status = VpnConnectionStatus.error;
           _errorMessage = 'No working server found in this group. Try again.';
@@ -1337,7 +1351,7 @@ class VpnProvider with ChangeNotifier {
 
       // Build the Xray JSON config (incl. TLS ClientHello fragment outbound).
       final configJson = XrayConfigBuilder.build(
-        _selectedXrayServer!,
+        serverToConnect!,
         fragmentEnabled: fragEnabled,
         fragmentPackets: fragPackets,
         fragmentLength: fragLength,
@@ -1346,14 +1360,15 @@ class VpnProvider with ChangeNotifier {
       );
 
       if (kDebugMode) {
-        debugPrint('🚀 Connecting Xray: ${_selectedXrayServer!.remark} '
-            '(${_selectedXrayServer!.protocol}) fragment=$fragEnabled');
+        debugPrint('🚀 Connecting Xray: ${serverToConnect.remark} '
+            '(${serverToConnect.protocol}) fragment=$fragEnabled');
       }
 
       final connected = await XrayConnection.connect(configJson);
       if (connected) {
         _status = VpnConnectionStatus.connected;
         _connectedServer = null; // Xray mode
+        _activeXrayServer = serverToConnect; // session-only (for label + ping)
         _errorMessage = null;
         _startDurationTimer();
         _startPingTimer(); // real ping via gstatic generate_204
@@ -1411,6 +1426,8 @@ class VpnProvider with ChangeNotifier {
         _connectionDuration = Duration.zero;
         _totalDownloadBytes = 0;
         _totalUploadBytes = 0;
+        // Drop the session server so a group target re-tests on next connect.
+        _activeXrayServer = null;
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting Xray...');
         }
@@ -1594,13 +1611,19 @@ class VpnProvider with ChangeNotifier {
     try {
       _openVpnConfigs = await _openVpnService.loadConfigs();
       
-      // Load selected config
+      // Load selected config (null-safe: never cast null to OpenVpnConfig).
       final selectedName = await _openVpnService.getSelectedConfigName();
-      if (selectedName != null) {
-        _selectedOpenVpnConfig = _openVpnConfigs.firstWhere(
-          (config) => config.name == selectedName,
-          orElse: () => _openVpnConfigs.isNotEmpty ? _openVpnConfigs.first : null as OpenVpnConfig,
-        );
+      if (selectedName != null && _openVpnConfigs.isNotEmpty) {
+        OpenVpnConfig? match;
+        for (final c in _openVpnConfigs) {
+          if (c.name == selectedName) {
+            match = c;
+            break;
+          }
+        }
+        _selectedOpenVpnConfig = match ?? _openVpnConfigs.first;
+      } else if (_openVpnConfigs.isEmpty) {
+        _selectedOpenVpnConfig = null;
       }
       
       notifyListeners();
