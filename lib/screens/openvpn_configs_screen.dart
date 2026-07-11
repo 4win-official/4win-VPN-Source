@@ -630,20 +630,26 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
   }
 
   Future<void> _selectAndConnect(OpenVpnConfig config) async {
-    // Save selected config
+    // Save selected config.
     await _service.setSelectedConfig(config.name);
 
+    if (!mounted) return;
     setState(() {
       _selectedConfigName = config.name;
     });
 
-    // Connect using VpnProvider
-    if (mounted) {
-      final vpnProvider = Provider.of<VpnProvider>(context, listen: false);
-      await vpnProvider.selectOpenVpnConfigAndConnect(config);
+    final vpnProvider = Provider.of<VpnProvider>(context, listen: false);
 
-      Navigator.pop(context); // برگشت به صفحه اصلی
-    }
+    // Return to the home screen FIRST so the UI stays responsive, THEN kick off
+    // the connection. Awaiting the whole connect() here (which drives native
+    // permission dialogs + the platform connect call) blocked this frame and
+    // made selecting a server feel like a freeze. connect() manages its own
+    // status via notifyListeners(), so we don't need to await it before popping.
+    Navigator.pop(context);
+
+    // Fire-and-forget: the provider updates state through listeners.
+    // ignore: discarded_futures
+    unawaited(vpnProvider.selectOpenVpnConfigAndConnect(config));
   }
 
   /// تست ping به سرور OpenVPN (استفاده از Socket)

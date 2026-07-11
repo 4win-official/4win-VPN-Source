@@ -11,6 +11,9 @@ class OpenVpnConnection {
   
   /// Callback for status changes
   static void Function(VPNStage?)? onStageChanged;
+
+  /// Callback for live byte counters (bytesIn, bytesOut) reported by the core.
+  static void Function(int bytesIn, int bytesOut)? onByteCount;
   
   /// Initialize OpenVPN
   static Future<void> initialize() async {
@@ -19,6 +22,12 @@ class OpenVpnConnection {
     try {
       _openvpn = OpenVPN(
         onVpnStatusChanged: (data) {
+          if (data != null) {
+            // byteIn/byteOut arrive as strings from the core; parse defensively.
+            final inB = int.tryParse((data.byteIn ?? '').toString()) ?? 0;
+            final outB = int.tryParse((data.byteOut ?? '').toString()) ?? 0;
+            if (onByteCount != null) onByteCount!(inB, outB);
+          }
           if (kDebugMode) {
             debugPrint('🔵 OpenVPN Status Changed:');
             if (data != null) {
@@ -64,14 +73,20 @@ class OpenVpnConnection {
   static Future<bool> connect(OpenVpnConfig config) async {
     try {
       await initialize();
-      
-      // ✅ استفاده از effectiveUsername و effectivePassword
-      // اولویت با username/password embedded در فایل است
+
+      // Parse ONCE (the model caches these) — never in a rebuild path.
       final username = config.effectiveUsername;
       final password = config.effectivePassword;
-      
-      // ✅ استفاده از normalizedConfig برای fix کردن TCP و credentials
       final normalizedConfigContent = config.normalizedConfig;
+
+      // Basic sanity check: a config with no `remote` line can never connect
+      // and can wedge the native core. Fail fast with a clear message instead
+      // of freezing on a hopeless attempt.
+      if (!normalizedConfigContent
+          .contains(RegExp(r'^\s*remote\s+\S+', multiLine: true))) {
+        if (kDebugMode) debugPrint('❌ OpenVPN config has no remote line');
+        return false;
+      }
       
       if (kDebugMode) {
         debugPrint('🚀 Connecting to OpenVPN: ${config.name}');

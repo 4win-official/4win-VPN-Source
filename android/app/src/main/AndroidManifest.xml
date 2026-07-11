@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- VPN Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -110,6 +111,28 @@
                 android:value="Xray VPN Service for secure proxy" />
         </service>
         
+        <!-- ===== OpenVPN core service override =====
+             The openvpn_flutter plugin declares de.blinkt.openvpn.core.OpenVPNService
+             with foregroundServiceType="systemExempted". On Android 14+ a
+             systemExempted FGS crashes the app (ForegroundServiceStartNotAllowed /
+             SecurityException) unless the app is on the exemption allow-list, which
+             we are NOT. We override it to "specialUse" — the same type our own two
+             VPN services use and the type real VPN apps use — so the OpenVPN
+             foreground service starts cleanly instead of crashing on connect. -->
+        <service
+            android:name="de.blinkt.openvpn.core.OpenVPNService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            tools:replace="android:foregroundServiceType,android:permission,android:exported">
+            <intent-filter>
+                <action android:name="android.net.VpnService"/>
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="OpenVPN tunnel for secure browsing" />
+        </service>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

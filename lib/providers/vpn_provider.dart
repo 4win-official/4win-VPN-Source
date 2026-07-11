@@ -219,7 +219,8 @@ class VpnProvider with ChangeNotifier {
       // مقدار null برمی‌گرداند؛ پس مدت‌زمان را خودمان به‌صورت دستی می‌شماریم.
       if (_selectedProtocol == 'direct_dns' ||
           _selectedProtocol == 'slowdns' ||
-          _selectedProtocol == 'xray') {
+          _selectedProtocol == 'xray' ||
+          _selectedProtocol == 'openvpn') {
         _connectionDuration += const Duration(seconds: 1);
         notifyListeners();
         return;
@@ -410,6 +411,36 @@ class VpnProvider with ChangeNotifier {
       return;
     }
     
+    // OpenVPN mode: TCP-ping the config's remote host:port (the tunnel is up,
+    // so this round-trips through it — a good live latency indicator).
+    if (_selectedProtocol == 'openvpn') {
+      final cfg = _selectedOpenVpnConfig;
+      final host = cfg?.serverAddress;
+      final port = int.tryParse(cfg?.serverPort ?? '') ?? 1194;
+      if (host == null || host.isEmpty) {
+        _currentPing = null;
+        _pingFailed = true;
+        notifyListeners();
+        return;
+      }
+      try {
+        _pingFailed = false;
+        final sw = Stopwatch()..start();
+        final socket = await Socket.connect(host, port,
+                timeout: const Duration(seconds: 5))
+            .timeout(const Duration(seconds: 5));
+        sw.stop();
+        socket.destroy();
+        _currentPing = sw.elapsedMilliseconds;
+        _pingFailed = false;
+      } catch (_) {
+        _currentPing = null;
+        _pingFailed = true;
+      }
+      notifyListeners();
+      return;
+    }
+
     // SSTP mode: ping VPN server
     if (_connectedServer == null) return;
     
@@ -831,24 +862,36 @@ class VpnProvider with ChangeNotifier {
 
     try {
       _status = VpnConnectionStatus.connecting;
+      _errorMessage = null;
       notifyListeners();
 
       if (kDebugMode) {
         debugPrint('🚀 Connecting to OpenVPN: ${_selectedOpenVpnConfig!.name}');
       }
 
-      // ✅ Connection timeout watchdog (15 seconds)
+      // ✅ Connection timeout watchdog (25 seconds). Real servers over a slow
+      // network can legitimately take >15s to hand out the tunnel config, so we
+      // give it a bit more headroom before declaring failure (like the official
+      // OpenVPN app, which keeps trying rather than bailing early).
       Timer? connectionTimeoutTimer;
-      connectionTimeoutTimer = Timer(const Duration(seconds: 15), () {
+      connectionTimeoutTimer = Timer(const Duration(seconds: 25), () {
         if (_status == VpnConnectionStatus.connecting) {
           if (kDebugMode) {
-            debugPrint('⏱️ Connection timeout - still connecting after 15s');
+            debugPrint('⏱️ Connection timeout - still connecting after 25s');
           }
           _status = VpnConnectionStatus.error;
-          _errorMessage = 'Connection timeout. Please try again or check server.';
+          _errorMessage =
+              'Connection timeout. Please try again or check the server.';
           notifyListeners();
         }
       });
+
+      // Live traffic counters straight from the OpenVPN core (bytes in/out).
+      OpenVpnConnection.onByteCount = (int bytesIn, int bytesOut) {
+        _totalDownloadBytes = bytesIn;
+        _totalUploadBytes = bytesOut;
+        notifyListeners();
+      };
 
       // Initialize OpenVPN with stage callback
       OpenVpnConnection.onStageChanged = (VPNStage? stage) {
@@ -1410,6 +1453,11 @@ class VpnProvider with ChangeNotifier {
         _dnsBaselineTxBytes = -1;
       } else if (_selectedProtocol == 'openvpn') {
         await OpenVpnConnection.disconnect();
+        _stopPingTimer();
+        _stopDurationTimer();
+        _connectionDuration = Duration.zero;
+        _totalDownloadBytes = 0;
+        _totalUploadBytes = 0;
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting OpenVPN...');
         }
