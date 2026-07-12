@@ -67,6 +67,26 @@ class DnsVpnConnection {
     }
   }
 
+  /// Runs the advanced native DNS scanner over [ips], testing each with a real
+  /// UDP DNS query + TCP/53 probe (concurrently). Returns the raw JSON string
+  /// the native side produces (array of {ip, udpMs, tcpMs, reachable}), or
+  /// null on failure. [domain] is the name queried during the probe.
+  static Future<String?> scanDns(List<String> ips,
+      {String domain = 'google.com'}) async {
+    try {
+      final result = await platform.invokeMethod('scanDns', {
+        'ips': ips,
+        'domain': domain,
+      });
+      return result is String ? result : null;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ DNS scan error: $e');
+      }
+      return null;
+    }
+  }
+
   /// Manually set the SSTP MTU. Writes the sstp_flutter plugin's PPP MTU value
   /// natively (into the plugin's default SharedPreferences) so the next connect
   /// really uses it. [mtu] should be in 1280..1500. Returns true on success.

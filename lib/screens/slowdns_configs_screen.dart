@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../models/slowdns_config.dart';
+import 'dns_scanner_screen.dart';
 
 /// Screen for managing Slow DNS (DNS Tunneling) configurations.
 ///
@@ -57,6 +58,20 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
         ),
         backgroundColor: Colors.orange,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            tooltip: 'DNS Scanner',
+            icon: const Icon(Icons.radar),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const DnsScannerScreen(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Consumer<VpnProvider>(
         builder: (context, provider, _) {
@@ -268,9 +283,28 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
                 ),
                 TextFormField(
                   controller: nsController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Name Server *',
                     hintText: '1.1.1.1',
+                    suffixIcon: IconButton(
+                      tooltip: 'Find best DNS (Scanner)',
+                      icon: const Icon(Icons.radar, color: Colors.orange),
+                      onPressed: () async {
+                        final picked = await Navigator.push<String>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DnsScannerScreen(
+                              probeDomain: domainController.text.trim().isEmpty
+                                  ? null
+                                  : domainController.text.trim(),
+                            ),
+                          ),
+                        );
+                        if (picked != null && picked.isNotEmpty) {
+                          nsController.text = picked;
+                        }
+                      },
+                    ),
                   ),
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,

@@ -92,6 +92,18 @@ class MainActivity: FlutterActivity() {
                         }
                     }.start()
                 }
+                "scanDns" -> {
+                    // Advanced DNS scanner for Slow DNS. Tests every candidate
+                    // resolver concurrently with a REAL UDP DNS query (port 53)
+                    // and a TCP/53 reachability probe, then returns a JSON array
+                    // of {ip, udpMs, tcpMs, reachable} sorted fastest-first.
+                    val ips = call.argument<List<String>>("ips") ?: emptyList()
+                    val domain = call.argument<String>("domain") ?: "google.com"
+                    Thread {
+                        val json = scanDnsServers(ips, domain)
+                        runOnUiThread { result.success(json) }
+                    }.start()
+                }
                 "setSstpMtu" -> {
                     // Write the sstp_flutter plugin's MTU value into the default
                     // SharedPreferences (the plugin reads PPP_MTU from there as a String).
@@ -507,6 +519,100 @@ class MainActivity: FlutterActivity() {
         } finally {
             try { socket?.close() } catch (e: Exception) {}
         }
+    }
+
+    /**
+     * Advanced concurrent DNS scanner used by the Slow DNS scanner screen.
+     *
+     * For each candidate resolver IP it runs, in parallel:
+     *   • a real UDP DNS A-query on port 53 (measures resolver round-trip and
+     *     verifies the server actually answers DNS, not just that the port is
+     *     open), and
+     *   • a TCP/53 connect probe (DNS-over-TCP reachability — important because
+     *     slowdns tunnels fall back to / rely on TCP and many networks only
+     *     allow one of the two).
+     *
+     * Returns a JSON array string of objects:
+     *   {"ip":"1.1.1.1","udpMs":12,"tcpMs":15,"reachable":true}
+     * sorted fastest-first (working servers before failures). udpMs / tcpMs are
+     * -1 when that probe failed.
+     */
+    private fun scanDnsServers(ips: List<String>, domain: String): String {
+        if (ips.isEmpty()) return "[]"
+
+        data class Res(val ip: String, val udp: Int, val tcp: Int)
+
+        val query = buildDnsQuery(domain)
+        val results = java.util.Collections.synchronizedList(ArrayList<Res>())
+        val threads = ArrayList<Thread>()
+
+        // Bound concurrency so we don't spawn hundreds of sockets at once.
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(16)
+        val latch = java.util.concurrent.CountDownLatch(ips.size)
+
+        for (ip in ips) {
+            pool.execute {
+                var udp = -1
+                var tcp = -1
+                // UDP DNS query with latency.
+                var socket: DatagramSocket? = null
+                try {
+                    val address = InetAddress.getByName(ip)
+                    socket = DatagramSocket()
+                    socket.soTimeout = 1500
+                    val sendPacket = DatagramPacket(query, query.size, address, 53)
+                    val respBuf = ByteArray(512)
+                    val respPacket = DatagramPacket(respBuf, respBuf.size)
+                    val start = System.currentTimeMillis()
+                    socket.send(sendPacket)
+                    socket.receive(respPacket)
+                    val elapsed = (System.currentTimeMillis() - start).toInt()
+                    // Validate: response must echo our transaction id (0x1234)
+                    // and have QR bit set — proves it's a real DNS answer.
+                    val looksLikeDns = respPacket.length >= 4 &&
+                        respBuf[0] == 0x12.toByte() && respBuf[1] == 0x34.toByte() &&
+                        (respBuf[2].toInt() and 0x80) != 0
+                    if (looksLikeDns && elapsed in 0..3000) udp = elapsed
+                } catch (e: Exception) {
+                    udp = -1
+                } finally {
+                    try { socket?.close() } catch (e: Exception) {}
+                }
+                // TCP/53 reachability with latency.
+                tcp = pingTcp(ip, 53)
+                results.add(Res(ip, udp, tcp))
+                latch.countDown()
+            }
+        }
+
+        try {
+            latch.await(20, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (e: Exception) {}
+        pool.shutdownNow()
+
+        // Sort: reachable (udp ok) first, then by best latency.
+        fun score(r: Res): Int {
+            val best = when {
+                r.udp >= 0 && r.tcp >= 0 -> minOf(r.udp, r.tcp)
+                r.udp >= 0 -> r.udp
+                r.tcp >= 0 -> r.tcp
+                else -> Int.MAX_VALUE
+            }
+            return best
+        }
+        val sorted = results.sortedBy { score(it) }
+
+        val sb = StringBuilder("[")
+        for ((i, r) in sorted.withIndex()) {
+            if (i > 0) sb.append(",")
+            val reachable = r.udp >= 0 || r.tcp >= 0
+            sb.append("{\"ip\":\"").append(r.ip).append("\",")
+            sb.append("\"udpMs\":").append(r.udp).append(",")
+            sb.append("\"tcpMs\":").append(r.tcp).append(",")
+            sb.append("\"reachable\":").append(reachable).append("}")
+        }
+        sb.append("]")
+        return sb.toString()
     }
 
     /** ساخت یک بسته‌ی استاندارد DNS query (نوع A) برای دامنه‌ی داده‌شده */

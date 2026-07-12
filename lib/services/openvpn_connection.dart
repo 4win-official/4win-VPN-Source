@@ -109,27 +109,24 @@ class OpenVpnConnection {
         debugPrint(configPreview);
       }
       
-      // ✅ Request Android VPN permission first
-      try {
-        final permissionGranted = await _openvpn.requestPermissionAndroid();
-        if (kDebugMode) {
-          debugPrint('📱 Android VPN permission: ${permissionGranted ? "✅ Granted" : "❌ Denied"}');
-        }
-        
-        if (!permissionGranted) {
-          if (kDebugMode) {
-            debugPrint('❌ VPN permission denied by user');
-          }
-          return false;
-        }
-      } catch (e) {
-        // Permission request not available on iOS or error
-        if (kDebugMode) {
-          debugPrint('⚠️ Permission request error (might be iOS): $e');
-        }
-      }
-      
-      // ✅ Connect after permission granted با normalizedConfig
+      // 🔴 CRITICAL FIX — the real reason "the file connects the official
+      // OpenVPN app but not ours":
+      //
+      // We USED to call `requestPermissionAndroid()` first and, if it returned
+      // false, ABORT with `return false`. But on Android that method returns
+      // false IMMEDIATELY when the system VPN-consent dialog is shown — before
+      // the user taps "OK". So the very first connection (or any time consent
+      // was revoked) aborted instantly and never started, while the consent
+      // dialog was still on screen. Even after the user granted consent, our
+      // code had already bailed, so nothing connected.
+      //
+      // The plugin's native `connect` handler already does the correct
+      // prepare → startActivityForResult → onActivityResult(connectWhileGranted)
+      // dance itself: it stores the config in static fields, shows the consent
+      // dialog if needed, and starts the tunnel once consent returns. So we
+      // must call `connect(...)` DIRECTLY and let the native side own the
+      // permission flow — exactly like the official app does. Do NOT gate it on
+      // a pre-check that races the dialog.
       //
       // 🔴 CRITICAL: openvpn_flutter 1.3.4 has a nasty quirk — when
       // certIsRequired == false it does:  config += "client-cert-not-required";
