@@ -99,8 +99,9 @@ class MainActivity: FlutterActivity() {
                     // of {ip, udpMs, tcpMs, reachable} sorted fastest-first.
                     val ips = call.argument<List<String>>("ips") ?: emptyList()
                     val domain = call.argument<String>("domain") ?: "google.com"
+                    val parallel = call.argument<Int>("parallel") ?: 100
                     Thread {
-                        val json = scanDnsServers(ips, domain)
+                        val json = scanDnsServers(ips, domain, parallel)
                         runOnUiThread { result.success(json) }
                     }.start()
                 }
@@ -537,17 +538,21 @@ class MainActivity: FlutterActivity() {
      * sorted fastest-first (working servers before failures). udpMs / tcpMs are
      * -1 when that probe failed.
      */
-    private fun scanDnsServers(ips: List<String>, domain: String): String {
+    private fun scanDnsServers(ips: List<String>, domain: String, parallel: Int = 100): String {
         if (ips.isEmpty()) return "[]"
 
         data class Res(val ip: String, val udp: Int, val tcp: Int)
 
         val query = buildDnsQuery(domain)
+        // Only KEEP working resolvers when scanning large ranges — otherwise a
+        // 10k scan would return a huge JSON of mostly-dead IPs.
+        val keepOnlyReachable = ips.size > 300
         val results = java.util.Collections.synchronizedList(ArrayList<Res>())
-        val threads = ArrayList<Thread>()
 
-        // Bound concurrency so we don't spawn hundreds of sockets at once.
-        val pool = java.util.concurrent.Executors.newFixedThreadPool(16)
+        // Bound concurrency by the caller's requested parallel count (clamped),
+        // so a 10,000-IP scan can run hundreds of probes at once.
+        val poolSize = parallel.coerceIn(10, 1000)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(poolSize)
         val latch = java.util.concurrent.CountDownLatch(ips.size)
 
         for (ip in ips) {
@@ -580,13 +585,21 @@ class MainActivity: FlutterActivity() {
                 }
                 // TCP/53 reachability with latency.
                 tcp = pingTcp(ip, 53)
-                results.add(Res(ip, udp, tcp))
+                val reachable = udp >= 0 || tcp >= 0
+                if (reachable || !keepOnlyReachable) {
+                    results.add(Res(ip, udp, tcp))
+                }
                 latch.countDown()
             }
         }
 
+        // Scale the overall timeout with the workload: ~each probe is <=3s, and
+        // we run `poolSize` in parallel, so total ≈ ceil(n / poolSize) * 3.5s,
+        // clamped to a sane [20s, 300s] window.
+        val estSecs = ((ips.size.toLong() * 4L) / poolSize + 20L)
+            .coerceIn(20L, 300L)
         try {
-            latch.await(20, java.util.concurrent.TimeUnit.SECONDS)
+            latch.await(estSecs, java.util.concurrent.TimeUnit.SECONDS)
         } catch (e: Exception) {}
         pool.shutdownNow()
 

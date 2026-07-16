@@ -22,12 +22,20 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
   final _scanner = DnsScannerService();
   final _customController = TextEditingController();
   final _domainController = TextEditingController();
+  // Range-scan inputs
+  final _startIpController = TextEditingController(text: '1.0.0.1');
+  final _countController = TextEditingController(text: '10000');
+  final _parallelController = TextEditingController(text: '150');
 
   bool _scanning = false;
+  bool _cancel = false;
   double _progress = 0;
   List<DnsScanResult> _results = [];
   int _testedCount = 0;
   int _totalCount = 0;
+  int _foundCount = 0;
+  // 0 = curated list mode, 1 = IP-range mode
+  int _mode = 0;
 
   static const Color _accent = Colors.orange;
 
@@ -37,16 +45,27 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     _domainController.text = widget.probeDomain?.trim().isNotEmpty == true
         ? widget.probeDomain!.trim()
         : 'google.com';
-    // Auto-start a scan of the default list as soon as the screen opens.
+    // Auto-start a curated-list scan as soon as the screen opens.
     WidgetsBinding.instance.addPostFrameCallback((_) => _startScan());
   }
 
   @override
   void dispose() {
+    _cancel = true;
     _customController.dispose();
     _domainController.dispose();
+    _startIpController.dispose();
+    _countController.dispose();
+    _parallelController.dispose();
     super.dispose();
   }
+
+  int get _parallel =>
+      (int.tryParse(_parallelController.text.trim()) ?? 150).clamp(10, 1000);
+
+  String get _domain => _domainController.text.trim().isEmpty
+      ? 'google.com'
+      : _domainController.text.trim();
 
   List<String> _parseCustom() {
     final text = _customController.text.trim();
@@ -58,8 +77,13 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         .toList();
   }
 
+  void _stopScan() {
+    setState(() => _cancel = true);
+  }
+
   Future<void> _startScan() async {
     if (_scanning) return;
+    if (_mode == 1) return _startRangeScan();
 
     final custom = _parseCustom();
     final targets = <String>[
@@ -72,9 +96,11 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
 
     setState(() {
       _scanning = true;
+      _cancel = false;
       _progress = 0;
       _results = [];
       _testedCount = 0;
+      _foundCount = 0;
       _totalCount = unique.length;
     });
 
@@ -82,17 +108,85 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     // all at once, so we animate the bar while awaiting).
     _animateProgress();
 
-    final domain = _domainController.text.trim().isEmpty
-        ? 'google.com'
-        : _domainController.text.trim();
-
     final results =
-        await _scanner.scan(servers: unique, domain: domain);
+        await _scanner.scan(servers: unique, domain: _domain, parallel: _parallel);
 
     if (!mounted) return;
     setState(() {
-      _results = results;
+      _results = results
+        ..sort((a, b) {
+          if (a.reachable != b.reachable) return a.reachable ? -1 : 1;
+          final am = a.bestMs < 0 ? 1 << 30 : a.bestMs;
+          final bm = b.bestMs < 0 ? 1 << 30 : b.bestMs;
+          return am.compareTo(bm);
+        });
       _testedCount = results.length;
+      _foundCount = results.where((r) => r.reachable).length;
+      _scanning = false;
+      _progress = 1;
+    });
+  }
+
+  /// IP-range scan: generate [count] IPs from [startIp] and probe them in
+  /// chunks against the domain, showing live progress and streaming working
+  /// resolvers as they are found. Great for finding a slowdns-friendly resolver
+  /// on a hostile network by brute-forcing a range.
+  Future<void> _startRangeScan() async {
+    if (_scanning) return;
+    final startIp = _startIpController.text.trim();
+    final count = int.tryParse(_countController.text.trim()) ?? 0;
+    if (startIp.split('.').length != 4 || count <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Enter a valid start IP and a count (e.g. 10000)')),
+      );
+      return;
+    }
+    // Safety cap so we don't generate an absurd list.
+    final safeCount = count.clamp(1, 200000);
+
+    setState(() {
+      _scanning = true;
+      _cancel = false;
+      _progress = 0;
+      _results = [];
+      _testedCount = 0;
+      _foundCount = 0;
+      _totalCount = safeCount;
+    });
+
+    final found = await _scanner.scanRange(
+      startIp: startIp,
+      count: safeCount,
+      domain: _domain,
+      parallel: _parallel,
+      chunkSize: 500,
+      isCancelled: () => _cancel || !mounted,
+      onProgress: (scanned, total) {
+        if (!mounted) return;
+        setState(() {
+          _testedCount = scanned;
+          _totalCount = total;
+          _progress = total == 0 ? 0 : scanned / total;
+        });
+      },
+      onFound: (batch) {
+        if (!mounted) return;
+        setState(() {
+          _results.addAll(batch);
+          _results.sort((a, b) {
+            final am = a.bestMs < 0 ? 1 << 30 : a.bestMs;
+            final bm = b.bestMs < 0 ? 1 << 30 : b.bestMs;
+            return am.compareTo(bm);
+          });
+          _foundCount = _results.length;
+        });
+      },
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _foundCount = found.length;
       _scanning = false;
       _progress = 1;
     });
@@ -128,11 +222,18 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         backgroundColor: _accent,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            tooltip: 'Rescan',
-            onPressed: _scanning ? null : _startScan,
-            icon: const Icon(Icons.refresh),
-          ),
+          if (_scanning)
+            IconButton(
+              tooltip: 'Stop',
+              onPressed: _stopScan,
+              icon: const Icon(Icons.stop),
+            )
+          else
+            IconButton(
+              tooltip: 'Rescan',
+              onPressed: _startScan,
+              icon: const Icon(Icons.refresh),
+            ),
         ],
       ),
       body: Column(
@@ -144,57 +245,132 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TextField(
-                  controller: _customController,
-                  minLines: 1,
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                    labelText: 'Custom DNS IPs (optional)',
-                    hintText: 'e.g. 1.1.1.1, 9.9.9.9 — space/comma separated',
-                    isDense: true,
-                    border: const OutlineInputBorder(),
-                    prefixIcon: const Icon(Icons.dns_outlined),
-                    filled: true,
-                    fillColor: isDark ? Colors.white10 : Colors.white,
+                // Mode switch: curated list vs IP range brute-force scan.
+                SegmentedButton<int>(
+                  segments: const [
+                    ButtonSegment(
+                        value: 0,
+                        label: Text('Public list'),
+                        icon: Icon(Icons.dns_outlined)),
+                    ButtonSegment(
+                        value: 1,
+                        label: Text('IP range'),
+                        icon: Icon(Icons.travel_explore)),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: _scanning
+                      ? null
+                      : (s) => setState(() => _mode = s.first),
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
                   ),
                 ),
+                const SizedBox(height: 10),
+                if (_mode == 0)
+                  TextField(
+                    controller: _customController,
+                    minLines: 1,
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      labelText: 'Custom DNS IPs (optional)',
+                      hintText: 'e.g. 1.1.1.1, 9.9.9.9 — space/comma separated',
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.dns_outlined),
+                      filled: true,
+                      fillColor: isDark ? Colors.white10 : Colors.white,
+                    ),
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: _startIpController,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'Start IP',
+                            hintText: '1.0.0.1',
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.my_location),
+                            filled: true,
+                            fillColor: isDark ? Colors.white10 : Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: _countController,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'Count',
+                            hintText: '10000',
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                            filled: true,
+                            fillColor: isDark ? Colors.white10 : Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
+                      flex: 3,
                       child: TextField(
                         controller: _domainController,
                         decoration: InputDecoration(
                           labelText: 'Probe domain',
                           isDense: true,
                           border: const OutlineInputBorder(),
-                          prefixIcon: const Icon(Icons.travel_explore),
+                          prefixIcon: const Icon(Icons.language),
                           filled: true,
                           fillColor: isDark ? Colors.white10 : Colors.white,
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        onPressed: _scanning ? null : _startScan,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _accent,
-                          foregroundColor: Colors.white,
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _parallelController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Parallel',
+                          hintText: '150',
+                          isDense: true,
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.bolt),
+                          filled: true,
+                          fillColor: isDark ? Colors.white10 : Colors.white,
                         ),
-                        icon: _scanning
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
-                              )
-                            : const Icon(Icons.radar),
-                        label: Text(_scanning ? 'Scanning' : 'Scan'),
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton.icon(
+                    onPressed: _scanning ? _stopScan : _startScan,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _scanning ? Colors.redAccent : _accent,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: _scanning
+                        ? const Icon(Icons.stop)
+                        : const Icon(Icons.radar),
+                    label: Text(_scanning
+                        ? 'Stop scan'
+                        : (_mode == 1 ? 'Start range scan' : 'Scan')),
+                  ),
                 ),
               ],
             ),
@@ -220,10 +396,14 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
                 Expanded(
                   child: Text(
                     _scanning
-                        ? 'Scanning $_totalCount resolvers…'
+                        ? (_mode == 1
+                            ? 'Scanning $_testedCount / $_totalCount · found $_foundCount working'
+                            : 'Scanning $_totalCount resolvers…')
                         : _results.isEmpty
                             ? 'No results yet'
-                            : '$reachable of $_testedCount reachable · sorted fastest first',
+                            : (_mode == 1
+                                ? '$_foundCount working of $_testedCount scanned · fastest first'
+                                : '$reachable of $_testedCount reachable · sorted fastest first'),
                     style: TextStyle(
                       fontSize: 12.5,
                       color: isDark ? Colors.white70 : Colors.black87,

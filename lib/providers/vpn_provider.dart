@@ -367,9 +367,10 @@ class VpnProvider with ChangeNotifier {
       try {
         _pingFailed = false;
         final config = await _buildDelayConfig(server);
+        final testUrl = await getXrayTestUrl();
         final delay = await XrayConnection.measureDelay(
           config,
-          url: 'https://www.gstatic.com/generate_204',
+          url: testUrl,
         ).timeout(const Duration(seconds: 6), onTimeout: () => -1);
         if (delay >= 0) {
           _currentPing = delay;
@@ -1180,6 +1181,30 @@ class VpnProvider with ChangeNotifier {
     return v.clamp(1, 300);
   }
 
+  /// Default delay-test URL. Used by the server-list delay test and the
+  /// 3-second home-screen ping. Changeable from Xray settings.
+  static const String defaultXrayTestUrl = 'http://www.google.com/gen_204';
+
+  /// Read the persisted Xray delay-test URL (falls back to the default).
+  Future<String> getXrayTestUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString('xray_test_url')?.trim();
+    if (v == null || v.isEmpty) return defaultXrayTestUrl;
+    return v;
+  }
+
+  /// Persist the Xray delay-test URL. Empty resets to the default.
+  Future<void> setXrayTestUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = url.trim();
+    if (v.isEmpty) {
+      await prefs.remove('xray_test_url');
+    } else {
+      await prefs.setString('xray_test_url', v);
+    }
+    notifyListeners();
+  }
+
   Future<String> _buildDelayConfig(XrayServer server) async {
     final prefs = await SharedPreferences.getInstance();
     final fragEnabled = prefs.getBool('xray_fragment') ?? false;
@@ -1204,7 +1229,8 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
     try {
       final config = await _buildDelayConfig(server);
-      final delay = await XrayConnection.measureDelay(config);
+      final testUrl = await getXrayTestUrl();
+      final delay = await XrayConnection.measureDelay(config, url: testUrl);
       await _xrayService.updatePing(server.id, delay >= 0 ? delay : -1);
       _applyPing(server.id, delay >= 0 ? delay : -1);
       return delay;
@@ -1235,7 +1261,17 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
     try {
       final batchSize = await getXrayConcurrentTests();
+      final testUrl = await getXrayTestUrl();
       final results = <String, int?>{};
+
+      // Precompute an id -> index map ONCE. Previously every result did
+      // `indexWhere` over the whole list (O(n) each → O(n²) overall), which is
+      // the main freeze when a subscription has thousands of servers.
+      final indexById = <String, int>{};
+      for (var i = 0; i < _xrayServers.length; i++) {
+        indexById[_xrayServers[i].id] = i;
+      }
+
       for (var i = 0; i < servers.length; i += batchSize) {
         final batch = servers.sublist(
             i, (i + batchSize).clamp(0, servers.length));
@@ -1246,17 +1282,24 @@ class VpnProvider with ChangeNotifier {
         await Future.wait(batch.map((s) async {
           try {
             final config = await _buildDelayConfig(s);
-            final delay = await XrayConnection.measureDelay(config);
+            final delay = await XrayConnection.measureDelay(config, url: testUrl);
             final ping = delay >= 0 ? delay : -1;
             results[s.id] = ping;
-            _applyPing(s.id, ping);
           } catch (_) {
             results[s.id] = -1;
-            _applyPing(s.id, -1);
           } finally {
             _xrayTestingIds.remove(s.id);
           }
         }));
+        // Apply this batch's pings in one pass using the index map (O(batch)),
+        // then a SINGLE notifyListeners per batch.
+        for (final s in batch) {
+          final idx = indexById[s.id];
+          if (idx != null && idx < _xrayServers.length) {
+            _xrayServers[idx] =
+                _xrayServers[idx].copyWith(ping: results[s.id]);
+          }
+        }
         notifyListeners();
       }
       await _xrayService.updatePings(results);
@@ -1689,16 +1732,34 @@ class VpnProvider with ChangeNotifier {
   /// Select OpenVPN config and connect
   Future<void> selectOpenVpnConfigAndConnect(OpenVpnConfig config) async {
     _selectedOpenVpnConfig = config;
-    
+
     // Save selected config
     await _openVpnService.setSelectedConfig(config.name);
-    
+
     notifyListeners();
-    
+
     if (kDebugMode) {
       debugPrint('✅ OpenVPN Config Selected: ${config.name}');
     }
-    
+
+    // 🔴 CRITICAL: connect() bails out immediately if _status is already
+    // `connecting` or `connected`. That's exactly why tapping a server did
+    // nothing — the user was already connected (to another protocol, another
+    // OpenVPN config, or a stale/leftover session). So we ALWAYS tear the
+    // current session down first, wait for it to settle, then reset the status
+    // to `disconnected` before starting the fresh OpenVPN connection.
+    if (_status == VpnConnectionStatus.connected ||
+        _status == VpnConnectionStatus.connecting) {
+      try {
+        await disconnect();
+      } catch (_) {}
+      // Give the platform a moment to actually tear the tunnel down.
+      await Future.delayed(const Duration(milliseconds: 400));
+    }
+    _status = VpnConnectionStatus.disconnected;
+    _errorMessage = null;
+    notifyListeners();
+
     // Automatically connect
     await connect();
   }

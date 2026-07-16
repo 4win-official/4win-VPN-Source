@@ -124,17 +124,26 @@ class DnsScannerService {
   /// Scans [servers] (or [defaultServers] when null/empty) and returns the
   /// results ranked fastest-first. [domain] is the name resolved during the
   /// probe (change it to test resolution of a specific/tunnel domain).
+  /// [parallel] controls how many probes run at once natively.
   Future<List<DnsScanResult>> scan({
     List<String>? servers,
     String domain = 'google.com',
+    int parallel = 100,
   }) async {
     final targets = (servers == null || servers.isEmpty)
         ? defaultServers
         : servers;
+    return _scanChunk(targets, domain, parallel);
+  }
 
-    final raw = await DnsVpnConnection.scanDns(targets, domain: domain);
+  Future<List<DnsScanResult>> _scanChunk(
+      List<String> targets, String domain, int parallel) async {
+    final raw = await DnsVpnConnection.scanDns(
+      targets,
+      domain: domain,
+      parallel: parallel,
+    );
     if (raw == null) return [];
-
     try {
       final list = jsonDecode(raw) as List<dynamic>;
       final results = list
@@ -143,18 +152,78 @@ class DnsScannerService {
                 name: knownProviders[(e)['ip']],
               ))
           .toList();
-      // Native already sorts, but re-sort defensively (reachable first, then
-      // by best latency).
-      results.sort((a, b) {
-        if (a.reachable != b.reachable) return a.reachable ? -1 : 1;
-        final am = a.bestMs < 0 ? 1 << 30 : a.bestMs;
-        final bm = b.bestMs < 0 ? 1 << 30 : b.bestMs;
-        return am.compareTo(bm);
-      });
       return results;
     } catch (e) {
       if (kDebugMode) debugPrint('❌ Failed to parse DNS scan result: $e');
       return [];
     }
+  }
+
+  /// Generate up to [count] sequential IPv4 addresses starting from [startIp].
+  /// Skips network/broadcast-ish .0 and .255 hosts. Used by the range scanner
+  /// so the user can say e.g. "scan 10,000 IPs from 1.1.1.0".
+  static List<String> generateRange(String startIp, int count) {
+    final parts = startIp.trim().split('.');
+    if (parts.length != 4) return [];
+    var n = 0;
+    for (var i = 0; i < 4; i++) {
+      final o = int.tryParse(parts[i]);
+      if (o == null || o < 0 || o > 255) return [];
+      n = (n << 8) | o;
+    }
+    final out = <String>[];
+    var produced = 0;
+    var cur = n & 0xFFFFFFFF;
+    while (produced < count && cur <= 0xFFFFFFFF) {
+      final last = cur & 0xFF;
+      if (last != 0 && last != 255) {
+        out.add('${(cur >> 24) & 0xFF}.${(cur >> 16) & 0xFF}.'
+            '${(cur >> 8) & 0xFF}.${cur & 0xFF}');
+        produced++;
+      }
+      cur++;
+    }
+    return out;
+  }
+
+  /// Range scan: generate [count] IPs from [startIp], probe them against
+  /// [domain] in chunks (so progress can be reported and memory stays bounded),
+  /// running [parallel] probes concurrently per chunk. [onProgress] is called
+  /// with (scanned, total) after each chunk; [onFound] streams working results
+  /// as they arrive. Returns the full list of reachable results, fastest-first.
+  Future<List<DnsScanResult>> scanRange({
+    required String startIp,
+    required int count,
+    String domain = 'google.com',
+    int parallel = 100,
+    int chunkSize = 500,
+    void Function(int scanned, int total)? onProgress,
+    void Function(List<DnsScanResult> found)? onFound,
+    bool Function()? isCancelled,
+  }) async {
+    final all = generateRange(startIp, count);
+    if (all.isEmpty) return [];
+    final found = <DnsScanResult>[];
+    var scanned = 0;
+    for (var i = 0; i < all.length; i += chunkSize) {
+      if (isCancelled?.call() == true) break;
+      final chunk = all.sublist(
+          i, (i + chunkSize).clamp(0, all.length));
+      final res = await _scanChunk(chunk, domain, parallel);
+      final reachable = res.where((r) => r.reachable).toList();
+      if (reachable.isNotEmpty) {
+        found.addAll(reachable);
+        onFound?.call(reachable);
+      }
+      scanned += chunk.length;
+      onProgress?.call(scanned, all.length);
+    }
+    found.sort((a, b) {
+      if (a.reachable != b.reachable) return a.reachable ? -1 : 1;
+      final am = a.bestMs < 0 ? 1 << 30 : a.bestMs;
+      final bm = b.bestMs < 0 ? 1 << 30 : b.bestMs;
+      return am.compareTo(bm);
+    });
+    return found;
   }
 }

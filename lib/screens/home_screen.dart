@@ -17,6 +17,7 @@ import 'dns_servers_screen.dart';
 import 'openvpn_configs_screen.dart';
 import 'slowdns_configs_screen.dart';
 import 'xray_servers_screen.dart';
+import 'secret_text_screen.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
 
@@ -174,6 +175,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
         ),
         actions: [
+          // Secret Text tool — encode/decode text so only 4win VPN can read it.
+          IconButton(
+            icon: Icon(
+              Icons.enhanced_encryption_outlined,
+              color: iconColor,
+            ),
+            tooltip: 'Secret Text',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SecretTextScreen(),
+                ),
+              );
+            },
+          ),
+
           // Theme Selection Button
           IconButton(
             icon: Icon(

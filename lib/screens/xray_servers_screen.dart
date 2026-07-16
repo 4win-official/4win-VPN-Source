@@ -29,8 +29,15 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // فقط لود از حافظه؛ آپدیت از لینک یک‌بار موقع باز شدن اپ انجام می‌شود.
-      await context.read<VpnProvider>().loadXrayServers();
+      final provider = context.read<VpnProvider>();
+      // 1) لود سریع از حافظه تا لیست فوراً نمایش داده شود.
+      await provider.loadXrayServers();
+      // 2) هم‌زمان، گروه‌های داخلی (Free + Plus) را از لینک تازه‌سازی می‌کنیم تا
+      //    اگر ساب پلاس خالی شده باشد، بلافاصله از لیست حذف شود (نه با تأخیر).
+      //    force=true تا محدودیت ۶ ساعته را دور بزند.
+      if (!mounted) return;
+      // بدون await تا UI بلاک نشود؛ بعد از اتمام، لیست خودش refresh می‌شود.
+      provider.refreshXrayFreeGroup(force: true);
     });
   }
 
@@ -475,42 +482,40 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               ),
             ),
           ),
-          // ---- Body (animated expand) ----
-          AnimatedCrossFade(
-            firstChild: const SizedBox(width: double.infinity, height: 0),
-            secondChild: Column(
-              children: [
-                const Divider(height: 1),
-                // Render at most 200 tiles to keep huge groups (1000+ servers)
-                // smooth. The whole group is still used when connecting/testing
-                // (fastest across ALL servers is picked); this only limits the
-                // visible list.
-                ...servers.take(200).map((s) => _buildServerTile(
-                      provider,
-                      s,
-                      provider.selectedXrayServer?.id == s.id,
-                      isDark,
-                      accent,
-                    )),
-                if (servers.length > 200)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      '…and ${servers.length - 200} more servers',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.white54 : Colors.black45,
-                      ),
-                    ),
+          // ---- Body ----
+          //
+          // PERFORMANCE: only BUILD the server tiles when the group is actually
+          // expanded. The old AnimatedCrossFade always built BOTH children, so
+          // every group eagerly created up to 200 tiles even while collapsed —
+          // with several large subscription groups that's thousands of widgets
+          // built up front, which is exactly the "small lag / freeze" the user
+          // saw. Collapsed groups now cost nothing.
+          if (expanded) ...[
+            const Divider(height: 1),
+            // Cap the visible tiles so a single huge group (1000+ servers) can't
+            // build an unbounded widget tree. The FULL group is still used when
+            // connecting/testing (fastest across ALL servers is picked); this
+            // only limits what's rendered.
+            ...servers.take(120).map((s) => _buildServerTile(
+                  provider,
+                  s,
+                  provider.selectedXrayServer?.id == s.id,
+                  isDark,
+                  accent,
+                )),
+            if (servers.length > 120)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  '…and ${servers.length - 120} more servers',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white54 : Colors.black45,
                   ),
-                const SizedBox(height: 6),
-              ],
-            ),
-            crossFadeState: expanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 220),
-          ),
+                ),
+              ),
+            const SizedBox(height: 6),
+          ],
         ],
       ),
     );

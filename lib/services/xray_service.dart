@@ -187,26 +187,34 @@ class XrayServerService {
     if (remaining.length != all.length) await saveServers(remaining);
   }
 
-  Future<List<String>> _fetchLinks(String url) async {
+  /// Fetches a subscription and reports BOTH the parsed links AND whether the
+  /// fetch itself SUCCEEDED. This distinction matters for built-in groups: a
+  /// successful fetch that returns ZERO links means the sub was intentionally
+  /// emptied and its old servers must be DROPPED (not cached), whereas a failed
+  /// fetch (network error / non-200) should keep the last known servers so the
+  /// default groups stay available offline.
+  Future<({bool ok, List<String> links})> _fetchLinksResult(
+      String url) async {
     try {
       final res = await http
           .get(Uri.parse(url))
           .timeout(const Duration(seconds: 20));
-      if (res.statusCode != 200) return [];
+      if (res.statusCode != 200) return (ok: false, links: <String>[]);
       var body = res.body.trim();
-      if (body.isEmpty) return [];
+      if (body.isEmpty) return (ok: true, links: <String>[]);
       if (!body.contains('://')) {
         try {
           body = utf8.decode(base64.decode(_padBase64(body)));
         } catch (_) {/* not base64 */}
       }
-      return body
+      final links = body
           .split(RegExp(r'[\r\n]+'))
           .map((e) => e.trim())
           .where((e) => e.isNotEmpty && e.contains('://'))
           .toList();
+      return (ok: true, links: links);
     } catch (_) {
-      return [];
+      return (ok: false, links: <String>[]);
     }
   }
 
@@ -321,9 +329,20 @@ class XrayServerService {
       }
       if (url == null) return -1; // not a URL-backed group
 
-      final lines = await _fetchLinks(url);
-      // Fetch failed — keep existing servers untouched (esp. cached built-ins).
-      if (lines.isEmpty) return -1;
+      final fetched = await _fetchLinksResult(url);
+      final lines = fetched.links;
+      if (lines.isEmpty) {
+        if (!fetched.ok) {
+          // Fetch FAILED — keep existing servers untouched.
+          return -1;
+        }
+        // Fetch SUCCEEDED but empty — the sub was emptied. WIPE this group so
+        // it disappears from the list (esp. for the built-in Plus group).
+        final all = await loadServers();
+        final keep = all.where((s) => s.group != groupKey).toList();
+        await saveServers(keep);
+        return 0;
+      }
 
       final all = await loadServers();
       final oldPings = <String, int?>{for (final s in all) s.link: s.ping};
@@ -386,13 +405,27 @@ class XrayServerService {
       final bodies = <List<String>>[];
       final groups = <String>[];
       final cachedBuiltIn = <XrayServer>[]; // failed built-ins reused from store
+      // Built-in groups that were fetched successfully but came back EMPTY
+      // (the sub was intentionally emptied). These MUST be wiped from storage
+      // even if nothing new was fetched — otherwise an emptied Plus keeps
+      // showing its stale cached servers.
+      final emptiedBuiltIns = <String>{};
       var fetchedAny = false;
       for (final entry in subUrls.entries) {
-        final lines = await _fetchLinks(entry.key);
+        final fetched = await _fetchLinksResult(entry.key);
+        final lines = fetched.links;
         final groupName = entry.value;
         if (lines.isEmpty && XrayServer.isBuiltInGroup(groupName)) {
-          // Keep the last known servers for this built-in group (cache).
-          cachedBuiltIn.addAll(all.where((s) => s.group == groupName));
+          // Built-in group returned NO links.
+          //   • fetch FAILED (network/non-200): keep last-known servers (cache)
+          //     so the default group stays available offline.
+          //   • fetch SUCCEEDED but empty: the sub was intentionally emptied —
+          //     DROP its old servers (don't cache), so the group disappears.
+          if (!fetched.ok) {
+            cachedBuiltIn.addAll(all.where((s) => s.group == groupName));
+          } else {
+            emptiedBuiltIns.add(groupName);
+          }
           continue;
         }
         if (lines.isNotEmpty) fetchedAny = true;
@@ -400,8 +433,10 @@ class XrayServerService {
         groups.add(groupName);
       }
 
-      // If nothing could be fetched at all, leave existing data untouched.
-      if (!fetchedAny && cachedBuiltIn.isEmpty) {
+      // If nothing could be fetched AND no built-in was emptied, leave existing
+      // data untouched. (If a built-in WAS emptied we must fall through to
+      // rebuild storage so its stale servers are removed.)
+      if (!fetchedAny && cachedBuiltIn.isEmpty && emptiedBuiltIns.isEmpty) {
         return all.where((s) => s.isLocked).length;
       }
 

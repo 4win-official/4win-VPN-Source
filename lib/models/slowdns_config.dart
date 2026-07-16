@@ -11,6 +11,12 @@ class SlowDnsConfig {
   final int? port; // پورت (پیش‌فرض 53)
   final String? username; // نام کاربری (اختیاری)
   final String? password; // رمز عبور (اختیاری)
+  // نوع انتقال DNS برای تونل (الهام‌گرفته از SlipNet): udp | dot | doh
+  // udp = رزولوِر معمولی روی پورت 53 (پیش‌فرض)
+  // dot = DNS over TLS، doh = DNS over HTTPS (برای عبور از DPI)
+  final String dnsTransport;
+  // آدرس سرور DoH (فقط وقتی dnsTransport == 'doh')، مثال: https://1.1.1.1/dns-query
+  final String? dohUrl;
   final DateTime addedAt; // تاریخ اضافه شدن
 
   SlowDnsConfig({
@@ -21,6 +27,8 @@ class SlowDnsConfig {
     this.port,
     this.username,
     this.password,
+    this.dnsTransport = 'udp',
+    this.dohUrl,
     DateTime? addedAt,
   }) : addedAt = addedAt ?? DateTime.now();
 
@@ -37,6 +45,8 @@ class SlowDnsConfig {
       'port': port,
       'username': username,
       'password': password,
+      'dnsTransport': dnsTransport,
+      'dohUrl': dohUrl,
       'addedAt': addedAt.toIso8601String(),
     };
   }
@@ -51,6 +61,8 @@ class SlowDnsConfig {
       port: json['port'] as int?,
       username: json['username'] as String?,
       password: json['password'] as String?,
+      dnsTransport: (json['dnsTransport'] as String?) ?? 'udp',
+      dohUrl: json['dohUrl'] as String?,
       addedAt: DateTime.parse(json['addedAt'] as String),
     );
   }
@@ -64,6 +76,8 @@ class SlowDnsConfig {
     int? port,
     String? username,
     String? password,
+    String? dnsTransport,
+    String? dohUrl,
     DateTime? addedAt,
   }) {
     return SlowDnsConfig(
@@ -74,6 +88,8 @@ class SlowDnsConfig {
       port: port ?? this.port,
       username: username ?? this.username,
       password: password ?? this.password,
+      dnsTransport: dnsTransport ?? this.dnsTransport,
+      dohUrl: dohUrl ?? this.dohUrl,
       addedAt: addedAt ?? this.addedAt,
     );
   }

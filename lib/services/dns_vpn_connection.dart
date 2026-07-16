@@ -72,11 +72,12 @@ class DnsVpnConnection {
   /// the native side produces (array of {ip, udpMs, tcpMs, reachable}), or
   /// null on failure. [domain] is the name queried during the probe.
   static Future<String?> scanDns(List<String> ips,
-      {String domain = 'google.com'}) async {
+      {String domain = 'google.com', int parallel = 100}) async {
     try {
       final result = await platform.invokeMethod('scanDns', {
         'ips': ips,
         'domain': domain,
+        'parallel': parallel,
       });
       return result is String ? result : null;
     } catch (e) {

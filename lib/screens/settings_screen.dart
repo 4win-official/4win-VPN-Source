@@ -41,6 +41,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // When on, the concurrent count is chosen automatically from the device's
   // CPU cores so stronger phones test more in parallel.
   bool _xrayAutoConcurrent = true;
+  // Delay-test URL used by both the server-list test and the home-screen
+  // 3-second ping. Default: http://www.google.com/gen_204
+  final _xrayTestUrlController = TextEditingController();
 
   @override
   void initState() {
@@ -61,6 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _xrayFragLengthController.dispose();
     _xrayFragIntervalController.dispose();
     _xrayFakeHostController.dispose();
+    _xrayTestUrlController.dispose();
     super.dispose();
   }
 
@@ -100,6 +104,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _xrayConcurrentTests =
           (prefs.getInt('xray_concurrent_tests') ?? 300).clamp(1, 300);
       _xrayAutoConcurrent = prefs.getBool('xray_auto_concurrent') ?? true;
+      _xrayTestUrlController.text =
+          prefs.getString('xray_test_url') ?? 'http://www.google.com/gen_204';
     });
   }
 
@@ -111,6 +117,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveXrayAutoConcurrent() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('xray_auto_concurrent', _xrayAutoConcurrent);
+  }
+
+  Future<void> _saveXrayTestUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = _xrayTestUrlController.text.trim();
+    if (v.isEmpty) {
+      await prefs.remove('xray_test_url');
+      _xrayTestUrlController.text = 'http://www.google.com/gen_204';
+    } else {
+      await prefs.setString('xray_test_url', v);
+    }
   }
 
   Future<void> _saveSstpFragment() async {
@@ -1204,6 +1221,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       // ✂️ Fragment - فرگمنت واقعی TLS ClientHello مخصوص Xray
                       _buildXrayFragmentCard(isDark),
+                      const SizedBox(height: 16),
+                      // 🌐 Delay-test URL (server list + 3s home ping)
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF1DE9B6)
+                                .withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.link,
+                                    color: Color(0xFF1DE9B6), size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Delay Test URL',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'URL used to test servers in the server list and '
+                              'the 3-second ping on the home screen. '
+                              'Default: http://www.google.com/gen_204',
+                              style: TextStyle(
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.black54,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: _xrayTestUrlController,
+                              keyboardType: TextInputType.url,
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontSize: 13,
+                              ),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                hintText: 'http://www.google.com/gen_204',
+                                filled: true,
+                                fillColor: isDark
+                                    ? Colors.white.withValues(alpha: 0.05)
+                                    : Colors.black.withValues(alpha: 0.03),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide.none,
+                                ),
+                                suffixIcon: IconButton(
+                                  icon: const Icon(Icons.restore, size: 20),
+                                  tooltip: 'Reset to default',
+                                  color: const Color(0xFF1DE9B6),
+                                  onPressed: () {
+                                    setState(() {
+                                      _xrayTestUrlController.text =
+                                          'http://www.google.com/gen_204';
+                                    });
+                                    _saveXrayTestUrl();
+                                  },
+                                ),
+                              ),
+                              onChanged: (_) => _saveXrayTestUrl(),
+                              onSubmitted: (_) => _saveXrayTestUrl(),
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       // ⚙️ Auto concurrent: pick the count from device power.
                       Container(

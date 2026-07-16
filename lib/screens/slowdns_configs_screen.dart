@@ -251,11 +251,15 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
     final nsController = TextEditingController();
     final pubKeyController = TextEditingController();
     final portController = TextEditingController(text: '53');
+    final dohUrlController = TextEditingController();
     final formKey = GlobalKey<FormState>();
+    // DNS transport (SlipNet-inspired): udp | dot | doh
+    String dnsTransport = 'udp';
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocalState) => AlertDialog(
         title: const Text('Add Slow DNS Config'),
         content: SingleChildScrollView(
           child: Form(
@@ -323,6 +327,34 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
                     labelText: 'Public Key (optional)',
                   ),
                 ),
+                const SizedBox(height: 8),
+                // 🔀 DNS Transport (SlipNet-inspired): UDP / DoT / DoH
+                DropdownButtonFormField<String>(
+                  initialValue: dnsTransport,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'DNS Transport',
+                    helperText: 'DoH/DoT help bypass DPI on DNS queries',
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'udp', child: Text('UDP (Plain, port 53)')),
+                    DropdownMenuItem(
+                        value: 'dot', child: Text('DoT (DNS over TLS)')),
+                    DropdownMenuItem(
+                        value: 'doh', child: Text('DoH (DNS over HTTPS)')),
+                  ],
+                  onChanged: (v) =>
+                      setLocalState(() => dnsTransport = v ?? 'udp'),
+                ),
+                if (dnsTransport == 'doh')
+                  TextFormField(
+                    controller: dohUrlController,
+                    decoration: const InputDecoration(
+                      labelText: 'DoH URL',
+                      hintText: 'https://1.1.1.1/dns-query',
+                    ),
+                  ),
               ],
             ),
           ),
@@ -345,6 +377,10 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
                 pubKey: pubKeyController.text.trim().isEmpty
                     ? null
                     : pubKeyController.text.trim(),
+                dnsTransport: dnsTransport,
+                dohUrl: dohUrlController.text.trim().isEmpty
+                    ? null
+                    : dohUrlController.text.trim(),
               );
 
               final provider = ctx.read<VpnProvider>();
@@ -365,6 +401,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
             child: const Text('Add'),
           ),
         ],
+      ),
       ),
     );
   }
