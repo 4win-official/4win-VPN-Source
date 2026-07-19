@@ -23,9 +23,12 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
   final _customController = TextEditingController();
   final _domainController = TextEditingController();
   // Range-scan inputs
-  final _startIpController = TextEditingController(text: '1.0.0.1');
+  final _fromIpController = TextEditingController(text: '1.0.0.0');
+  final _toIpController = TextEditingController(text: '1.0.31.255');
   final _countController = TextEditingController(text: '10000');
   final _parallelController = TextEditingController(text: '150');
+  // Range submode: false = IP range (from→to), true = random IPs
+  bool _randomMode = false;
 
   bool _scanning = false;
   bool _cancel = false;
@@ -54,7 +57,8 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     _cancel = true;
     _customController.dispose();
     _domainController.dispose();
-    _startIpController.dispose();
+    _fromIpController.dispose();
+    _toIpController.dispose();
     _countController.dispose();
     _parallelController.dispose();
     super.dispose();
@@ -127,23 +131,42 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     });
   }
 
-  /// IP-range scan: generate [count] IPs from [startIp] and probe them in
-  /// chunks against the domain, showing live progress and streaming working
-  /// resolvers as they are found. Great for finding a slowdns-friendly resolver
-  /// on a hostile network by brute-forcing a range.
+  /// Bulk scan: build a target list from either an IP range (from→to) or a
+  /// set of random public IPs, then probe them in chunks against the domain,
+  /// showing live progress and streaming working resolvers as found. Great for
+  /// discovering a slowdns-friendly resolver on a hostile network.
   Future<void> _startRangeScan() async {
     if (_scanning) return;
-    final startIp = _startIpController.text.trim();
-    final count = int.tryParse(_countController.text.trim()) ?? 0;
-    if (startIp.split('.').length != 4 || count <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Enter a valid start IP and a count (e.g. 10000)')),
-      );
-      return;
+
+    List<String> targets;
+    if (_randomMode) {
+      final count = int.tryParse(_countController.text.trim()) ?? 0;
+      if (count <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Enter how many random IPs to scan (e.g. 10000)')),
+        );
+        return;
+      }
+      targets = DnsScannerService.generateRandom(count.clamp(1, 200000));
+    } else {
+      final from = _fromIpController.text.trim();
+      final to = _toIpController.text.trim();
+      if (from.split('.').length != 4 || to.split('.').length != 4) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Enter a valid IP range (from → to)')),
+        );
+        return;
+      }
+      targets = DnsScannerService.generateRange(from, to);
+      if (targets.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid or empty IP range')),
+        );
+        return;
+      }
     }
-    // Safety cap so we don't generate an absurd list.
-    final safeCount = count.clamp(1, 200000);
 
     setState(() {
       _scanning = true;
@@ -152,12 +175,11 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
       _results = [];
       _testedCount = 0;
       _foundCount = 0;
-      _totalCount = safeCount;
+      _totalCount = targets.length;
     });
 
     final found = await _scanner.scanRange(
-      startIp: startIp,
-      count: safeCount,
+      targets: targets,
       domain: _domain,
       parallel: _parallel,
       chunkSize: 500,
@@ -281,43 +303,86 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
                       fillColor: isDark ? Colors.white10 : Colors.white,
                     ),
                   )
-                else
+                else ...[
+                  // Range submode: IP range (from→to) vs random IPs.
                   Row(
                     children: [
                       Expanded(
-                        flex: 3,
-                        child: TextField(
-                          controller: _startIpController,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText: 'Start IP',
-                            hintText: '1.0.0.1',
-                            isDense: true,
-                            border: const OutlineInputBorder(),
-                            prefixIcon: const Icon(Icons.my_location),
-                            filled: true,
-                            fillColor: isDark ? Colors.white10 : Colors.white,
-                          ),
+                        child: ChoiceChip(
+                          label: const Text('IP range'),
+                          selected: !_randomMode,
+                          onSelected: _scanning
+                              ? null
+                              : (_) => setState(() => _randomMode = false),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: _countController,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText: 'Count',
-                            hintText: '10000',
-                            isDense: true,
-                            border: const OutlineInputBorder(),
-                            filled: true,
-                            fillColor: isDark ? Colors.white10 : Colors.white,
-                          ),
+                        child: ChoiceChip(
+                          label: const Text('Random IPs'),
+                          selected: _randomMode,
+                          onSelected: _scanning
+                              ? null
+                              : (_) => setState(() => _randomMode = true),
                         ),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  if (_randomMode)
+                    TextField(
+                      controller: _countController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'How many random IPs',
+                        hintText: '10000',
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.shuffle),
+                        filled: true,
+                        fillColor: isDark ? Colors.white10 : Colors.white,
+                      ),
+                    )
+                  else
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _fromIpController,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                              labelText: 'From IP',
+                              hintText: '1.0.0.0',
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                              filled: true,
+                              fillColor:
+                                  isDark ? Colors.white10 : Colors.white,
+                            ),
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 6),
+                          child: Icon(Icons.arrow_forward, size: 18),
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _toIpController,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                              labelText: 'To IP',
+                              hintText: '1.0.31.255',
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                              filled: true,
+                              fillColor:
+                                  isDark ? Colors.white10 : Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
                 const SizedBox(height: 8),
                 Row(
                   children: [

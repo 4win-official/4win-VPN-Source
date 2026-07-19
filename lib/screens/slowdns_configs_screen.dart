@@ -252,6 +252,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
     final pubKeyController = TextEditingController();
     final portController = TextEditingController(text: '53');
     final dohUrlController = TextEditingController();
+    final resolversController = TextEditingController();
     final formKey = GlobalKey<FormState>();
     // DNS transport (SlipNet-inspired): udp | dot | doh
     String dnsTransport = 'udp';
@@ -355,6 +356,45 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
                       hintText: 'https://1.1.1.1/dns-query',
                     ),
                   ),
+                const SizedBox(height: 8),
+                // 🔁 Failover resolvers: multiple resolvers tried concurrently;
+                // the connection uses whichever reaches the server, and falls
+                // back through the list until one works.
+                TextFormField(
+                  controller: resolversController,
+                  minLines: 1,
+                  maxLines: 4,
+                  decoration: InputDecoration(
+                    labelText: 'Failover resolvers (optional)',
+                    hintText: '8.8.8.8, 1.1.1.1, 9.9.9.9 — comma/space/newline',
+                    helperText:
+                        'Tried together with the name server; first working one is used',
+                    suffixIcon: IconButton(
+                      tooltip: 'Scan & pick a resolver',
+                      icon: const Icon(Icons.radar, color: Colors.orange),
+                      onPressed: () async {
+                        final picked = await Navigator.push<String>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DnsScannerScreen(
+                              probeDomain:
+                                  domainController.text.trim().isEmpty
+                                      ? null
+                                      : domainController.text.trim(),
+                            ),
+                          ),
+                        );
+                        if (picked != null && picked.isNotEmpty) {
+                          final cur = resolversController.text.trim();
+                          setLocalState(() {
+                            resolversController.text =
+                                cur.isEmpty ? picked : '$cur, $picked';
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -381,6 +421,11 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
                 dohUrl: dohUrlController.text.trim().isEmpty
                     ? null
                     : dohUrlController.text.trim(),
+                resolvers: resolversController.text
+                    .split(RegExp(r'[\s,;\n]+'))
+                    .map((e) => e.trim())
+                    .where((e) => e.isNotEmpty)
+                    .toList(),
               );
 
               final provider = ctx.read<VpnProvider>();

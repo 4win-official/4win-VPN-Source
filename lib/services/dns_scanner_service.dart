@@ -159,41 +159,85 @@ class DnsScannerService {
     }
   }
 
-  /// Generate up to [count] sequential IPv4 addresses starting from [startIp].
-  /// Skips network/broadcast-ish .0 and .255 hosts. Used by the range scanner
-  /// so the user can say e.g. "scan 10,000 IPs from 1.1.1.0".
-  static List<String> generateRange(String startIp, int count) {
-    final parts = startIp.trim().split('.');
-    if (parts.length != 4) return [];
+  /// Parse a dotted IPv4 string into a 32-bit int, or null if invalid.
+  static int? _ipToInt(String ip) {
+    final parts = ip.trim().split('.');
+    if (parts.length != 4) return null;
     var n = 0;
     for (var i = 0; i < 4; i++) {
       final o = int.tryParse(parts[i]);
-      if (o == null || o < 0 || o > 255) return [];
+      if (o == null || o < 0 || o > 255) return null;
       n = (n << 8) | o;
     }
+    return n & 0xFFFFFFFF;
+  }
+
+  static String _intToIp(int v) =>
+      '${(v >> 24) & 0xFF}.${(v >> 16) & 0xFF}.${(v >> 8) & 0xFF}.${v & 0xFF}';
+
+  /// Generate every host IPv4 in the inclusive range [fromIp] .. [toIp]
+  /// (skipping .0 and .255 hosts), capped at [max] addresses. Used by the
+  /// range scanner — the user gives a start and end of the range to scan.
+  static List<String> generateRange(String fromIp, String toIp,
+      {int max = 200000}) {
+    final a = _ipToInt(fromIp);
+    final b = _ipToInt(toIp);
+    if (a == null || b == null) return [];
+    final lo = a <= b ? a : b;
+    final hi = a <= b ? b : a;
     final out = <String>[];
-    var produced = 0;
-    var cur = n & 0xFFFFFFFF;
-    while (produced < count && cur <= 0xFFFFFFFF) {
+    for (var cur = lo; cur <= hi && out.length < max; cur++) {
       final last = cur & 0xFF;
-      if (last != 0 && last != 255) {
-        out.add('${(cur >> 24) & 0xFF}.${(cur >> 16) & 0xFF}.'
-            '${(cur >> 8) & 0xFF}.${cur & 0xFF}');
-        produced++;
-      }
-      cur++;
+      if (last != 0 && last != 255) out.add(_intToIp(cur));
     }
     return out;
   }
 
-  /// Range scan: generate [count] IPs from [startIp], probe them against
-  /// [domain] in chunks (so progress can be reported and memory stays bounded),
-  /// running [parallel] probes concurrently per chunk. [onProgress] is called
-  /// with (scanned, total) after each chunk; [onFound] streams working results
-  /// as they arrive. Returns the full list of reachable results, fastest-first.
+  /// Generate [count] RANDOM public-ish IPv4 addresses (avoids private,
+  /// loopback, multicast, and reserved blocks). Used by the scanner's random
+  /// mode so the user can just say "scan 10,000 random IPs".
+  static List<String> generateRandom(int count, {int? seed}) {
+    final rnd = seed ?? (DateTime.now().microsecondsSinceEpoch & 0x7fffffff);
+    var state = rnd == 0 ? 0x2545F491 : rnd;
+    int next() {
+      // xorshift32 — fast, dependency-free.
+      state ^= (state << 13) & 0xFFFFFFFF;
+      state ^= (state >> 17);
+      state ^= (state << 5) & 0xFFFFFFFF;
+      return state & 0xFFFFFFFF;
+    }
+
+    bool isPublic(int a, int b) {
+      if (a == 0 || a == 10 || a == 127) return false; // this-net / private / loopback
+      if (a == 172 && b >= 16 && b <= 31) return false; // private
+      if (a == 192 && b == 168) return false; // private
+      if (a == 169 && b == 254) return false; // link-local
+      if (a == 100 && b >= 64 && b <= 127) return false; // CGNAT
+      if (a >= 224) return false; // multicast / reserved
+      return true;
+    }
+
+    final out = <String>{};
+    var guard = count * 20 + 100;
+    while (out.length < count && guard-- > 0) {
+      final a = next() % 256;
+      final b = next() % 256;
+      final c = next() % 256;
+      final d = 1 + (next() % 254); // 1..254
+      if (!isPublic(a, b)) continue;
+      out.add('$a.$b.$c.$d');
+    }
+    return out.toList();
+  }
+
+  /// Bulk scan a pre-built list of [targets] (from a range or random set),
+  /// probing them against [domain] in chunks (so progress can be reported and
+  /// memory stays bounded), running [parallel] probes concurrently per chunk.
+  /// [onProgress] is called with (scanned, total) after each chunk; [onFound]
+  /// streams working results as they arrive. Returns reachable results only,
+  /// fastest-first.
   Future<List<DnsScanResult>> scanRange({
-    required String startIp,
-    required int count,
+    required List<String> targets,
     String domain = 'google.com',
     int parallel = 100,
     int chunkSize = 500,
@@ -201,7 +245,7 @@ class DnsScannerService {
     void Function(List<DnsScanResult> found)? onFound,
     bool Function()? isCancelled,
   }) async {
-    final all = generateRange(startIp, count);
+    final all = targets;
     if (all.isEmpty) return [];
     final found = <DnsScanResult>[];
     var scanned = 0;

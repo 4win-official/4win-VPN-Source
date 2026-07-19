@@ -36,8 +36,10 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
       //    اگر ساب پلاس خالی شده باشد، بلافاصله از لیست حذف شود (نه با تأخیر).
       //    force=true تا محدودیت ۶ ساعته را دور بزند.
       if (!mounted) return;
-      // بدون await تا UI بلاک نشود؛ بعد از اتمام، لیست خودش refresh می‌شود.
-      provider.refreshXrayFreeGroup(force: true);
+      // بدون await تا UI بلاک نشود؛ فقط گروه‌های داخلی (Free + Plus) تازه می‌شوند
+      // تا اگر ساب پلاس خالی شده باشد حذف شود. ساب‌های کاربر با دکمه‌ی رفرش
+      // خودشان آپدیت می‌شوند.
+      provider.refreshXrayFreeGroup(force: true, builtInOnly: true);
     });
   }
 

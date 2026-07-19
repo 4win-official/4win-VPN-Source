@@ -140,8 +140,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         backgroundColor: Colors.transparent, // شفاف - یکپارچه
         elevation: 0,
-        title: Row(
+        title: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               '4win VPN',
@@ -151,19 +152,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(width: 4),
-            // Help / Guide Button — کنار عنوان تا بالای صفحه خلوت بماند
-            IconButton(
-              icon: Icon(
-                Icons.help_outline,
-                color: iconColor,
-                size: 22,
-              ),
-              tooltip: 'Quick Guide',
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              onPressed: () {
+            // Help / Guide — زیر نوشته‌ی «4win VPN» قرار گرفته است.
+            InkWell(
+              onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -171,6 +162,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 );
               },
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 1, bottom: 1, right: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.help_outline,
+                      color: iconColor,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      'Quick Guide',
+                      style: TextStyle(
+                        color: iconColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),

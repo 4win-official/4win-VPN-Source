@@ -373,7 +373,14 @@ class XrayServerService {
   /// sub URL becomes its own group named after the URL host. Servers the user
   /// added by pasting raw links ([userLinksGroup]) and individual (group-less)
   /// servers are preserved. Returns total subscription servers loaded.
-  Future<int> refreshFreeGroup({Duration? minInterval}) async {
+  /// Refreshes subscription groups from their URLs.
+  ///
+  /// When [builtInOnly] is true, ONLY the built-in subscriptions (Free + Plus)
+  /// are fetched/updated; every user-added subscription group is left exactly
+  /// as stored (used on the loading screen, where user subs should NOT be
+  /// re-downloaded — they update from the server list's own refresh button).
+  Future<int> refreshFreeGroup(
+      {Duration? minInterval, bool builtInOnly = false}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
@@ -393,7 +400,8 @@ class XrayServerService {
 
       // Build each subscription group. Map keeps insertion order: the two
       // built-in groups first (Free, then Plus), then user subs.
-      final userUrls = await getSubUrls();
+      // In builtInOnly mode, user subs are excluded from the fetch set.
+      final userUrls = builtInOnly ? <String>[] : await getSubUrls();
       final subUrls = <String, String>{
         ...builtInSubs,
         for (final u in userUrls) u: groupNameForUrl(u),
@@ -404,39 +412,40 @@ class XrayServerService {
       //    the default groups are ALWAYS present, even offline.
       final bodies = <List<String>>[];
       final groups = <String>[];
-      final cachedBuiltIn = <XrayServer>[]; // failed built-ins reused from store
-      // Built-in groups that were fetched successfully but came back EMPTY
-      // (the sub was intentionally emptied). These MUST be wiped from storage
-      // even if nothing new was fetched — otherwise an emptied Plus keeps
-      // showing its stale cached servers.
-      final emptiedBuiltIns = <String>{};
+      // Servers from any subscription group whose fetch FAILED (network/non-200)
+      // are re-used from storage so a transient failure never wipes a group.
+      final cachedFailed = <XrayServer>[];
+      // Groups that were fetched SUCCESSFULLY but came back EMPTY (the sub was
+      // intentionally emptied). These MUST be wiped even if nothing new was
+      // fetched — otherwise an emptied Plus/sub keeps its stale servers.
+      final emptiedGroups = <String>{};
       var fetchedAny = false;
       for (final entry in subUrls.entries) {
         final fetched = await _fetchLinksResult(entry.key);
         final lines = fetched.links;
         final groupName = entry.value;
-        if (lines.isEmpty && XrayServer.isBuiltInGroup(groupName)) {
-          // Built-in group returned NO links.
+        if (lines.isEmpty) {
+          // Subscription group returned NO links.
           //   • fetch FAILED (network/non-200): keep last-known servers (cache)
-          //     so the default group stays available offline.
+          //     so the group stays available offline / on a flaky network.
           //   • fetch SUCCEEDED but empty: the sub was intentionally emptied —
           //     DROP its old servers (don't cache), so the group disappears.
           if (!fetched.ok) {
-            cachedBuiltIn.addAll(all.where((s) => s.group == groupName));
+            cachedFailed.addAll(all.where((s) => s.group == groupName));
           } else {
-            emptiedBuiltIns.add(groupName);
+            emptiedGroups.add(groupName);
           }
           continue;
         }
-        if (lines.isNotEmpty) fetchedAny = true;
+        fetchedAny = true;
         bodies.add(lines);
         groups.add(groupName);
       }
 
-      // If nothing could be fetched AND no built-in was emptied, leave existing
-      // data untouched. (If a built-in WAS emptied we must fall through to
-      // rebuild storage so its stale servers are removed.)
-      if (!fetchedAny && cachedBuiltIn.isEmpty && emptiedBuiltIns.isEmpty) {
+      // If nothing could be fetched AND nothing was emptied, leave existing
+      // data untouched. (If a group WAS emptied we must fall through to rebuild
+      // storage so its stale servers are removed.)
+      if (!fetchedAny && cachedFailed.isEmpty && emptiedGroups.isEmpty) {
         return all.where((s) => s.isLocked).length;
       }
 
@@ -449,15 +458,19 @@ class XrayServerService {
               _ParseJob(bodies, groups, oldPings, maxServersPerGroup),
             );
 
-      // Encode cached built-in servers (from failed fetches) so they persist.
-      final encodedCached = cachedBuiltIn
-          .map((s) => jsonEncode(s.toJson()))
-          .toList();
+      // Encode cached servers (from failed fetches) so they persist.
+      final encodedCached = cachedFailed.length > 60
+          ? await compute(_encodeServersIsolate, cachedFailed)
+          : cachedFailed.map((s) => jsonEncode(s.toJson())).toList();
 
-      // Keep user-pasted links group + individual user servers as-is.
-      final keep = all
-          .where((s) => s.group.isEmpty || s.group == userLinksGroup)
-          .toList();
+      // Keep user-pasted links group + individual user servers as-is. In
+      // builtInOnly mode, ALSO keep every user-subscription group untouched
+      // (only the built-in Free/Plus groups are being refreshed).
+      final keep = all.where((s) {
+        if (s.group.isEmpty || s.group == userLinksGroup) return true;
+        if (builtInOnly && !XrayServer.isBuiltInGroup(s.group)) return true;
+        return false;
+      }).toList();
       final encodedKeep = keep.length > 60
           ? await compute(_encodeServersIsolate, keep)
           : keep.map((s) => jsonEncode(s.toJson())).toList();

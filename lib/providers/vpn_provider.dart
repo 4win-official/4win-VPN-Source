@@ -1134,12 +1134,14 @@ class VpnProvider with ChangeNotifier {
 
   /// Refresh the locked free subscription group from the server.
   /// [force] ignores the throttle window. Returns number of free servers.
-  Future<int> refreshXrayFreeGroup({bool force = false}) async {
+  Future<int> refreshXrayFreeGroup(
+      {bool force = false, bool builtInOnly = false}) async {
     _xrayRefreshing = true;
     notifyListeners();
     try {
       final count = await _xrayService.refreshFreeGroup(
         minInterval: force ? null : const Duration(hours: 6),
+        builtInOnly: builtInOnly,
       );
       await loadXrayServers();
       return count;

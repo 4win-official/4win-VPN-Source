@@ -49,8 +49,10 @@ class _LoadingScreenState extends State<LoadingScreen> {
     unawaited(() async {
       try {
         await provider.loadXrayServers();
-        // همیشه در هر بار باز شدن اپ، سرورهای Xray از لینک آپدیت شوند.
-        await provider.refreshXrayFreeGroup(force: true);
+        // در لود اسکرین فقط ساب‌لینک‌های پیش‌فرض (Free + Plus) آپدیت می‌شوند.
+        // ساب‌لینک‌های کاربر دست‌نخورده می‌مانند و از دکمه‌ی رفرش سرور لیست
+        // آپدیت می‌شوند. Plus فقط در صورتی نمایش داده می‌شود که سرور داشته باشد.
+        await provider.refreshXrayFreeGroup(force: true, builtInOnly: true);
       } catch (_) {}
     }());
 

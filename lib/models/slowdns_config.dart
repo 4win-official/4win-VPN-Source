@@ -17,6 +17,10 @@ class SlowDnsConfig {
   final String dnsTransport;
   // آدرس سرور DoH (فقط وقتی dnsTransport == 'doh')، مثال: https://1.1.1.1/dns-query
   final String? dohUrl;
+  // فهرست ریزالورهای پشتیبان (failover). هنگام اتصال، همه‌ی ریزالورها هم‌زمان
+  // تست می‌شوند و سریع‌ترین ریزالورِ سالم برای رسیدن به سرور استفاده می‌شود؛
+  // اگر هیچ‌کدام کار نکرد، به‌ترتیب ریزالورهای بعدی امتحان می‌شوند تا وصل شود.
+  final List<String> resolvers;
   final DateTime addedAt; // تاریخ اضافه شدن
 
   SlowDnsConfig({
@@ -29,8 +33,21 @@ class SlowDnsConfig {
     this.password,
     this.dnsTransport = 'udp',
     this.dohUrl,
+    this.resolvers = const [],
     DateTime? addedAt,
   }) : addedAt = addedAt ?? DateTime.now();
+
+  /// All resolvers to try, always starting with the primary [nameServer] and
+  /// followed by the failover [resolvers] (de-duplicated, in order).
+  List<String> get allResolvers {
+    final out = <String>[];
+    final seen = <String>{};
+    for (final r in [nameServer, ...resolvers]) {
+      final v = r.trim();
+      if (v.isNotEmpty && seen.add(v)) out.add(v);
+    }
+    return out;
+  }
 
   /// پورت موثر (پیش‌فرض 53 برای DNS)
   int get effectivePort => port ?? 53;
@@ -47,6 +64,7 @@ class SlowDnsConfig {
       'password': password,
       'dnsTransport': dnsTransport,
       'dohUrl': dohUrl,
+      'resolvers': resolvers,
       'addedAt': addedAt.toIso8601String(),
     };
   }
@@ -63,6 +81,10 @@ class SlowDnsConfig {
       password: json['password'] as String?,
       dnsTransport: (json['dnsTransport'] as String?) ?? 'udp',
       dohUrl: json['dohUrl'] as String?,
+      resolvers: (json['resolvers'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
       addedAt: DateTime.parse(json['addedAt'] as String),
     );
   }
@@ -78,6 +100,7 @@ class SlowDnsConfig {
     String? password,
     String? dnsTransport,
     String? dohUrl,
+    List<String>? resolvers,
     DateTime? addedAt,
   }) {
     return SlowDnsConfig(
@@ -90,6 +113,7 @@ class SlowDnsConfig {
       password: password ?? this.password,
       dnsTransport: dnsTransport ?? this.dnsTransport,
       dohUrl: dohUrl ?? this.dohUrl,
+      resolvers: resolvers ?? this.resolvers,
       addedAt: addedAt ?? this.addedAt,
     );
   }
