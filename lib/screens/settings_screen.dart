@@ -255,27 +255,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 );
               }
-              return Column(
-                children: urls
-                    .map((u) => ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.cloud_outlined,
-                              size: 18, color: accent),
-                          title: Text(u,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12)),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline,
-                                color: Colors.redAccent, size: 20),
-                            onPressed: () async {
-                              await provider.removeXraySubUrl(u);
-                              if (mounted) setState(() {});
-                            },
+              return FutureBuilder<Map<String, String>>(
+                future: provider.getXraySubNames(),
+                builder: (context, nameSnap) {
+                  final names = nameSnap.data ?? const {};
+                  return Column(
+                    children: urls.map((u) {
+                      final custom = names[u];
+                      final hasName =
+                          custom != null && custom.trim().isNotEmpty;
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.cloud_outlined,
+                            size: 18, color: accent),
+                        title: Text(
+                          hasName ? custom : u,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight:
+                                hasName ? FontWeight.w600 : FontWeight.normal,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
-                        ))
-                    .toList(),
+                        ),
+                        subtitle: hasName
+                            ? Text(u,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark
+                                      ? Colors.white38
+                                      : Colors.black45,
+                                ))
+                            : null,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Rename',
+                              icon: const Icon(Icons.edit_outlined,
+                                  color: accent, size: 20),
+                              onPressed: () =>
+                                  _renameSubLinkDialog(provider, u, custom),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.redAccent, size: 20),
+                              onPressed: () async {
+                                await provider.removeXraySubUrl(u);
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
               );
             },
           ),
@@ -319,6 +358,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: ok ? Colors.green : Colors.red,
       ),
     );
+  }
+
+  /// Rename (or clear the name of) a subscription link so the user can tell
+  /// which is which in the server list.
+  Future<void> _renameSubLinkDialog(
+      VpnProvider provider, String url, String? current) async {
+    final controller = TextEditingController(text: current ?? '');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Name this link'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              url,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'e.g. Germany Fast, My VPS…',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ''),
+            child: const Text('Clear'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return; // cancelled
+    await provider.setXraySubName(url, result);
+    if (mounted) setState(() {});
   }
 
   /// Reusable fragment configuration card (used by both SSTP and Xray).
@@ -1066,6 +1157,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      Divider(color: isDark ? Colors.white12 : Colors.black12),
+                      const SizedBox(height: 12),
+
+                      // ⚡ Parallel server test count (1–300)
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.speed,
+                            color: isDark
+                                ? const Color(0xFF00FF88)
+                                : Colors.blue,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Parallel Server Test',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'How many servers are tested at once (1–300). '
+                                  'Higher = faster but heavier.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: (isDark
+                                      ? const Color(0xFF00FF88)
+                                      : Colors.blue)
+                                  .withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$_concurrentTests',
+                              style: TextStyle(
+                                color: isDark
+                                    ? const Color(0xFF00FF88)
+                                    : Colors.blue,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Slider(
+                        value: _concurrentTests.toDouble().clamp(1, 300),
+                        min: 1,
+                        max: 300,
+                        divisions: 299,
+                        label: '$_concurrentTests',
+                        activeColor:
+                            isDark ? const Color(0xFF00FF88) : Colors.blue,
+                        onChanged: (v) =>
+                            setState(() => _concurrentTests = v.round()),
+                        onChangeEnd: (v) async {
+                          final prefs =
+                              await SharedPreferences.getInstance();
+                          await prefs.setInt(
+                              'concurrent_tests', _concurrentTests);
+                        },
+                      ),
                     ],
                   ),
                   const SizedBox(height: 24),
@@ -1259,9 +1433,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              'URL used to test servers in the server list and '
-                              'the 3-second ping on the home screen. '
-                              'Default: http://www.google.com/gen_204',
+                              'Configs are tested by actually opening THIS site '
+                              'through each server — both in the server list and '
+                              'the 3-second home-screen ping. Enter any site '
+                              '(e.g. https://eset.com) to check which configs can '
+                              'reach it. Default: http://www.google.com/gen_204',
                               style: TextStyle(
                                 color: isDark
                                     ? Colors.white60

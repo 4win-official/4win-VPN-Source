@@ -1119,6 +1119,21 @@ class VpnProvider with ChangeNotifier {
   /// Subscription URL management (Xray settings).
   Future<List<String>> getXraySubUrls() => _xrayService.getSubUrls();
 
+  /// Custom names the user assigned to each Xray subscription URL.
+  Future<Map<String, String>> getXraySubNames() => _xrayService.getSubNames();
+
+  /// The name currently shown for a sub URL (custom name or host fallback).
+  Future<String> xraySubDisplayName(String url) =>
+      _xrayService.groupNameForUrlAsync(url);
+
+  /// Set/clear a custom display name for a subscription URL and refresh so the
+  /// server list reflects the new group name.
+  Future<void> setXraySubName(String url, String name) async {
+    await _xrayService.setSubName(url, name);
+    await loadXrayServers();
+    notifyListeners();
+  }
+
   /// Accepts an http subscription URL OR raw share link(s). Returns true if
   /// anything was added. Refreshes so the new entries show in the list.
   Future<bool> addXraySubUrl(String url) async {

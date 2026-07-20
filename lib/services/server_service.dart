@@ -15,7 +15,9 @@ class ServerService {
   // تعداد تست همزمان - قابل تنظیم از Settings
   static Future<int> getConcurrentTests() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt('concurrent_tests') ?? 100; // پیش‌فرض 100
+    final v = prefs.getInt('concurrent_tests') ?? 100; // پیش‌فرض 100
+    // Clamp to the supported 1–300 parallel range.
+    return v.clamp(1, 300);
   }
 
   /// آیا حالت Deep Scan فعال است؟ (برای اینترنت ضعیف یا محدودیت دولتی)
@@ -127,99 +129,76 @@ class ServerService {
     }
   }
 
-  /// Test server connectivity (actual SSTP port check) - سختگیرانه‌تر
+  /// Test server connectivity with a REAL micro-connection attempt (NOT an
+  /// ICMP ping).
   ///
-  /// در حالت Deep Scan (برای اینترنت ضعیف یا محدودیت دولتی):
-  /// - تایم‌اوت اتصال کوتاه‌تر (3 ثانیه) برای رد سریع سرورهای فیلترشده
-  /// - تا 3 بار تلاش مجدد روی هر سرور (مقابله با قطعی‌های لحظه‌ای)
-  /// - آستانه‌ی پینگ بالاتر (2000ms) تا سرورهای کندتر هم برای کاربرانِ
-  ///   با اینترنت ضعیف قابل‌استفاده باقی بمانند
+  /// Why not a ping: many SSTP servers do NOT answer ICMP/UDP pings at all yet
+  /// still accept a TCP session on their SSTP port — sometimes the TCP
+  /// handshake itself completes only a few seconds after the request. So the
+  /// only reliable signal is: "can we actually open a TCP connection to the
+  /// SSTP port?". If the 3-way handshake succeeds, the server is usable —
+  /// regardless of how slow it was.
+  ///
+  /// We therefore:
+  ///  • use a generous connect timeout (up to ~6s) so slow-to-accept servers
+  ///    (e.g. one that connects ~4s after the request) are NOT dropped,
+  ///  • accept ANY successful handshake as reachable (no low-latency cutoff),
+  ///  • retry a couple of times so a single transient drop doesn't reject a
+  ///    working server.
   Future<int?> testServerConnectivity(VpnServer server) async {
     final bool deepScan = await isDeepScanEnabled();
 
-    // پارامترها بر اساس حالت Deep Scan
+    // Generous timeout so slow-accepting SSTP servers still pass. Deep Scan
+    // waits even longer and retries more.
     final Duration connectTimeout =
-        deepScan ? const Duration(seconds: 3) : const Duration(seconds: 5);
-    final int maxAttempts = deepScan ? 3 : 1; // تلاش مجدد فقط در Deep Scan
-    final int pingThreshold = deepScan ? 2000 : 800; // آستانه‌ی پذیرش
+        deepScan ? const Duration(seconds: 8) : const Duration(seconds: 6);
+    final int maxAttempts = deepScan ? 3 : 2;
 
     int? bestPing;
     for (int attempt = 0; attempt < maxAttempts; attempt++) {
-      final ping = await _singleConnectivityTest(
-        server,
-        connectTimeout,
-        pingThreshold,
-      );
+      final ping = await _singleConnectivityTest(server, connectTimeout);
       if (ping != null) {
-        // بهترین (کمترین) پینگ بین تلاش‌ها را نگه می‌داریم
-        if (bestPing == null || ping < bestPing) {
-          bestPing = ping;
-        }
-        // در حالت عادی همان اولین موفقیت کافی است
-        if (!deepScan) break;
+        if (bestPing == null || ping < bestPing) bestPing = ping;
+        // First successful handshake is enough — the server is reachable.
+        break;
       }
     }
     return bestPing;
   }
 
-  /// یک بار تست اتصال به سرور و برگرداندن پینگ (یا null)
+  /// A single REAL connection attempt: open a TCP socket to the SSTP port and
+  /// measure how long the handshake took. A completed handshake means the
+  /// server accepted the connection — that is the actual "can I connect?"
+  /// signal the user asked for. We do NOT reject on latency, and we do NOT
+  /// require the server to echo any bytes (SSTP servers legitimately stay
+  /// silent until the TLS/PPP handshake begins). Returns the handshake time in
+  /// ms, or null if the connection could not be established.
   Future<int?> _singleConnectivityTest(
     VpnServer server,
     Duration connectTimeout,
-    int pingThreshold,
   ) async {
+    Socket? socket;
     try {
       final stopwatch = Stopwatch()..start();
 
-      final socket = await Socket.connect(
+      socket = await Socket.connect(
         server.address,
         server.port,
         timeout: connectTimeout,
       );
 
       stopwatch.stop();
-
-      // تست دقیق‌تر: چک کردن اینکه سرور واقعاً پاسخ میده
-      try {
-        socket.write('CONNECT\r\n');
-        await socket.flush();
-
-        await Future.delayed(const Duration(milliseconds: 100));
-
-        if (socket.remoteAddress.address.isEmpty) {
-          await socket.close();
-          return null; // سرور فیک - پینگ نداد
-        }
-
-        bool socketAlive = true;
-        try {
-          socket.listen(
-            (data) {},
-            onDone: () => socketAlive = false,
-            onError: (e) => socketAlive = false,
-            cancelOnError: true,
-          );
-
-          await Future.delayed(const Duration(milliseconds: 200));
-
-          if (!socketAlive) {
-            await socket.close();
-            return null; // سرور قطع کرد - فیک است
-          }
-        } catch (e) {
-          // خطا در خواندن - ولی سوکت زنده بود
-        }
-      } catch (e) {
-        await socket.close();
-        return null; // خطا - سرور قابل اتصال نیست
-      }
-
-      await socket.close();
-
       final ping = stopwatch.elapsedMilliseconds;
-      return ping < pingThreshold ? ping : null;
+
+      // Connection established = server is reachable. Close cleanly and report
+      // the handshake latency (used only for ordering, never for filtering).
+      socket.destroy();
+      return ping;
     } catch (e) {
-      return null; // Server unreachable
+      try {
+        socket?.destroy();
+      } catch (_) {}
+      return null; // handshake failed within the timeout → unreachable
     }
   }
 

@@ -64,6 +64,8 @@ class XrayServerService {
   static const String _selectedKey = 'selected_xray_server';
   static const String _subUpdatedKey = 'xray_sub_updated_at';
   static const String _subUrlsKey = 'xray_sub_urls';
+  // Per-URL custom display names (URL -> name), JSON-encoded map.
+  static const String _subNamesKey = 'xray_sub_names';
 
   /// Our built-in free subscription (one share link per line).
   static const String subscriptionUrl =
@@ -85,15 +87,75 @@ class XrayServerService {
     return prefs.getStringList(_subUrlsKey) ?? [];
   }
 
-  /// A stable, human-friendly group name for a user subscription URL. Each
-  /// sub link is shown as its OWN group in the server list.
-  String groupNameForUrl(String url) {
+  /// Custom display names the user assigned to each subscription URL.
+  Future<Map<String, String>> getSubNames() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_subNamesKey);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      return m.map((k, v) => MapEntry(k, v.toString()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// The auto (host-based) name for a URL, ignoring any custom name.
+  String _autoNameForUrl(String url) {
     try {
       final host = Uri.parse(url).host;
       if (host.isNotEmpty) return host;
     } catch (_) {/* fall through */}
     final u = url.replaceAll(RegExp(r'^https?://'), '');
     return u.length > 24 ? '${u.substring(0, 24)}…' : u;
+  }
+
+  /// A stable, human-friendly group name for a user subscription URL. Each
+  /// sub link is shown as its OWN group in the server list. If the user set a
+  /// custom name for this URL, that name is used; otherwise the URL host.
+  ///
+  /// NOTE: this is synchronous, so it can't read prefs; use [groupNameForUrl]
+  /// only where a cached names map is passed in, or [groupNameForUrlAsync].
+  String groupNameForUrl(String url, [Map<String, String>? names]) {
+    final custom = names?[url];
+    if (custom != null && custom.trim().isNotEmpty) return custom.trim();
+    return _autoNameForUrl(url);
+  }
+
+  /// Async variant that reads the stored custom names.
+  Future<String> groupNameForUrlAsync(String url) async {
+    final names = await getSubNames();
+    return groupNameForUrl(url, names);
+  }
+
+  /// Assigns/updates the custom display name for a subscription [url] and
+  /// migrates any already-stored servers to the new group name so the change
+  /// is reflected immediately in the server list. An empty [name] clears the
+  /// custom name (reverting to the host-based name).
+  Future<void> setSubName(String url, String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    final names = await getSubNames();
+    final oldGroup = groupNameForUrl(url, names);
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      names.remove(url);
+    } else {
+      names[url] = trimmed;
+    }
+    await prefs.setString(_subNamesKey, jsonEncode(names));
+    final newGroup = groupNameForUrl(url, names);
+    if (oldGroup != newGroup) {
+      final all = await loadServers();
+      var changed = false;
+      final migrated = all.map((s) {
+        if (s.group == oldGroup) {
+          changed = true;
+          return s.copyWith(group: newGroup);
+        }
+        return s;
+      }).toList();
+      if (changed) await saveServers(migrated);
+    }
   }
 
   /// Add a subscription URL. Returns false if empty/duplicate/invalid.
@@ -181,7 +243,12 @@ class XrayServerService {
     urls.remove(url);
     await prefs.setStringList(_subUrlsKey, urls);
     // Drop that subscription's group from the stored server list too.
-    final group = groupNameForUrl(url);
+    final names = await getSubNames();
+    final group = groupNameForUrl(url, names);
+    // Clean up any custom name for this URL.
+    if (names.remove(url) != null) {
+      await prefs.setString(_subNamesKey, jsonEncode(names));
+    }
     final all = await loadServers();
     final remaining = all.where((s) => s.group != group).toList();
     if (remaining.length != all.length) await saveServers(remaining);
@@ -320,8 +387,9 @@ class XrayServerService {
       }
       if (url == null) {
         final userUrls = await getSubUrls();
+        final names = await getSubNames();
         for (final u in userUrls) {
-          if (groupNameForUrl(u) == groupKey) {
+          if (groupNameForUrl(u, names) == groupKey) {
             url = u;
             break;
           }
@@ -402,9 +470,10 @@ class XrayServerService {
       // built-in groups first (Free, then Plus), then user subs.
       // In builtInOnly mode, user subs are excluded from the fetch set.
       final userUrls = builtInOnly ? <String>[] : await getSubUrls();
+      final subNames = builtInOnly ? <String, String>{} : await getSubNames();
       final subUrls = <String, String>{
         ...builtInSubs,
-        for (final u in userUrls) u: groupNameForUrl(u),
+        for (final u in userUrls) u: groupNameForUrl(u, subNames),
       };
 
       // 1) Fetch every subscription body (network only). A built-in group whose
