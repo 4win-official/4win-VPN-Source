@@ -574,36 +574,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
-                                // Show ping (همیشه نمایش داده شود)
+                                // Show ping. For Xray it's TAP-TO-PING (no auto
+                                // 3s timer); other protocols auto-refresh.
                                 Padding(
                                   padding: const EdgeInsets.only(top: 8),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.network_ping,
-                                        size: 16,
-                                        color: provider.currentPing != null 
-                                            ? _getPingColor(provider.currentPing!)
-                                            : (isDark ? Colors.white38 : Colors.black38),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        provider.currentPing != null 
-                                            ? '${provider.currentPing}ms'
-                                            : (provider.pingFailed ? 'Failed' : 'Testing...'),
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: provider.currentPing != null
-                                              ? _getPingColor(provider.currentPing!)
-                                              : (provider.pingFailed
-                                                  ? Colors.redAccent
-                                                  : (isDark ? Colors.white38 : Colors.black38)),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                  child: _buildPingIndicator(provider, isDark),
                                 ),
                               ],
                             ),
@@ -921,6 +896,132 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case VpnConnectionStatus.error:
         return isDark ? const Color(0xFFFF4466) : Colors.red; // نئون قرمز
     }
+  }
+
+  /// The ping row under the timer. For Xray this is a tappable button
+  /// (tap-to-ping); the first time it shows "click to ping". Every subsequent
+  /// tap runs a fresh measurement. Other protocols keep the auto display.
+  Widget _buildPingIndicator(VpnProvider provider, bool isDark) {
+    final ping = provider.currentPing;
+
+    if (provider.selectedProtocol == 'xray') {
+      final pinging = provider.xrayPinging;
+      final awaitingFirst = provider.xrayPingAwaitingFirstTap;
+
+      final Widget content;
+      if (pinging) {
+        content = Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation(
+                    isDark ? const Color(0xFF00FF88) : Colors.blue),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Pinging…',
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white54 : Colors.black54,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        );
+      } else if (awaitingFirst && ping == null && !provider.pingFailed) {
+        content = Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.touch_app,
+                size: 16, color: isDark ? Colors.white54 : Colors.black54),
+            const SizedBox(width: 4),
+            Text(
+              'click to ping',
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white54 : Colors.black54,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        );
+      } else {
+        content = Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.network_ping,
+              size: 16,
+              color: ping != null
+                  ? _getPingColor(ping)
+                  : (isDark ? Colors.white38 : Colors.black38),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              ping != null
+                  ? '${ping}ms'
+                  : (provider.pingFailed ? 'Failed' : 'click to ping'),
+              style: TextStyle(
+                fontSize: 13,
+                color: ping != null
+                    ? _getPingColor(ping)
+                    : (provider.pingFailed
+                        ? Colors.redAccent
+                        : (isDark ? Colors.white54 : Colors.black54)),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        );
+      }
+
+      return InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: pinging ? null : () => provider.manualXrayPing(),
+        child: Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: content,
+        ),
+      );
+    }
+
+    // Non-Xray: automatic ping display (unchanged behaviour).
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.network_ping,
+          size: 16,
+          color: ping != null
+              ? _getPingColor(ping)
+              : (isDark ? Colors.white38 : Colors.black38),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          ping != null
+              ? '${ping}ms'
+              : (provider.pingFailed ? 'Failed' : 'Testing...'),
+          style: TextStyle(
+            fontSize: 13,
+            color: ping != null
+                ? _getPingColor(ping)
+                : (provider.pingFailed
+                    ? Colors.redAccent
+                    : (isDark ? Colors.white38 : Colors.black38)),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
   }
 
   Color _getPingColor(int ping) {

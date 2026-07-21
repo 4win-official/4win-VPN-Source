@@ -41,6 +41,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // When on, the concurrent count is chosen automatically from the device's
   // CPU cores so stronger phones test more in parallel.
   bool _xrayAutoConcurrent = true;
+  // How many times each server is re-tested when connecting to a whole group
+  // (best ping wins). Range 1..5.
+  int _xrayGroupTestRounds = 1;
   // Delay-test URL used by both the server-list test and the home-screen
   // 3-second ping. Default: http://www.google.com/gen_204
   final _xrayTestUrlController = TextEditingController();
@@ -104,6 +107,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _xrayConcurrentTests =
           (prefs.getInt('xray_concurrent_tests') ?? 300).clamp(1, 300);
       _xrayAutoConcurrent = prefs.getBool('xray_auto_concurrent') ?? true;
+      _xrayGroupTestRounds =
+          (prefs.getInt('xray_group_test_rounds') ?? 1).clamp(1, 5);
       _xrayTestUrlController.text =
           prefs.getString('xray_test_url') ?? 'http://www.google.com/gen_204';
     });
@@ -114,17 +119,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setInt('xray_concurrent_tests', _xrayConcurrentTests);
   }
 
+  Future<void> _saveXrayGroupTestRounds() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('xray_group_test_rounds', _xrayGroupTestRounds);
+  }
+
   Future<void> _saveXrayAutoConcurrent() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('xray_auto_concurrent', _xrayAutoConcurrent);
   }
 
+  /// Persist the typed test URL. IMPORTANT: an empty field is NOT rewritten to
+  /// the default here — otherwise the user could never clear it to type a new
+  /// one (every keystroke that empties it would snap it back). Empty just
+  /// removes the stored value (falls back to default at read time). The default
+  /// text is only re-filled explicitly via the reset button.
   Future<void> _saveXrayTestUrl() async {
     final prefs = await SharedPreferences.getInstance();
     final v = _xrayTestUrlController.text.trim();
     if (v.isEmpty) {
       await prefs.remove('xray_test_url');
-      _xrayTestUrlController.text = 'http://www.google.com/gen_204';
     } else {
       await prefs.setString('xray_test_url', v);
     }
@@ -1637,6 +1651,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                             : Colors.black38,
                                         fontSize: 11)),
                                 Text('300',
+                                    style: TextStyle(
+                                        color: isDark
+                                            ? Colors.white38
+                                            : Colors.black38,
+                                        fontSize: 11)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      // 🔁 Group test rounds (retest each server N times, pick best)
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF1DE9B6)
+                                .withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.repeat,
+                                    color: Color(0xFF1DE9B6), size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Group Test Rounds',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1DE9B6)
+                                        .withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '$_xrayGroupTestRounds×',
+                                    style: const TextStyle(
+                                      color: Color(0xFF1DE9B6),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'When you connect to a whole group, each server is '
+                              're-tested this many times and the fastest one is '
+                              'used. Higher = more accurate best pick but slower. '
+                              '1–5, default 1.',
+                              style: TextStyle(
+                                color:
+                                    isDark ? Colors.white60 : Colors.black54,
+                                fontSize: 12,
+                              ),
+                            ),
+                            Slider(
+                              value: _xrayGroupTestRounds.toDouble(),
+                              min: 1,
+                              max: 5,
+                              divisions: 4,
+                              activeColor: const Color(0xFF1DE9B6),
+                              label: '$_xrayGroupTestRounds×',
+                              onChanged: (v) => setState(
+                                  () => _xrayGroupTestRounds = v.round()),
+                              onChangeEnd: (v) => _saveXrayGroupTestRounds(),
+                            ),
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('1',
+                                    style: TextStyle(
+                                        color: isDark
+                                            ? Colors.white38
+                                            : Colors.black38,
+                                        fontSize: 11)),
+                                Text('5',
                                     style: TextStyle(
                                         color: isDark
                                             ? Colors.white38

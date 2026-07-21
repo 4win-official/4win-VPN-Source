@@ -68,8 +68,13 @@ class XrayConfigBuilder {
       outbounds.add({
         'tag': 'fragment',
         'protocol': 'freedom',
+        // NOTE: do NOT set domainStrategy here. v2rayNG's working fragment
+        // outbound carries ONLY the `fragment` object. Forcing "UseIP" makes
+        // this freedom dialer re-resolve the destination through the config's
+        // DNS, which regularly fails on mobile — the exact reason "fragment on
+        // → nothing connects". Leaving it as AsIs lets it dial the address the
+        // proxy hands it directly.
         'settings': {
-          'domainStrategy': 'UseIP',
           'fragment': {
             'packets': fragmentPackets,
             'length': fragmentLength,
@@ -217,8 +222,8 @@ class XrayConfigBuilder {
       outbounds.add({
         'tag': 'fragment',
         'protocol': 'freedom',
+        // Same fix as the main config: no domainStrategy here (see note above).
         'settings': {
-          'domainStrategy': 'UseIP',
           'fragment': {
             'packets': fragmentPackets,
             'length': fragmentLength,
@@ -233,6 +238,11 @@ class XrayConfigBuilder {
 
     final config = <String, dynamic>{
       'log': {'loglevel': 'none'},
+      // A DNS section so any hostname the proxy must resolve works during the
+      // delay test (the fragment dialer no longer forces UseIP).
+      'dns': {
+        'servers': ['1.1.1.1', '8.8.8.8', 'localhost'],
+      },
       'outbounds': outbounds,
     };
     return const JsonEncoder.withIndent('  ').convert(config);

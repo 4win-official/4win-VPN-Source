@@ -336,21 +336,56 @@ class VpnProvider with ChangeNotifier {
   }
 
   // Ping timer - every 3 seconds
+  // Xray ping is MANUAL (tap-to-ping), not an automatic 3s timer. This flag is
+  // true until the user taps the ping the first time after connecting, so the
+  // UI can show a "click to ping" hint only once.
+  bool _xrayPingAwaitingFirstTap = false;
+  bool get xrayPingAwaitingFirstTap => _xrayPingAwaitingFirstTap;
+  bool _xrayPinging = false;
+  bool get xrayPinging => _xrayPinging;
+
   void _startPingTimer() {
     _stopPingTimer();
-    
-    // Get initial ping
+
+    // Xray: NO automatic timer — the user taps to ping (see manualXrayPing).
+    // Show the "click to ping" hint until the first tap.
+    if (_selectedProtocol == 'xray') {
+      _xrayPingAwaitingFirstTap = true;
+      _currentPing = null;
+      _pingFailed = false;
+      notifyListeners();
+      return;
+    }
+
+    // Other protocols: keep the automatic 3-second ping.
     _updateCurrentPing();
-    
     _pingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       _updateCurrentPing();
     });
+  }
+
+  /// Manual, tap-triggered ping for Xray. Runs a single real-delay measurement
+  /// each time the user taps the ping indicator on the home screen.
+  Future<void> manualXrayPing() async {
+    if (_selectedProtocol != 'xray') return;
+    if (_xrayPinging) return; // ignore rapid double taps
+    _xrayPingAwaitingFirstTap = false;
+    _xrayPinging = true;
+    notifyListeners();
+    try {
+      await _updateCurrentPing();
+    } finally {
+      _xrayPinging = false;
+      notifyListeners();
+    }
   }
 
   void _stopPingTimer() {
     _pingTimer?.cancel();
     _pingTimer = null;
     _currentPing = null;
+    _xrayPingAwaitingFirstTap = false;
+    _xrayPinging = false;
   }
 
   Future<void> _updateCurrentPing() async {
@@ -1198,6 +1233,20 @@ class VpnProvider with ChangeNotifier {
     return v.clamp(1, 300);
   }
 
+  /// How many times each server is re-tested when connecting to a whole group,
+  /// so the app can pick the best server more reliably. Range 1..5, default 1.
+  Future<int> getXrayGroupTestRounds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getInt('xray_group_test_rounds') ?? 1;
+    return v.clamp(1, 5);
+  }
+
+  Future<void> setXrayGroupTestRounds(int rounds) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('xray_group_test_rounds', rounds.clamp(1, 5));
+    notifyListeners();
+  }
+
   /// Default delay-test URL. Used by the server-list delay test and the
   /// 3-second home-screen ping. Changeable from Xray settings.
   static const String defaultXrayTestUrl = 'http://www.google.com/gen_204';
@@ -1268,7 +1317,12 @@ class VpnProvider with ChangeNotifier {
   /// Concurrently delay-test a list of servers in batches sized by the
   /// user's concurrent-test setting (default 30, up to 300). Updates pings
   /// live so the UI reflects results as they arrive.
-  Future<void> testXrayServers(List<XrayServer> servers) async {
+  /// Concurrently delay-test [servers]. [rounds] (1..5) re-tests every server
+  /// that many times and keeps the BEST (lowest positive) ping — used when
+  /// connecting to a whole group so the "connect to fastest" choice is more
+  /// reliable. Defaults to a single round.
+  Future<void> testXrayServers(List<XrayServer> servers,
+      {int rounds = 1}) async {
     if (servers.isEmpty || _xrayGroupTesting) return;
     _xrayGroupTesting = true;
     // Mark only the group(s) these servers belong to as "testing" so the
@@ -1279,6 +1333,8 @@ class VpnProvider with ChangeNotifier {
     try {
       final batchSize = await getXrayConcurrentTests();
       final testUrl = await getXrayTestUrl();
+      final int totalRounds = rounds.clamp(1, 5);
+      // Best ping seen per server across all rounds (lower positive = better).
       final results = <String, int?>{};
 
       // Precompute an id -> index map ONCE. Previously every result did
@@ -1289,35 +1345,48 @@ class VpnProvider with ChangeNotifier {
         indexById[_xrayServers[i].id] = i;
       }
 
-      for (var i = 0; i < servers.length; i += batchSize) {
-        final batch = servers.sublist(
-            i, (i + batchSize).clamp(0, servers.length));
-        for (final s in batch) {
-          _xrayTestingIds.add(s.id);
+      // Merge a fresh measurement into the best-so-far for a server.
+      void mergeBest(String id, int ping) {
+        final prev = results[id];
+        if (ping > 0) {
+          // Keep the lowest positive ping.
+          if (prev == null || prev <= 0 || ping < prev) results[id] = ping;
+        } else {
+          // Only record failure if we have no positive result yet.
+          if (prev == null) results[id] = -1;
         }
-        notifyListeners();
-        await Future.wait(batch.map((s) async {
-          try {
-            final config = await _buildDelayConfig(s);
-            final delay = await XrayConnection.measureDelay(config, url: testUrl);
-            final ping = delay >= 0 ? delay : -1;
-            results[s.id] = ping;
-          } catch (_) {
-            results[s.id] = -1;
-          } finally {
-            _xrayTestingIds.remove(s.id);
+      }
+
+      for (var round = 0; round < totalRounds; round++) {
+        for (var i = 0; i < servers.length; i += batchSize) {
+          final batch = servers.sublist(
+              i, (i + batchSize).clamp(0, servers.length));
+          for (final s in batch) {
+            _xrayTestingIds.add(s.id);
           }
-        }));
-        // Apply this batch's pings in one pass using the index map (O(batch)),
-        // then a SINGLE notifyListeners per batch.
-        for (final s in batch) {
-          final idx = indexById[s.id];
-          if (idx != null && idx < _xrayServers.length) {
-            _xrayServers[idx] =
-                _xrayServers[idx].copyWith(ping: results[s.id]);
+          notifyListeners();
+          await Future.wait(batch.map((s) async {
+            try {
+              final config = await _buildDelayConfig(s);
+              final delay =
+                  await XrayConnection.measureDelay(config, url: testUrl);
+              mergeBest(s.id, delay >= 0 ? delay : -1);
+            } catch (_) {
+              mergeBest(s.id, -1);
+            } finally {
+              _xrayTestingIds.remove(s.id);
+            }
+          }));
+          // Apply the best-so-far pings in one pass, then a SINGLE notify.
+          for (final s in batch) {
+            final idx = indexById[s.id];
+            if (idx != null && idx < _xrayServers.length) {
+              _xrayServers[idx] =
+                  _xrayServers[idx].copyWith(ping: results[s.id]);
+            }
           }
+          notifyListeners();
         }
-        notifyListeners();
       }
       await _xrayService.updatePings(results);
       await _sortXrayByPing();
@@ -1393,7 +1462,8 @@ class VpnProvider with ChangeNotifier {
   Future<XrayServer?> _pickFastestFreeServer() async {
     final group = _selectedGroupServers();
     if (group.isEmpty) return null;
-    await testXrayServers(group);
+    final rounds = await getXrayGroupTestRounds();
+    await testXrayServers(group, rounds: rounds);
     final g = _selectedXrayGroup;
     final working = _xrayServers
         .where((s) => s.group == g && (s.ping ?? -1) > 0)
