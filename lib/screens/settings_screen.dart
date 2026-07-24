@@ -339,31 +339,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _addSubLinkDialog(VpnProvider provider) async {
     final controller = TextEditingController();
-    final url = await showDialog<String>(
+    final nameController = TextEditingController();
+    final result = await showDialog<(String, String)>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Add Subscription / Link'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'https://example.com/sub.txt\nor vless:// , vmess:// , trojan:// , ss://',
-            border: OutlineInputBorder(),
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Optional custom NAME shown for this subscription in the server
+            // list. Filled in at add-time so the user doesn't have to rename
+            // afterwards.
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Name (optional)',
+                hintText: 'e.g. Germany Fast, My VPS…',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Subscription URL or share link',
+                hintText:
+                    'https://example.com/sub.txt\nor vless:// , vmess:// , trojan:// , ss://',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancel')),
           ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, controller.text),
+              onPressed: () => Navigator.pop(
+                  ctx, (controller.text, nameController.text)),
               child: const Text('Add')),
         ],
       ),
     );
-    if (url == null || url.trim().isEmpty) return;
-    final ok = await provider.addXraySubUrl(url.trim());
+    if (result == null || result.$1.trim().isEmpty) return;
+    final ok = await provider.addXraySubUrl(result.$1.trim(),
+        name: result.$2.trim());
     if (!mounted) return;
     setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
@@ -374,28 +397,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Rename (or clear the name of) a subscription link so the user can tell
-  /// which is which in the server list.
+  /// Edit a subscription link: change BOTH its custom name AND its URL so the
+  /// user can fix a wrong/expired link without deleting and re-adding it.
   Future<void> _renameSubLinkDialog(
       VpnProvider provider, String url, String? current) async {
-    final controller = TextEditingController(text: current ?? '');
-    final result = await showDialog<String>(
+    final nameController = TextEditingController(text: current ?? '');
+    final urlController = TextEditingController(text: url);
+    final result = await showDialog<(String name, String url)>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Name this link'),
+        title: const Text('Edit subscription'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              url,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-            ),
-            const SizedBox(height: 12),
             TextField(
-              controller: controller,
+              controller: nameController,
               autofocus: true,
               decoration: const InputDecoration(
                 labelText: 'Name',
@@ -403,26 +420,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: urlController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Subscription URL',
+                hintText: 'https://example.com/sub.txt',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, ''),
-            child: const Text('Clear'),
+            onPressed: () => Navigator.pop(ctx, ('', url)),
+            child: const Text('Clear name'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            onPressed: () => Navigator.pop(
+                ctx, (nameController.text.trim(), urlController.text.trim())),
             child: const Text('Save'),
           ),
         ],
       ),
     );
     if (result == null) return; // cancelled
-    await provider.setXraySubName(url, result);
+    final newName = result.$1;
+    final newUrl = result.$2;
+
+    // If the URL was changed, move the subscription to the new URL first
+    // (this also carries over the old name). Then apply the name on whichever
+    // URL is current.
+    var targetUrl = url;
+    if (newUrl.isNotEmpty && newUrl != url) {
+      final ok = await provider.changeXraySubUrl(url, newUrl);
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invalid or duplicate URL'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      targetUrl = newUrl;
+    }
+    await provider.setXraySubName(targetUrl, newName);
     if (mounted) setState(() {});
   }
 

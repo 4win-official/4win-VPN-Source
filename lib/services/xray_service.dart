@@ -254,6 +254,44 @@ class XrayServerService {
     if (remaining.length != all.length) await saveServers(remaining);
   }
 
+  /// Changes the URL of an existing subscription (keeping its custom name).
+  /// Returns false if [newUrl] is invalid or already exists. The old URL's
+  /// cached servers are dropped; the caller should refresh to fetch the new
+  /// URL's servers.
+  Future<bool> changeSubUrl(String oldUrl, String newUrl) async {
+    final n = newUrl.trim();
+    if (n.isEmpty || !n.startsWith('http')) return false;
+    if (n == oldUrl) return true; // nothing to do
+    final prefs = await SharedPreferences.getInstance();
+    final urls = prefs.getStringList(_subUrlsKey) ?? [];
+    if (urls.contains(n)) return false; // duplicate
+    final idx = urls.indexOf(oldUrl);
+    if (idx < 0) {
+      // Old URL not found — just add the new one.
+      urls.add(n);
+    } else {
+      urls[idx] = n;
+    }
+    await prefs.setStringList(_subUrlsKey, urls);
+
+    // Carry over any custom name from the old URL to the new one.
+    final names = await getSubNames();
+    final oldName = names[oldUrl];
+    if (oldName != null) {
+      names.remove(oldUrl);
+      names[n] = oldName;
+      await prefs.setString(_subNamesKey, jsonEncode(names));
+    }
+
+    // Drop the OLD subscription's cached servers so we don't keep stale ones.
+    final oldGroup = groupNameForUrl(oldUrl,
+        oldName != null ? {oldUrl: oldName} : null);
+    final all = await loadServers();
+    final remaining = all.where((s) => s.group != oldGroup).toList();
+    if (remaining.length != all.length) await saveServers(remaining);
+    return true;
+  }
+
   /// Fetches a subscription and reports BOTH the parsed links AND whether the
   /// fetch itself SUCCEEDED. This distinction matters for built-in groups: a
   /// successful fetch that returns ZERO links means the sub was intentionally

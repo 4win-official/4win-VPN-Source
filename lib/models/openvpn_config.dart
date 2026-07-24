@@ -124,6 +124,23 @@ class OpenVpnConfig {
       config.contains('<auth-user-pass>') ||
       config.contains(RegExp(r'^\s*auth-user-pass\b', multiLine: true));
 
+  /// True when the config carries a CLIENT certificate/key (inline `<cert>` /
+  /// `<key>` blocks or file-based `cert`/`key` directives). When it does NOT,
+  /// the core
+  /// must be told the client cert is not required, otherwise it waits for a
+  /// certificate that never comes and the handshake stalls — the classic
+  /// "connects to nothing" symptom for username/password-only servers.
+  bool get hasClientCert =>
+      config.contains('<cert>') ||
+      config.contains('<key>') ||
+      config.contains(RegExp(r'^\s*cert\s+\S+', multiLine: true)) ||
+      config.contains(RegExp(r'^\s*key\s+\S+', multiLine: true)) ||
+      config.contains(RegExp(r'^\s*pkcs12\s+\S+', multiLine: true));
+
+  /// True when the config already declares that no client cert is required.
+  bool get _hasCertNotRequiredDirective => config.contains(
+      RegExp(r'^\s*client-cert-not-required\b', multiLine: true));
+
   /// Normalized config fed to the native OpenVPN core.
   ///
   /// The official OpenVPN Connect app works with so many configs because it
@@ -164,6 +181,19 @@ class OpenVpnConfig {
     }
 
     if (!normalized.endsWith('\n')) normalized = '$normalized\n';
+
+    // Fix 3 — THE OpenVPN "connects to nothing" fix.
+    //
+    // We pass certIsRequired:true to the plugin so it never appends its own
+    // broken (newline-less) `client-cert-not-required`. But username/password
+    // servers genuinely have NO client certificate, and the core will stall
+    // waiting for one unless we declare it ourselves. So when the config has
+    // no client cert (and hasn't already said so), append the directive
+    // CLEANLY on its own line. This is exactly what the official app relies on
+    // the core defaulting to, made explicit and safe here.
+    if (!hasClientCert && !_hasCertNotRequiredDirective) {
+      normalized = '${normalized}client-cert-not-required\n';
+    }
 
     _normalizedCache = normalized;
     return normalized;

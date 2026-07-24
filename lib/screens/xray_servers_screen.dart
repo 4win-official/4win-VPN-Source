@@ -30,16 +30,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = context.read<VpnProvider>();
-      // 1) لود سریع از حافظه تا لیست فوراً نمایش داده شود.
+      // لود سریع از حافظه تا لیست فوراً نمایش داده شود.
       await provider.loadXrayServers();
-      // 2) هم‌زمان، گروه‌های داخلی (Free + Plus) را از لینک تازه‌سازی می‌کنیم تا
-      //    اگر ساب پلاس خالی شده باشد، بلافاصله از لیست حذف شود (نه با تأخیر).
-      //    force=true تا محدودیت ۶ ساعته را دور بزند.
-      if (!mounted) return;
-      // بدون await تا UI بلاک نشود؛ فقط گروه‌های داخلی (Free + Plus) تازه می‌شوند
-      // تا اگر ساب پلاس خالی شده باشد حذف شود. ساب‌های کاربر با دکمه‌ی رفرش
-      // خودشان آپدیت می‌شوند.
-      provider.refreshXrayFreeGroup(force: true, builtInOnly: true);
+      // آپدیت ساب‌های پیش‌فرض (Free + Plus) فقط موقع باز شدن اپ در Loading
+      // screen انجام می‌شود؛ دیگر هر بار ورود به این صفحه رفرش نمی‌کنیم.
+      // کاربر می‌تواند دستی با دکمه‌ی رفرش لیست را به‌روز کند.
     });
   }
 
@@ -52,8 +47,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   /// base64-encoded subscription blob (same as many providers use).
   Future<void> _exportServers(List<XrayServer> servers, String title) async {
     if (servers.isEmpty) return;
-    final plain = servers.map((s) => s.link).join('\n');
+    // Use exportLink: encrypted servers are copied back in their ENCRYPTED
+    // (4ws://) form so the real share link never leaves the app.
+    final plain = servers.map((s) => s.exportLink).join('\n');
     final b64 = base64.encode(utf8.encode(plain));
+    final hasEncrypted = servers.any((s) => s.encrypted);
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
@@ -63,10 +61,25 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(
-                'Export "$title" (${servers.length})',
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Export "$title" (${servers.length})',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  if (hasEncrypted)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Text(
+                        '🔒 Encrypted servers are copied in their protected '
+                        '4win form.',
+                        style: TextStyle(fontSize: 12),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                ],
               ),
             ),
             ListTile(
@@ -98,6 +111,17 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     );
   }
 
+  /// Copy a SINGLE server's link straight to the clipboard (no bottom sheet).
+  /// Normal servers copy their plain share link; encrypted (4ws://) servers
+  /// copy their protected form. This is the fast path used by the per-row copy
+  /// icon so a normal server always copies exactly its own working link.
+  Future<void> _copyOneServer(XrayServer s) async {
+    final text = s.exportLink;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    _toast(s.encrypted ? 'Encrypted link copied' : 'Link copied');
+  }
+
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -109,7 +133,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final controller = TextEditingController();
     final clip = await Clipboard.getData('text/plain');
     final clipText = clip?.text ?? '';
-    if (RegExp(r'^(vless|vmess|trojan|ss)://', caseSensitive: false)
+    if (RegExp(r'^(vless|vmess|trojan|ss|4ws)://', caseSensitive: false)
         .hasMatch(clipText.trim())) {
       controller.text = clipText.trim();
     }
@@ -124,7 +148,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           children: [
             const Text(
               'Paste one or more share links (vless://, vmess://, '
-              'trojan://, ss://). One per line.',
+              'trojan://, ss://) or 4win encrypted links (4ws://). '
+              'One per line.',
               style: TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 12),
@@ -281,40 +306,84 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               if (!XrayServer.isBuiltInGroup(k)) k,
           ];
 
-          final children = <Widget>[
-            for (final key in orderedKeys)
-              _buildGroup(
-                provider: provider,
-                isDark: isDark,
-                accentIn: accent,
-                title: key,
-                groupKey: key,
-                servers: groups[key]!,
-                // Every named group is a selectable subscription group.
-                locked: true,
-                expanded: _expandedGroups.contains(key),
-                onToggleExpand: () => setState(() =>
-                    _toggleExpanded(key)),
-              ),
-            if (individual.isNotEmpty)
-              _buildGroup(
-                provider: provider,
-                isDark: isDark,
-                accentIn: accent,
-                title: 'My Servers',
-                groupKey: '',
-                servers: individual,
-                locked: false,
-                expanded: _expandedGroups.contains(''),
-                onToggleExpand: () => setState(() => _toggleExpanded('')),
-              ),
-          ];
+          // PERFORMANCE: build a FLAT list of lightweight "rows" (group headers
+          // + individual server tiles) and render them with a LAZY
+          // ListView.builder. Only rows actually scrolled into view are ever
+          // built, so a subscription with hundreds/thousands of servers no
+          // longer builds every widget up front — that eager build was the
+          // "server list lags when there are many servers" the user reported.
+          final rows = <_Row>[];
+          void addGroupRows(String key, String title, List<XrayServer> servers,
+              bool locked) {
+            final expanded = _expandedGroups.contains(key);
+            rows.add(_Row.header(key, title, servers, locked, expanded));
+            if (expanded) {
+              // Cap the visible tiles so a single huge group can't build an
+              // unbounded tree even when lazily scrolled. The full group is
+              // still used for connecting/testing (fastest across ALL servers).
+              final show = servers.length > 500 ? 500 : servers.length;
+              for (var i = 0; i < show; i++) {
+                rows.add(_Row.tile(servers[i], locked));
+              }
+              if (servers.length > show) {
+                rows.add(_Row.more(servers.length - show));
+              }
+            }
+          }
+
+          for (final key in orderedKeys) {
+            addGroupRows(key, key, groups[key]!, true);
+          }
+          if (individual.isNotEmpty) {
+            addGroupRows('', 'My Servers', individual, false);
+          }
 
           return RefreshIndicator(
             onRefresh: _refreshFreeGroup,
-            child: ListView(
+            child: ListView.builder(
               padding: const EdgeInsets.all(12),
-              children: children,
+              itemCount: rows.length,
+              // A stable key per row keeps element recycling cheap while
+              // scrolling through very long lists.
+              itemBuilder: (context, index) {
+                final row = rows[index];
+                switch (row.kind) {
+                  case _RowKind.header:
+                    return _buildGroupHeader(
+                      provider: provider,
+                      isDark: isDark,
+                      accentIn: accent,
+                      title: row.title!,
+                      groupKey: row.groupKey!,
+                      servers: row.servers!,
+                      locked: row.locked,
+                      expanded: row.expanded,
+                    );
+                  case _RowKind.tile:
+                    final s = row.server!;
+                    return _buildServerTile(
+                      provider,
+                      s,
+                      provider.selectedXrayServer?.id == s.id,
+                      isDark,
+                      row.locked && s.group == XrayServer.plusGroup
+                          ? const Color(0xFFE6B800)
+                          : accent,
+                    );
+                  case _RowKind.more:
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        '…and ${row.moreCount} more servers',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white54 : Colors.black45,
+                        ),
+                      ),
+                    );
+                }
+              },
             ),
           );
         },
@@ -328,9 +397,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     );
   }
 
-  /// A collapsible group: header (tap = select group, arrow = expand) plus the
-  /// server tiles when expanded.
-  Widget _buildGroup({
+  /// A collapsible group HEADER only (tap = select group, arrow = expand).
+  /// The server tiles themselves are rendered as separate rows by the lazy
+  /// ListView.builder in [build] so a huge group never builds all its tiles at
+  /// once.
+  Widget _buildGroupHeader({
     required VpnProvider provider,
     required bool isDark,
     required Color accentIn,
@@ -339,8 +410,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     required List<XrayServer> servers,
     required bool locked,
     required bool expanded,
-    required VoidCallback onToggleExpand,
   }) {
+    void onToggleExpand() => setState(() => _toggleExpanded(groupKey));
     // The Plus built-in group gets a distinctive GOLD frame; everything else
     // uses the passed-in (green) accent.
     final Color accent = groupKey == XrayServer.plusGroup
@@ -363,12 +434,14 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final refreshing = provider.xrayGroupRefreshingFor(groupKey);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.only(bottom: expanded ? 0 : 12),
       decoration: BoxDecoration(
         color: isDark
             ? Colors.white.withValues(alpha: 0.04)
             : Colors.black.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: expanded
+            ? const BorderRadius.vertical(top: Radius.circular(14))
+            : BorderRadius.circular(14),
         border: Border.all(
           color: highlight ? accent : Colors.transparent,
           width: 2,
@@ -484,40 +557,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               ),
             ),
           ),
-          // ---- Body ----
-          //
-          // PERFORMANCE: only BUILD the server tiles when the group is actually
-          // expanded. The old AnimatedCrossFade always built BOTH children, so
-          // every group eagerly created up to 200 tiles even while collapsed —
-          // with several large subscription groups that's thousands of widgets
-          // built up front, which is exactly the "small lag / freeze" the user
-          // saw. Collapsed groups now cost nothing.
-          if (expanded) ...[
-            const Divider(height: 1),
-            // Cap the visible tiles so a single huge group (1000+ servers) can't
-            // build an unbounded widget tree. The FULL group is still used when
-            // connecting/testing (fastest across ALL servers is picked); this
-            // only limits what's rendered.
-            ...servers.take(120).map((s) => _buildServerTile(
-                  provider,
-                  s,
-                  provider.selectedXrayServer?.id == s.id,
-                  isDark,
-                  accent,
-                )),
-            if (servers.length > 120)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  '…and ${servers.length - 120} more servers',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? Colors.white54 : Colors.black45,
-                  ),
-                ),
-              ),
-            const SizedBox(height: 6),
-          ],
+          // Server tiles are rendered as separate lazy rows by the parent
+          // ListView.builder (see [build]); the header stops here.
+          if (expanded) const Divider(height: 1),
         ],
       ),
     );
@@ -574,7 +616,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   Widget _buildServerTile(VpnProvider provider, XrayServer s, bool selected,
       bool isDark, Color accent) {
     final testing = provider.xrayTestingIds.contains(s.id);
-    return ListTile(
+    return Container(
+      color: isDark
+          ? Colors.white.withValues(alpha: 0.04)
+          : Colors.black.withValues(alpha: 0.03),
+      child: ListTile(
       dense: true,
       leading: CircleAvatar(
         radius: 18,
@@ -621,7 +667,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           IconButton(
             tooltip: 'Copy link',
             icon: Icon(Icons.copy, color: accent, size: 18),
-            onPressed: () => _exportServers([s], s.remark),
+            onPressed: () => _copyOneServer(s),
           ),
           IconButton(
             tooltip: 'Real delay test',
@@ -651,6 +697,52 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         ],
       ),
       onTap: () => provider.selectXrayServer(s),
+    ),
     );
   }
+}
+
+/// Kinds of flat rows in the lazy server ListView.
+enum _RowKind { header, tile, more }
+
+/// A single lightweight row descriptor used by the lazy [ListView.builder] in
+/// [_XrayServersScreenState.build]. Building rows lazily (only what's on
+/// screen) is what keeps a list of hundreds/thousands of servers smooth.
+class _Row {
+  final _RowKind kind;
+  final String? groupKey;
+  final String? title;
+  final List<XrayServer>? servers;
+  final XrayServer? server;
+  final bool locked;
+  final bool expanded;
+  final int moreCount;
+
+  _Row._({
+    required this.kind,
+    this.groupKey,
+    this.title,
+    this.servers,
+    this.server,
+    this.locked = false,
+    this.expanded = false,
+    this.moreCount = 0,
+  });
+
+  factory _Row.header(String groupKey, String title,
+          List<XrayServer> servers, bool locked, bool expanded) =>
+      _Row._(
+        kind: _RowKind.header,
+        groupKey: groupKey,
+        title: title,
+        servers: servers,
+        locked: locked,
+        expanded: expanded,
+      );
+
+  factory _Row.tile(XrayServer server, bool locked) =>
+      _Row._(kind: _RowKind.tile, server: server, locked: locked);
+
+  factory _Row.more(int count) =>
+      _Row._(kind: _RowKind.more, moreCount: count);
 }

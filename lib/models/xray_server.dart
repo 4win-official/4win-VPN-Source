@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../services/secret_text_cipher.dart';
 
 /// A single Xray server, parsed from a share link (vless:// / vmess:// /
 /// trojan:// / ss://). Stores the raw link plus the decoded fields needed to
@@ -12,6 +13,12 @@ class XrayServer {
   final int port;
   final DateTime addedAt;
   int? ping;
+
+  /// True when this server was imported from a 4win ENCRYPTED link (`4ws://`).
+  /// [link] still holds the real decoded share link (so we can connect), but
+  /// exporting/copying re-encrypts it via [exportLink] so the real link never
+  /// leaves the app in the clear.
+  final bool encrypted;
 
   /// Group this server belongs to. Empty for user-added individual servers.
   /// The built-in subscription uses [freeGroup]; each user-added subscription
@@ -42,6 +49,7 @@ class XrayServer {
     DateTime? addedAt,
     this.ping,
     this.group = '',
+    this.encrypted = false,
   }) : addedAt = addedAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
@@ -54,6 +62,7 @@ class XrayServer {
         'addedAt': addedAt.toIso8601String(),
         'ping': ping,
         'group': group,
+        'encrypted': encrypted,
       };
 
   factory XrayServer.fromJson(Map<String, dynamic> json) => XrayServer(
@@ -67,6 +76,7 @@ class XrayServer {
             DateTime.now(),
         ping: (json['ping'] as num?)?.toInt(),
         group: json['group'] as String? ?? '',
+        encrypted: json['encrypted'] as bool? ?? false,
       );
 
   XrayServer copyWith({int? ping, String? group}) => XrayServer(
@@ -79,15 +89,40 @@ class XrayServer {
         addedAt: addedAt,
         ping: ping ?? this.ping,
         group: group ?? this.group,
+        encrypted: encrypted,
       );
 
   String get fullAddress => '$address:$port';
 
+  /// The link to use when EXPORTING / COPYING this server. For an encrypted
+  /// server this re-encrypts the real link back into a `4ws://…` blob so the
+  /// underlying share link is never revealed. Normal servers return the link
+  /// as-is.
+  String get exportLink {
+    if (!encrypted) return link;
+    try {
+      return SecretTextCipher.encodeServerLink(link);
+    } catch (_) {
+      return link; // fail-safe (shouldn't happen)
+    }
+  }
+
   /// Parse a share link into a [XrayServer]. Throws [FormatException] on
   /// unsupported / malformed links.
   factory XrayServer.fromLink(String raw, {String group = ''}) {
-    final link = raw.trim();
-    final lower = link.toLowerCase();
+    var link = raw.trim();
+    var lower = link.toLowerCase();
+
+    // 4win ENCRYPTED link: decrypt to the real share link first, then parse it
+    // normally but flag the resulting server as encrypted so copying re-hides
+    // the real link.
+    var isEncrypted = false;
+    if (lower.startsWith('4ws://')) {
+      link = SecretTextCipher.decodeServerLink(link).trim();
+      lower = link.toLowerCase();
+      isEncrypted = true;
+    }
+
     XrayServer s;
     if (lower.startsWith('vmess://')) {
       s = _parseVmess(link);
@@ -101,7 +136,21 @@ class XrayServer {
       throw const FormatException(
           'Unsupported link. Use vless://, vmess://, trojan:// or ss://');
     }
-    return group.isEmpty ? s : s.copyWith(group: group);
+    if (isEncrypted || group.isNotEmpty) {
+      s = XrayServer(
+        id: s.id,
+        remark: s.remark,
+        link: s.link,
+        protocol: s.protocol,
+        address: s.address,
+        port: s.port,
+        addedAt: s.addedAt,
+        ping: s.ping,
+        group: group.isEmpty ? s.group : group,
+        encrypted: isEncrypted,
+      );
+    }
+    return s;
   }
 
   // Deterministic id derived ONLY from the link, so a server keeps the same id

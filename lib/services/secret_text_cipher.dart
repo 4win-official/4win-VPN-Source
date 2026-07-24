@@ -24,6 +24,53 @@ class SecretTextCipher {
 
   static const String _prefix = '4W~';
 
+  /// URI-style prefix for an ENCRYPTED Xray server link. A single share link
+  /// (vless/vmess/trojan/ss) is encrypted into `4ws://<blob>`. This can be
+  /// imported into the Xray server list exactly like a normal link, but the
+  /// real link stays hidden — copying it back yields the encrypted form again.
+  static const String serverScheme = '4ws://';
+
+  /// True if [text] is (or contains) a 4win encrypted server link.
+  static bool looksLikeServerLink(String text) =>
+      text.trim().toLowerCase().startsWith('4ws://');
+
+  /// Encrypt ONE share link into a `4ws://…` string. The output is decodable
+  /// only inside this app (same embedded key) and looks like gibberish.
+  static String encodeServerLink(String shareLink) {
+    final blob = encode(shareLink.trim());
+    // Strip the human "4W~" prefix — we re-add our own URI scheme instead.
+    final body = blob.startsWith(_prefix) ? blob.substring(_prefix.length) : blob;
+    return serverScheme + body;
+  }
+
+  /// Decrypt a `4ws://…` string back to the original share link. Throws
+  /// [FormatException] if it isn't a valid 4win server link.
+  static String decodeServerLink(String encrypted) {
+    var s = encrypted.trim();
+    final lower = s.toLowerCase();
+    if (!lower.startsWith('4ws://')) {
+      throw const FormatException('Not a 4win server link');
+    }
+    s = s.substring(serverScheme.length);
+    return decode(_prefix + s);
+  }
+
+  /// Encrypt MANY share links (one per line) into `4ws://…` lines. Blank lines
+  /// and lines that are already `4ws://` are passed through unchanged.
+  static String encodeServerLinks(String rawLinks) {
+    final out = <String>[];
+    for (final line in rawLinks.split(RegExp(r'[\r\n]+'))) {
+      final t = line.trim();
+      if (t.isEmpty) continue;
+      if (looksLikeServerLink(t)) {
+        out.add(t); // already encrypted
+      } else {
+        out.add(encodeServerLink(t));
+      }
+    }
+    return out.join('\n');
+  }
+
   // Custom 85-char alphabet (no spaces, no easily-confused chars removed for
   // uniqueness). Deliberately unusual so output looks "weird".
   static const String _alphabet =

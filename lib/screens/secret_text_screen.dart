@@ -16,13 +16,18 @@ class SecretTextScreen extends StatefulWidget {
 
 class _SecretTextScreenState extends State<SecretTextScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 2, vsync: this);
+  late final TabController _tab = TabController(length: 3, vsync: this);
 
   final _plainIn = TextEditingController();
   final _secretOut = TextEditingController();
   final _secretIn = TextEditingController();
   final _plainOut = TextEditingController();
   String? _decodeError;
+
+  // Xray-server encryption tab.
+  final _xrayIn = TextEditingController();
+  final _xrayOut = TextEditingController();
+  int _xrayCount = 0;
 
   static const Color _accent = Color(0xFF6C4CE0); // purple
 
@@ -33,7 +38,28 @@ class _SecretTextScreenState extends State<SecretTextScreen>
     _secretOut.dispose();
     _secretIn.dispose();
     _plainOut.dispose();
+    _xrayIn.dispose();
+    _xrayOut.dispose();
     super.dispose();
+  }
+
+  void _encryptXray() {
+    final raw = _xrayIn.text.trim();
+    if (raw.isEmpty) {
+      setState(() {
+        _xrayOut.text = '';
+        _xrayCount = 0;
+      });
+      return;
+    }
+    // Encrypt each share link line into a 4ws:// blob.
+    final out = SecretTextCipher.encodeServerLinks(raw);
+    final count =
+        out.split('\n').where((e) => e.trim().isNotEmpty).length;
+    setState(() {
+      _xrayOut.text = out;
+      _xrayCount = count;
+    });
   }
 
   void _encrypt() {
@@ -85,9 +111,11 @@ class _SecretTextScreenState extends State<SecretTextScreen>
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white70,
+          isScrollable: true,
           tabs: const [
             Tab(icon: Icon(Icons.lock_outline), text: 'Encrypt'),
             Tab(icon: Icon(Icons.lock_open_outlined), text: 'Decrypt'),
+            Tab(icon: Icon(Icons.dns_outlined), text: 'Xray'),
           ],
         ),
       ),
@@ -96,6 +124,104 @@ class _SecretTextScreenState extends State<SecretTextScreen>
         children: [
           _buildEncryptTab(isDark),
           _buildDecryptTab(isDark),
+          _buildXrayTab(isDark),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildXrayTab(bool isDark) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _accent.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'Turn Xray share links into protected 4win links. The output '
+              '(4ws://…) imports into the Xray server list like any normal '
+              'link and goes to "My Servers", but the real link stays hidden — '
+              'even when copied it stays encrypted, usable only inside 4win VPN.',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white70 : Colors.black87),
+            ),
+          ),
+          const SizedBox(height: 16),
+          _sectionLabel('Xray links', Icons.dns_outlined),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _xrayIn,
+            maxLines: 6,
+            minLines: 4,
+            onChanged: (_) => _encryptXray(),
+            style: const TextStyle(fontFamily: 'monospace'),
+            decoration: _dec(isDark,
+                'vless://…\nvmess://…\ntrojan://…  (one per line)'),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: () => _paste(_xrayIn).then((_) => _encryptXray()),
+                icon: const Icon(Icons.content_paste, size: 18),
+                label: const Text('Paste'),
+              ),
+              const Spacer(),
+              ElevatedButton.icon(
+                onPressed: _encryptXray,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _accent,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.enhanced_encryption),
+                label: const Text('Encrypt'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _sectionLabel(
+              _xrayCount > 0
+                  ? 'Protected links ($_xrayCount)'
+                  : 'Protected links',
+              Icons.shield_outlined),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _xrayOut,
+            maxLines: 6,
+            minLines: 4,
+            readOnly: true,
+            style: const TextStyle(
+                fontFamily: 'monospace', letterSpacing: 0.5),
+            decoration: _dec(isDark, 'Encrypted 4ws:// links appear here…'),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: ElevatedButton.icon(
+              onPressed: () => _copy(_xrayOut.text, 'Protected links'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _accent.withValues(alpha: 0.15),
+                foregroundColor: _accent,
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.copy),
+              label: const Text('Copy'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Import these in Xray → Servers → Add. They cannot be turned back '
+            'into the original link outside the app.',
+            style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white54 : Colors.black54),
+          ),
         ],
       ),
     );

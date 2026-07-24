@@ -1171,15 +1171,37 @@ class VpnProvider with ChangeNotifier {
 
   /// Accepts an http subscription URL OR raw share link(s). Returns true if
   /// anything was added. Refreshes so the new entries show in the list.
-  Future<bool> addXraySubUrl(String url) async {
-    final added = await _xrayService.addSubInput(url);
-    if (added > 0) await refreshXrayFreeGroup(force: true);
+  /// If [name] is given (and the input was a single http subscription URL),
+  /// that custom name is assigned to the subscription right away.
+  Future<bool> addXraySubUrl(String url, {String? name}) async {
+    final trimmed = url.trim();
+    final added = await _xrayService.addSubInput(trimmed);
+    if (added > 0) {
+      // Assign the custom name to the URL BEFORE refreshing, so the servers
+      // are parsed straight into the correctly-named group.
+      if (name != null &&
+          name.trim().isNotEmpty &&
+          trimmed.startsWith('http') &&
+          !trimmed.contains(RegExp(r'[\r\n]'))) {
+        await _xrayService.setSubName(trimmed, name.trim());
+      }
+      await refreshXrayFreeGroup(force: true);
+    }
     return added > 0;
   }
 
   Future<void> removeXraySubUrl(String url) async {
     await _xrayService.removeSubUrl(url);
     await refreshXrayFreeGroup(force: true);
+  }
+
+  /// Change an existing subscription's URL (its custom name is kept). Refreshes
+  /// so the new URL's servers are fetched. Returns false if the new URL is
+  /// invalid or a duplicate.
+  Future<bool> changeXraySubUrl(String oldUrl, String newUrl) async {
+    final ok = await _xrayService.changeSubUrl(oldUrl, newUrl);
+    if (ok) await refreshXrayFreeGroup(force: true);
+    return ok;
   }
 
   /// Refresh the locked free subscription group from the server.
