@@ -137,10 +137,6 @@ class OpenVpnConfig {
       config.contains(RegExp(r'^\s*key\s+\S+', multiLine: true)) ||
       config.contains(RegExp(r'^\s*pkcs12\s+\S+', multiLine: true));
 
-  /// True when the config already declares that no client cert is required.
-  bool get _hasCertNotRequiredDirective => config.contains(
-      RegExp(r'^\s*client-cert-not-required\b', multiLine: true));
-
   /// Normalized config fed to the native OpenVPN core.
   ///
   /// The official OpenVPN Connect app works with so many configs because it
@@ -180,20 +176,11 @@ class OpenVpnConfig {
       }
     }
 
+    // ALWAYS end with a newline. This is what makes the plugin's
+    // `config += "client-cert-not-required"` (appended when certIsRequired ==
+    // false) land on its OWN line instead of being glued onto the last config
+    // line — the difference between a profile that parses and one that stalls.
     if (!normalized.endsWith('\n')) normalized = '$normalized\n';
-
-    // Fix 3 — THE OpenVPN "connects to nothing" fix.
-    //
-    // We pass certIsRequired:true to the plugin so it never appends its own
-    // broken (newline-less) `client-cert-not-required`. But username/password
-    // servers genuinely have NO client certificate, and the core will stall
-    // waiting for one unless we declare it ourselves. So when the config has
-    // no client cert (and hasn't already said so), append the directive
-    // CLEANLY on its own line. This is exactly what the official app relies on
-    // the core defaulting to, made explicit and safe here.
-    if (!hasClientCert && !_hasCertNotRequiredDirective) {
-      normalized = '${normalized}client-cert-not-required\n';
-    }
 
     _normalizedCache = normalized;
     return normalized;

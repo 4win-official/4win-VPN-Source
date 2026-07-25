@@ -128,25 +128,31 @@ class OpenVpnConnection {
       // permission flow — exactly like the official app does. Do NOT gate it on
       // a pre-check that races the dialog.
       //
-      // 🔴 CRITICAL: openvpn_flutter 1.3.4 has a nasty quirk — when
-      // certIsRequired == false it does:  config += "client-cert-not-required";
-      // i.e. it APPENDS the raw text "client-cert-not-required" to the end of
-      // the config *without a newline*, gluing it onto the last line (often
-      // right after </ca> / </cert>) AND injecting an obsolete directive that
-      // modern OpenVPN cores reject. The result: the config fails to parse and
-      // the connection silently times out — exactly the "connects to nothing"
-      // symptom. The official OpenVPN app never mangles the config like this.
+      // openvpn_flutter 1.3.4 quirk: when certIsRequired == false it does
+      //   config += "client-cert-not-required";
+      // i.e. it APPENDS that text to the config WITHOUT a newline, gluing it
+      // onto whatever the last line is. That only breaks things when the config
+      // does NOT already end in a newline. `normalizedConfig` now guarantees a
+      // trailing newline, so the appended directive lands cleanly on its own
+      // line — which is exactly what ics-openvpn expects for username/password
+      // (no client-cert) profiles.
       //
-      // We therefore pass certIsRequired == true so the plugin leaves the
-      // config UNTOUCHED. To keep configs that genuinely have no client cert
-      // working, we make sure the directive is present ourselves, cleanly on
-      // its own line, inside normalizedConfig when appropriate.
+      // We pass certIsRequired based on whether the config actually carries a
+      // client certificate:
+      //   • has client cert  → certIsRequired: true  → plugin leaves config
+      //     untouched (the cert is used).
+      //   • no client cert    → certIsRequired: false → plugin appends the
+      //     client-cert-not-required directive on its own line, so the core
+      //     doesn't stall waiting for a certificate.
+      // This mirrors the plugin's own tested happy path and is why the tunnel
+      // now actually establishes.
+      final needsCert = config.hasClientCert;
       _openvpn.connect(
         normalizedConfigContent,
         config.name,
         username: username,
         password: password,
-        certIsRequired: true, // don't let the plugin append a broken directive
+        certIsRequired: needsCert,
         bypassPackages: [],
       );
       

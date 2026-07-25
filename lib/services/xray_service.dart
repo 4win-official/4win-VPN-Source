@@ -50,12 +50,6 @@ List<XrayServer> _decodeServersIsolate(List<String> raw) {
   return out;
 }
 
-/// Encodes a list of XrayServer objects into JSON strings on a background
-/// isolate for large lists.
-List<String> _encodeServersIsolate(List<XrayServer> servers) {
-  return servers.map((s) => jsonEncode(s.toJson())).toList();
-}
-
 /// Manages persisted Xray servers + the currently selected one, plus the
 /// built-in free subscription group ([XrayServer.freeGroup]) that the user
 /// cannot delete and that we keep refreshed from our subscription URL.
@@ -348,13 +342,13 @@ class XrayServerService {
   Future<bool> saveServers(List<XrayServer> servers) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      // Encode off the UI isolate for large lists.
-      final List<String> encoded;
-      if (servers.length > 60) {
-        encoded = await compute(_encodeServersIsolate, servers);
-      } else {
-        encoded = servers.map((s) => jsonEncode(s.toJson())).toList();
-      }
+      // Encode on the MAIN isolate. Passing a List<XrayServer> to compute()
+      // means the whole object graph has to be copied to a background isolate,
+      // and a custom class that isn't cleanly transferable can make that copy
+      // THROW in a release build — which is exactly why adding servers started
+      // failing. jsonEncode of even a few thousand small maps takes only a few
+      // milliseconds, so doing it here is both safe and fast.
+      final encoded = servers.map((s) => jsonEncode(s.toJson())).toList();
       await prefs.setStringList(_storageKey, encoded);
       return true;
     } catch (e) {
@@ -460,10 +454,10 @@ class XrayServerService {
       );
 
       // Keep everything EXCEPT this group's old servers, then append fresh ones.
+      // Encode on the main isolate — passing XrayServer objects to compute()
+      // can throw in release builds (see saveServers).
       final keep = all.where((s) => s.group != groupKey).toList();
-      final encodedKeep = keep.length > 60
-          ? await compute(_encodeServersIsolate, keep)
-          : keep.map((s) => jsonEncode(s.toJson())).toList();
+      final encodedKeep = keep.map((s) => jsonEncode(s.toJson())).toList();
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(_storageKey, [...encodedKeep, ...encodedGroup]);
@@ -565,10 +559,10 @@ class XrayServerService {
               _ParseJob(bodies, groups, oldPings, maxServersPerGroup),
             );
 
-      // Encode cached servers (from failed fetches) so they persist.
-      final encodedCached = cachedFailed.length > 60
-          ? await compute(_encodeServersIsolate, cachedFailed)
-          : cachedFailed.map((s) => jsonEncode(s.toJson())).toList();
+      // Encode cached servers (from failed fetches) so they persist. Encoded
+      // on the main isolate (see saveServers for why not compute()).
+      final encodedCached =
+          cachedFailed.map((s) => jsonEncode(s.toJson())).toList();
 
       // Keep user-pasted links group + individual user servers as-is. In
       // builtInOnly mode, ALSO keep every user-subscription group untouched
@@ -578,9 +572,7 @@ class XrayServerService {
         if (builtInOnly && !XrayServer.isBuiltInGroup(s.group)) return true;
         return false;
       }).toList();
-      final encodedKeep = keep.length > 60
-          ? await compute(_encodeServersIsolate, keep)
-          : keep.map((s) => jsonEncode(s.toJson())).toList();
+      final encodedKeep = keep.map((s) => jsonEncode(s.toJson())).toList();
 
       // 3) Store the merged encoded list directly.
       await prefs.setStringList(
