@@ -964,9 +964,19 @@ class VpnProvider with ChangeNotifier {
           _stopDurationTimer();
           _stopPingTimer();
           notifyListeners();
-        } else if (stage == VPNStage.connecting || 
-                   stage == VPNStage.prepare || 
-                   stage == VPNStage.authenticating) {
+        } else if (stage == VPNStage.connecting ||
+                   stage == VPNStage.prepare ||
+                   stage == VPNStage.authenticating ||
+                   stage == VPNStage.authentication ||
+                   stage == VPNStage.wait_connection ||
+                   stage == VPNStage.vpn_generate_config ||
+                   stage == VPNStage.get_config ||
+                   stage == VPNStage.tcp_connect ||
+                   stage == VPNStage.udp_connect ||
+                   stage == VPNStage.assign_ip ||
+                   stage == VPNStage.resolve) {
+          // All of these are legitimate intermediate stages of a real OpenVPN
+          // handshake — keep the UI in "connecting" until we reach connected.
           _status = VpnConnectionStatus.connecting;
           notifyListeners();
         }
@@ -1468,7 +1478,14 @@ class VpnProvider with ChangeNotifier {
   Future<void> selectNextFreeServer() async {
     final group = _selectedGroupServers();
     if (group.isEmpty) return;
-    final curId = _selectedXrayServer?.id;
+    // The reference "current" server must be the one that is ACTUALLY active,
+    // not just `_selectedXrayServer`. When a whole group is selected, the
+    // connect path picks the fastest server into `_activeXrayServer` while
+    // `_selectedXrayServer` stays null — so using only `_selectedXrayServer?.id`
+    // made the first "Next" tap start from index -1 → 0, i.e. re-select the
+    // server we were already on (the classic "first Next does nothing" bug).
+    // Prefer the active server's id, then the selected one.
+    final curId = _activeXrayServer?.id ?? _selectedXrayServer?.id;
     var idx = group.indexWhere((s) => s.id == curId);
     idx = (idx + 1) % group.length; // wrap around; -1 -> 0
     final next = group[idx];

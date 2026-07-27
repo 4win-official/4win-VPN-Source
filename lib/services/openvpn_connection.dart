@@ -8,7 +8,17 @@ class OpenVpnConnection {
   static bool _initialized = false;
   static VPNStage? _currentStage;
   static String? _connectedConfigName;
-  
+
+  /// Timestamp of the last `connect()` request. Used to swallow the SPURIOUS
+  /// `disconnected` stage the native core emits while it is still preparing /
+  /// showing the VPN-consent dialog — that early `disconnected` was flipping the
+  /// UI back to "disconnected" the instant the user tapped connect, so the
+  /// tunnel never appeared to start. We ignore `disconnected` for a short grace
+  /// window right after a connect request UNLESS we had already reached a real
+  /// connected state.
+  static DateTime? _connectRequestedAt;
+  static bool _sawConnected = false;
+
   /// Callback for status changes
   static void Function(VPNStage?)? onStageChanged;
 
@@ -39,9 +49,40 @@ class OpenVpnConnection {
         },
         onVpnStageChanged: (VPNStage stage, String message) {
           if (kDebugMode) {
-            debugPrint('🔵 OpenVPN Stage: $stage');
-            debugPrint('   Message: $message');
+            debugPrint('🔵 OpenVPN Stage: $stage — $message');
           }
+
+          // 🔴 CRITICAL: filter the SPURIOUS early `disconnected`.
+          //
+          // The native core emits `disconnected` (its DEFAULT status) as soon as
+          // the engine is queried — which happens right when we call connect()
+          // and while the system VPN-consent dialog is still on screen, BEFORE
+          // the tunnel starts. Passing that through flipped our provider back to
+          // "disconnected" instantly, so the connection appeared to never start.
+          //
+          // Rule: within a grace window after a connect request, ignore
+          // `disconnected` (and `exiting`/`idle`) unless we had already reached
+          // `connected`. Real connect stages (connecting/authenticating/
+          // connected/error/denied) always pass through.
+          if (stage == VPNStage.disconnected ||
+              stage == VPNStage.exiting) {
+            final reqAt = _connectRequestedAt;
+            final inGrace = reqAt != null &&
+                DateTime.now().difference(reqAt) <
+                    const Duration(seconds: 12);
+            if (inGrace && !_sawConnected) {
+              if (kDebugMode) {
+                debugPrint(
+                    '   ↳ ignoring spurious "$stage" during connect grace window');
+              }
+              return; // do NOT propagate — this is the consent/prepare noise
+            }
+          }
+
+          if (stage == VPNStage.connected) {
+            _sawConnected = true;
+          }
+
           _currentStage = stage;
           if (onStageChanged != null) {
             onStageChanged!(stage);
@@ -72,6 +113,12 @@ class OpenVpnConnection {
   /// Connect to OpenVPN server
   static Future<bool> connect(OpenVpnConfig config) async {
     try {
+      // Open the grace window BEFORE initialize(), because initialize() itself
+      // queries the engine and emits a `disconnected` default status that must
+      // also be swallowed.
+      _connectRequestedAt = DateTime.now();
+      _sawConnected = false;
+
       await initialize();
 
       // Parse ONCE (the model caches these) — never in a rebuild path.
@@ -146,8 +193,17 @@ class OpenVpnConnection {
       //     doesn't stall waiting for a certificate.
       // This mirrors the plugin's own tested happy path and is why the tunnel
       // now actually establishes.
+      // Refresh the grace-window start right before issuing the actual connect
+      // (initialize() above may have taken a moment).
+      _connectRequestedAt = DateTime.now();
+      _sawConnected = false;
+
       final needsCert = config.hasClientCert;
-      _openvpn.connect(
+
+      // AWAIT the native connect so a real parse/checkProfile error surfaces
+      // here as an exception instead of becoming a swallowed unhandled async
+      // error (which is why failures were previously invisible).
+      await _openvpn.connect(
         normalizedConfigContent,
         config.name,
         username: username,
@@ -155,17 +211,22 @@ class OpenVpnConnection {
         certIsRequired: needsCert,
         bypassPackages: [],
       );
-      
+
       _connectedConfigName = config.name;
-      
+
       if (kDebugMode) {
         debugPrint('✅ OpenVPN connect command sent successfully');
       }
-      
+
       return true;
     } catch (e) {
+      // A real native failure (bad config, checkProfile error, etc.) lands here.
       if (kDebugMode) {
         debugPrint('❌ Failed to connect OpenVPN: $e');
+      }
+      _connectRequestedAt = null;
+      if (onStageChanged != null) {
+        onStageChanged!(VPNStage.error);
       }
       return false;
     }
@@ -185,6 +246,8 @@ class OpenVpnConnection {
       _openvpn.disconnect();
       _connectedConfigName = null;
       _currentStage = null;
+      _connectRequestedAt = null;
+      _sawConnected = false;
       
       if (kDebugMode) {
         debugPrint('✅ OpenVPN disconnected successfully');

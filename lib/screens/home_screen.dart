@@ -32,6 +32,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final UpdateService _updateService = UpdateService();
 
+  /// آیا الان در حال بررسی دستی آپدیت هستیم (برای نمایش لودینگ روی آیکون)
+  bool _checkingUpdate = false;
+
   @override
   void initState() {
     super.initState();
@@ -78,6 +81,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     } catch (_) {
       // خطا در بررسی آپدیت را بی‌صدا رد کن - نباید تجربه کاربر مختل شود
+    }
+  }
+
+  /// بررسی دستی آپدیت با زدن آیکون بروزرسانی زیر نوشته‌ی «4win VPN».
+  /// اگر نسخه جدیدی باشد دیالوگ آپدیت نمایش داده می‌شود، در غیر این صورت پیام
+  /// «شما آخرین نسخه را دارید» نشان داده می‌شود.
+  Future<void> _checkForUpdateManually() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      final updateInfo = await _updateService.checkForUpdate();
+      final currentVersion = await _updateService.getCurrentVersion();
+      if (!mounted) return;
+
+      if (updateInfo != null) {
+        await UpdateDialog.show(
+          context,
+          updateInfo: updateInfo,
+          currentVersion: currentVersion,
+        );
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('You are on the latest version (v$currentVersion)'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not check for updates. Try again later.'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
     }
   }
 
@@ -176,6 +220,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(width: 3),
                     Text(
                       'Quick Guide',
+                      style: TextStyle(
+                        color: iconColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Check for update — آیکون بروزرسانی زیر نوشته‌ی «4win VPN».
+            // با زدن روی آن، اپ آخرین ریلیز گیت‌هاب را بررسی می‌کند.
+            InkWell(
+              onTap: _checkingUpdate ? null : _checkForUpdateManually,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 1, bottom: 1, right: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _checkingUpdate
+                        ? SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(iconColor),
+                            ),
+                          )
+                        : Icon(
+                            Icons.system_update,
+                            color: iconColor,
+                            size: 14,
+                          ),
+                    const SizedBox(width: 3),
+                    Text(
+                      _checkingUpdate ? 'Checking…' : 'Check for update',
                       style: TextStyle(
                         color: iconColor,
                         fontSize: 11,
