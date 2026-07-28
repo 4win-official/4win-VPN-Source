@@ -175,30 +175,27 @@ class OpenVpnConnection {
       // permission flow — exactly like the official app does. Do NOT gate it on
       // a pre-check that races the dialog.
       //
-      // openvpn_flutter 1.3.4 quirk: when certIsRequired == false it does
-      //   config += "client-cert-not-required";
-      // i.e. it APPENDS that text to the config WITHOUT a newline, gluing it
-      // onto whatever the last line is. That only breaks things when the config
-      // does NOT already end in a newline. `normalizedConfig` now guarantees a
-      // trailing newline, so the appended directive lands cleanly on its own
-      // line — which is exactly what ics-openvpn expects for username/password
-      // (no client-cert) profiles.
+      // ── The decisive change (learning from real ics-openvpn behaviour) ──
       //
-      // We pass certIsRequired based on whether the config actually carries a
-      // client certificate:
-      //   • has client cert  → certIsRequired: true  → plugin leaves config
-      //     untouched (the cert is used).
-      //   • no client cert    → certIsRequired: false → plugin appends the
-      //     client-cert-not-required directive on its own line, so the core
-      //     doesn't stall waiting for a certificate.
-      // This mirrors the plugin's own tested happy path and is why the tunnel
-      // now actually establishes.
-      // Refresh the grace-window start right before issuing the actual connect
-      // (initialize() above may have taken a moment).
+      // openvpn_flutter 1.3.4 has this in connect():
+      //     if (!certIsRequired) config += "client-cert-not-required";
+      // It APPENDS that string to the raw config with NO newline. Worse, that
+      // directive is UNKNOWN to ics-openvpn's ConfigParser, so at best it's
+      // ignored and at worst it corrupts the final line (e.g. gluing onto the
+      // closing tag of an inline <tls-crypt>/<ca> block), which makes the parser
+      // build a profile with no enabled connection → checkProfile returns
+      // `remote_no_server_selected` → the native side throws and NOTHING
+      // connects. That exactly matches "works in the official app, not in ours".
+      //
+      // The official OpenVPN app feeds the config to the core VERBATIM. The auth
+      // type (user/pass vs cert) is derived by the ConfigParser FROM THE CONFIG
+      // ITSELF (`auth-user-pass` → user/pass; `<cert>`/`<key>` → cert), NOT from
+      // this flag. So the correct, safe behaviour is to ALWAYS pass
+      // certIsRequired: true — that is the ONLY value for which the plugin
+      // leaves the config completely untouched. We then feed a clean, verbatim
+      // config and let the core parse the real auth type. This is the fix.
       _connectRequestedAt = DateTime.now();
       _sawConnected = false;
-
-      final needsCert = config.hasClientCert;
 
       // AWAIT the native connect so a real parse/checkProfile error surfaces
       // here as an exception instead of becoming a swallowed unhandled async
@@ -208,7 +205,7 @@ class OpenVpnConnection {
         config.name,
         username: username,
         password: password,
-        certIsRequired: needsCert,
+        certIsRequired: true, // ALWAYS true → plugin never mutates the config
         bypassPackages: [],
       );
 

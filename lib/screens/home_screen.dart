@@ -184,18 +184,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         backgroundColor: Colors.transparent, // شفاف - یکپارچه
         elevation: 0,
-        title: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '4win VPN',
-              style: TextStyle(
-                color: textColor,
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
+        // عنوان به همراه دو دکمه‌ی «آموزش» و «بروزرسانی» زیرش قرار می‌گیرد،
+        // پس به ارتفاع بیشتری نیاز داریم تا «4win VPN» زیادی بالا نرود و با
+        // نوار وضعیت هم‌پوشانی نکند.
+        toolbarHeight: 96,
+        title: Padding(
+          // چون extendBodyBehindAppBar روشن است، کمی از بالا فاصله می‌دهیم تا
+          // عنوان درست زیر نوار وضعیت بنشیند، نه چسبیده به بالای صفحه.
+          padding: const EdgeInsets.only(top: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '4win VPN',
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
+              const SizedBox(height: 4),
             // Help / Guide — زیر نوشته‌ی «4win VPN» قرار گرفته است.
             InkWell(
               onTap: () {
@@ -268,7 +278,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
-          ],
+            ],
+          ),
         ),
         actions: [
           // Secret Text tool — encode/decode text so only 4win VPN can read it.
