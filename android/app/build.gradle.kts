@@ -58,4 +58,11 @@ dependencies {
     // The real Xray core, identical to the one used by v2rayNG
     // (AndroidLibXrayLite / libv2ray.aar). Bundles tun2socks + geoip/geosite.
     implementation(files("libs/libv2ray.aar"))
+
+    // Same OpenVPN core the openvpn_flutter plugin uses. We reference it
+    // directly so MainActivity can run ics-openvpn's ConfigParser/checkProfile
+    // to surface the REAL reason a config is rejected (the plugin's own connect
+    // path swallows that error). compileOnly is enough since the plugin already
+    // bundles this AAR at runtime — this avoids duplicate classes.
+    compileOnly("com.github.nizwar:openvpn_library:b3941ef040")
 }

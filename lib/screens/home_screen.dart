@@ -184,101 +184,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         backgroundColor: Colors.transparent, // شفاف - یکپارچه
         elevation: 0,
-        // عنوان به همراه دو دکمه‌ی «آموزش» و «بروزرسانی» زیرش قرار می‌گیرد،
-        // پس به ارتفاع بیشتری نیاز داریم تا «4win VPN» زیادی بالا نرود و با
-        // نوار وضعیت هم‌پوشانی نکند.
-        toolbarHeight: 96,
-        title: Padding(
-          // چون extendBodyBehindAppBar روشن است، کمی از بالا فاصله می‌دهیم تا
-          // عنوان درست زیر نوار وضعیت بنشیند، نه چسبیده به بالای صفحه.
-          padding: const EdgeInsets.only(top: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '4win VPN',
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-            // Help / Guide — زیر نوشته‌ی «4win VPN» قرار گرفته است.
-            InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const GuideScreen(),
-                  ),
-                );
-              },
-              borderRadius: BorderRadius.circular(6),
-              child: Padding(
-                padding: const EdgeInsets.only(top: 1, bottom: 1, right: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.help_outline,
-                      color: iconColor,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      'Quick Guide',
-                      style: TextStyle(
-                        color: iconColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // Check for update — آیکون بروزرسانی زیر نوشته‌ی «4win VPN».
-            // با زدن روی آن، اپ آخرین ریلیز گیت‌هاب را بررسی می‌کند.
-            InkWell(
-              onTap: _checkingUpdate ? null : _checkForUpdateManually,
-              borderRadius: BorderRadius.circular(6),
-              child: Padding(
-                padding: const EdgeInsets.only(top: 1, bottom: 1, right: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _checkingUpdate
-                        ? SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(iconColor),
-                            ),
-                          )
-                        : Icon(
-                            Icons.system_update,
-                            color: iconColor,
-                            size: 14,
-                          ),
-                    const SizedBox(width: 3),
-                    Text(
-                      _checkingUpdate ? 'Checking…' : 'Check for update',
-                      style: TextStyle(
-                        color: iconColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            ],
+        title: Text(
+          '4win VPN',
+          style: TextStyle(
+            color: textColor,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
           ),
         ),
         actions: [
@@ -409,6 +320,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 
+                // دکمه‌های عمودی سمت چپ (Quick Guide + Check for update) —
+                // زیر نوار عنوان، در ناحیه‌ای که کاربر مشخص کرد.
+                Positioned(
+                  top: kToolbarHeight + MediaQuery.of(context).padding.top + 8,
+                  left: 12,
+                  child: _buildTopLeftActions(iconColor),
+                ),
+
                 // محتوای اصلی
                 Column(
                   children: [
@@ -994,6 +913,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// The ping row under the timer. For Xray this is a tappable button
   /// (tap-to-ping); the first time it shows "click to ping". Every subsequent
   /// tap runs a fresh measurement. Other protocols keep the auto display.
+  /// دو دکمه‌ی «Quick Guide» و «Check for update» به‌صورت عمودی، سمت چپ صفحه،
+  /// زیر نوار عنوان (همان‌جایی که کاربر با خط قرمز مشخص کرد).
+  Widget _buildTopLeftActions(Color iconColor) {
+    Widget item({
+      required Widget icon,
+      required String label,
+      required VoidCallback? onTap,
+    }) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              icon,
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: iconColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        item(
+          icon: Icon(Icons.help_outline, color: iconColor, size: 16),
+          label: 'Quick Guide',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const GuideScreen()),
+            );
+          },
+        ),
+        item(
+          icon: _checkingUpdate
+              ? SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(iconColor),
+                  ),
+                )
+              : Icon(Icons.system_update, color: iconColor, size: 16),
+          label: _checkingUpdate ? 'Checking…' : 'Check for update',
+          onTap: _checkingUpdate ? null : _checkForUpdateManually,
+        ),
+      ],
+    );
+  }
+
   Widget _buildPingIndicator(VpnProvider provider, bool isDark) {
     final ping = provider.currentPing;
 

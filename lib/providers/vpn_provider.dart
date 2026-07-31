@@ -997,7 +997,10 @@ class VpnProvider with ChangeNotifier {
       if (!connected) {
         connectionTimeoutTimer?.cancel();
         _status = VpnConnectionStatus.error;
-        _errorMessage = 'Failed to establish OpenVPN connection. Please check your config and try again.';
+        final nativeErr = OpenVpnConnection.lastError;
+        _errorMessage = (nativeErr != null && nativeErr.isNotEmpty)
+            ? 'OpenVPN error: $nativeErr'
+            : 'Failed to establish OpenVPN connection. Please check your config and try again.';
         notifyListeners();
       }
     } on TimeoutException {

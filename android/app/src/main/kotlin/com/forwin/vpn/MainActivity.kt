@@ -10,6 +10,9 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import id.laskarmedia.openvpn_flutter.OpenVPNFlutterPlugin
+import de.blinkt.openvpn.VpnProfile
+import de.blinkt.openvpn.core.ConfigParser
+import java.io.StringReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -20,6 +23,7 @@ class MainActivity: FlutterActivity() {
     private val DNS_CHANNEL = "com.forwin.vpn/dns"
     private val XRAY_CHANNEL = "com.forwin.vpn/xray"
     private val IMPORT_CHANNEL = "com.forwin.vpn/import"
+    private val OPENVPN_CHANNEL = "com.forwin.vpn/openvpn"
     private val VPN_REQUEST_CODE = 100
     private val XRAY_REQUEST_CODE = 101
 
@@ -39,7 +43,60 @@ class MainActivity: FlutterActivity() {
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
+
+        // ── OpenVPN validation channel ──────────────────────────────────────
+        // The openvpn_flutter plugin (via VPNHelper.connect) catches the
+        // RemoteException thrown by OpenVpnApi.startVpn when the config fails
+        // ics-openvpn's parse/checkProfile, and SILENTLY swallows it
+        // (e.printStackTrace()). So a config that fails to parse produces no
+        // stage event and no error — the tunnel just never starts. That is the
+        // real reason OpenVPN "does nothing".
+        //
+        // Here we run the EXACT same pipeline the core uses
+        // (ConfigParser.parseConfig → convertProfile → checkProfile) up-front
+        // and return the real error string to Dart, so we can (a) see exactly
+        // why a config is rejected and (b) show the user a meaningful message
+        // instead of a silent failure.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OPENVPN_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "validateConfig" -> {
+                        val config = call.argument<String>("config") ?: ""
+                        try {
+                            val parser = ConfigParser()
+                            parser.parseConfig(StringReader(config))
+                            val profile: VpnProfile = parser.convertProfile()
+                            profile.mName = call.argument<String>("name") ?: "4win"
+                            val err = profile.checkProfile(applicationContext)
+                            // R.string.no_error_found → returns that resource id
+                            // when the profile is valid.
+                            val okId = resources.getIdentifier(
+                                "no_error_found", "string", packageName
+                            )
+                            val map = HashMap<String, Any?>()
+                            if (err == okId || okId == 0 && err == 0) {
+                                map["ok"] = true
+                            } else {
+                                map["ok"] = false
+                                map["error"] = try {
+                                    getString(err)
+                                } catch (e: Exception) {
+                                    "profile_error_$err"
+                                }
+                                map["authType"] = profile.mAuthenticationType
+                            }
+                            result.success(map)
+                        } catch (e: Exception) {
+                            val map = HashMap<String, Any?>()
+                            map["ok"] = false
+                            map["error"] = "parse_error: ${e.message}"
+                            result.success(map)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         // DNS Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DNS_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {

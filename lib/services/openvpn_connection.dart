@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:openvpn_flutter/openvpn_flutter.dart';
 import '../models/openvpn_config.dart';
 
@@ -18,6 +19,16 @@ class OpenVpnConnection {
   /// connected state.
   static DateTime? _connectRequestedAt;
   static bool _sawConnected = false;
+
+  /// Native channel to validate an OpenVPN config with the REAL ics-openvpn
+  /// parser/checkProfile before we hand it to the plugin (whose connect path
+  /// silently swallows parse errors). Lets us surface the actual reason a
+  /// config is rejected instead of a silent no-op.
+  static const MethodChannel _nativeChannel =
+      MethodChannel('com.forwin.vpn/openvpn');
+
+  /// The last real error reported by native validation (for the UI/logs).
+  static String? lastError;
 
   /// Callback for status changes
   static void Function(VPNStage?)? onStageChanged;
@@ -196,6 +207,42 @@ class OpenVpnConnection {
       // config and let the core parse the real auth type. This is the fix.
       _connectRequestedAt = DateTime.now();
       _sawConnected = false;
+
+      // ── Pre-flight: validate the config with the REAL native parser ──
+      // This runs ConfigParser.parseConfig → convertProfile → checkProfile
+      // exactly like the core does at connect time. If it fails we now SEE the
+      // real reason (e.g. remote_no_server_selected, missing_tlsauth, a parse
+      // error) instead of the plugin swallowing it. We surface it and abort
+      // cleanly rather than firing a connect that will silently do nothing.
+      lastError = null;
+      try {
+        final res = await _nativeChannel.invokeMethod<dynamic>(
+          'validateConfig',
+          {'config': normalizedConfigContent, 'name': config.name},
+        );
+        if (res is Map && res['ok'] != true) {
+          final err = (res['error'] ?? 'unknown').toString();
+          lastError = err;
+          if (kDebugMode) {
+            debugPrint('❌ OpenVPN config rejected by native parser: $err '
+                '(authType=${res['authType']})');
+          }
+          // Do NOT abort on validation failure alone — some builds return a
+          // benign resource-id mismatch. We only LOG it and continue so a
+          // genuinely-valid config still connects. But if it is a hard parse
+          // error we abort, because that will 100% fail natively.
+          if (err.startsWith('parse_error')) {
+            if (onStageChanged != null) onStageChanged!(VPNStage.error);
+            return false;
+          }
+        } else if (kDebugMode) {
+          debugPrint('✅ OpenVPN config passed native validation');
+        }
+      } on MissingPluginException {
+        // Older build without the native validator — just continue.
+      } catch (e) {
+        if (kDebugMode) debugPrint('⚠️ OpenVPN native validate failed: $e');
+      }
 
       // AWAIT the native connect so a real parse/checkProfile error surfaces
       // here as an exception instead of becoming a swallowed unhandled async
