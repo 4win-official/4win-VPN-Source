@@ -323,8 +323,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 // دکمه‌های عمودی سمت چپ (Quick Guide + Check for update) —
                 // زیر نوار عنوان، در ناحیه‌ای که کاربر مشخص کرد.
                 Positioned(
-                  top: kToolbarHeight + MediaQuery.of(context).padding.top + 8,
-                  left: 12,
+                  top: MediaQuery.of(context).padding.top + kToolbarHeight - 4,
+                  left: 8,
                   child: _buildTopLeftActions(iconColor),
                 ),
 
@@ -918,30 +918,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildTopLeftActions(Color iconColor) {
     Widget item({
       required Widget icon,
-      required String label,
+      required String tooltip,
       required VoidCallback? onTap,
     }) {
-      return InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              icon,
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  color: iconColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
+      return IconButton(
+        icon: icon,
+        tooltip: tooltip,
+        color: iconColor,
+        iconSize: 22,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.all(4),
+        constraints: const BoxConstraints(),
+        onPressed: onTap,
       );
     }
 
@@ -950,8 +938,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         item(
-          icon: Icon(Icons.help_outline, color: iconColor, size: 16),
-          label: 'Quick Guide',
+          icon: Icon(Icons.help_outline, color: iconColor, size: 22),
+          tooltip: 'Quick Guide',
           onTap: () {
             Navigator.push(
               context,
@@ -959,18 +947,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             );
           },
         ),
+        const SizedBox(height: 6),
         item(
           icon: _checkingUpdate
               ? SizedBox(
-                  width: 16,
-                  height: 16,
+                  width: 22,
+                  height: 22,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
                     valueColor: AlwaysStoppedAnimation<Color>(iconColor),
                   ),
                 )
-              : Icon(Icons.system_update, color: iconColor, size: 16),
-          label: _checkingUpdate ? 'Checking…' : 'Check for update',
+              : Icon(Icons.system_update, color: iconColor, size: 22),
+          tooltip: 'Check for update',
           onTap: _checkingUpdate ? null : _checkForUpdateManually,
         ),
       ],

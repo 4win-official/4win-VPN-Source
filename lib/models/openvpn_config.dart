@@ -159,6 +159,33 @@ class OpenVpnConfig {
       (m) => '${m.group(1)}tcp-client',
     );
 
+    // Fix 1b: The official OpenVPN app connects even when a config references a
+    // client cert/key FILE that isn't present (it shows a warning and proceeds).
+    // ics-openvpn instead rejects such a profile with `missing_certificates`
+    // (auth type becomes USERPASS_CERTIFICATES=5 but the file paths are empty),
+    // so the tunnel never starts. To mirror the official app, strip FILE-based
+    // `cert <file>` / `key <file>` / `pkcs12 <file>` directives. Inline
+    // `<cert>` / `<key>` / `<pkcs12>` blocks (which carry a real certificate)
+    // are left untouched. This makes the profile parse as pure user/pass
+    // (auth type USERPASS=3), which passes checkProfile and connects.
+    final bool hasInlineCert = normalized.contains('<cert>') ||
+        normalized.contains('<key>') ||
+        normalized.contains('<pkcs12>');
+    if (!hasInlineCert) {
+      normalized = normalized.replaceAll(
+        RegExp(r'^\s*cert\s+\S.*$', multiLine: true),
+        '',
+      );
+      normalized = normalized.replaceAll(
+        RegExp(r'^\s*key\s+\S.*$', multiLine: true),
+        '',
+      );
+      normalized = normalized.replaceAll(
+        RegExp(r'^\s*pkcs12\s+\S.*$', multiLine: true),
+        '',
+      );
+    }
+
     // Fix 2: add credentials only if provided and config has none of its own.
     if (!requiresAuth) {
       final user = effectiveUsername;
