@@ -213,6 +213,29 @@ class OpenVpnConfig {
     return normalized;
   }
 
+  /// A copy of the normalized config with EVERY client-certificate artifact
+  /// removed — inline `<cert>` / `<key>` / `<pkcs12>` blocks AND file-based
+  /// `cert` / `key` / `pkcs12` directives. Used when the user chooses to
+  /// "connect anyway" after a certificate warning (mirroring the official
+  /// OpenVPN app): the profile then parses as pure user/pass (auth type 3),
+  /// passing ics-openvpn's checkProfile so the tunnel actually starts.
+  String get configWithoutClientCert {
+    String c = normalizedConfig;
+    // Remove inline blocks (multiline).
+    for (final tag in ['cert', 'key', 'pkcs12']) {
+      c = c.replaceAll(
+        RegExp('<$tag>.*?</$tag>\\s*', dotAll: true),
+        '',
+      );
+    }
+    // Remove file-based directives (whole line).
+    c = c.replaceAll(RegExp(r'^\s*cert\s+\S.*$', multiLine: true), '');
+    c = c.replaceAll(RegExp(r'^\s*key\s+\S.*$', multiLine: true), '');
+    c = c.replaceAll(RegExp(r'^\s*pkcs12\s+\S.*$', multiLine: true), '');
+    if (!c.endsWith('\n')) c = '$c\n';
+    return c;
+  }
+
   /// Get server address from config
   String? get serverAddress => _p['server'];
 

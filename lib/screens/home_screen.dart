@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/vpn_provider.dart';
 import '../providers/theme_provider.dart';
+import '../services/openvpn_connection.dart';
 import '../widgets/snow_animation.dart';
 import '../widgets/pixel_effect.dart';
 import '../widgets/rain_animation.dart';
@@ -323,8 +324,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 // دکمه‌های عمودی سمت چپ (Quick Guide + Check for update) —
                 // زیر نوار عنوان، در ناحیه‌ای که کاربر مشخص کرد.
                 Positioned(
-                  top: MediaQuery.of(context).padding.top + kToolbarHeight - 4,
-                  left: 8,
+                  top: MediaQuery.of(context).padding.top + kToolbarHeight - 8,
+                  left: 14,
                   child: _buildTopLeftActions(iconColor),
                 ),
 
@@ -1133,7 +1134,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _handleConnectTap(BuildContext context, VpnProvider provider) {
+  void _handleConnectTap(BuildContext context, VpnProvider provider) async {
     if (provider.isConnecting) {
       // وقتی در حال اتصال است، اگر کاربر تپ کند، قطع شود
       provider.disconnect();
@@ -1142,9 +1143,55 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (provider.isConnected) {
       provider.disconnect();
-    } else {
-      provider.connect();
+      return;
     }
+
+    // OpenVPN: before connecting, check whether the config has a client
+    // certificate problem. If it does, ask the user (like the official OpenVPN
+    // app) whether to connect anyway; on confirm we connect while bypassing the
+    // certificate requirement.
+    if (provider.selectedProtocol == 'openvpn' &&
+        provider.selectedOpenVpnConfig != null) {
+      final hasCertIssue = await OpenVpnConnection.precheckCertIssue(
+        provider.selectedOpenVpnConfig!,
+      );
+      if (!mounted) return;
+      if (hasCertIssue) {
+        final proceed = await _showCertWarningDialog(context);
+        if (proceed != true) return;
+        provider.connect(forceBypassCert: true);
+        return;
+      }
+    }
+
+    provider.connect();
+  }
+
+  Future<bool?> _showCertWarningDialog(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        icon: const Icon(Icons.verified_user_outlined,
+            color: Colors.orangeAccent, size: 36),
+        title: const Text('Certificate problem'),
+        content: const Text(
+          'This config has a client-certificate issue. Do you still want to '
+          'connect anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Connect anyway'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _handleLongPress(BuildContext context) async {

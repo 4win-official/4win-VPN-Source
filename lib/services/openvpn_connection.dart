@@ -121,8 +121,39 @@ class OpenVpnConnection {
     }
   }
   
-  /// Connect to OpenVPN server
-  static Future<bool> connect(OpenVpnConfig config) async {
+  /// Pre-flight check that runs the REAL native ics-openvpn parser
+  /// (ConfigParser → convertProfile → checkProfile) and reports whether the
+  /// config would be rejected due to a client-certificate problem — the same
+  /// situation where the official OpenVPN app pops up a "connect anyway?"
+  /// warning. Returns true when a cert-related error is detected.
+  static Future<bool> precheckCertIssue(OpenVpnConfig config) async {
+    try {
+      await initialize();
+      final res = await _nativeChannel.invokeMethod<dynamic>(
+        'validateConfig',
+        {'config': config.normalizedConfig, 'name': config.name},
+      );
+      if (res is Map && res['ok'] != true) {
+        final err = (res['error'] ?? '').toString().toLowerCase();
+        return err.contains('cert') || err.contains('certificate');
+      }
+    } catch (_) {
+      // If we can't validate (older build / plugin missing), assume no issue
+      // and let the normal connect path run.
+    }
+    return false;
+  }
+
+  /// Connect to OpenVPN server.
+  ///
+  /// [forceBypassCert] — when true (the user pressed "connect anyway" after a
+  /// certificate warning) every client-cert artifact is stripped from the
+  /// config and the core is told the client cert is not required, so it
+  /// connects with just username/password — exactly like the official app.
+  static Future<bool> connect(
+    OpenVpnConfig config, {
+    bool forceBypassCert = false,
+  }) async {
     try {
       // Open the grace window BEFORE initialize(), because initialize() itself
       // queries the engine and emits a `disconnected` default status that must
@@ -135,7 +166,9 @@ class OpenVpnConnection {
       // Parse ONCE (the model caches these) — never in a rebuild path.
       final username = config.effectiveUsername;
       final password = config.effectivePassword;
-      final normalizedConfigContent = config.normalizedConfig;
+      final normalizedConfigContent = forceBypassCert
+          ? config.configWithoutClientCert
+          : config.normalizedConfig;
 
       // Basic sanity check: a config with no `remote` line can never connect
       // and can wedge the native core. Fail fast with a clear message instead
@@ -252,7 +285,10 @@ class OpenVpnConnection {
         config.name,
         username: username,
         password: password,
-        certIsRequired: true, // ALWAYS true → plugin never mutates the config
+        // When the user chose to connect despite the cert warning we also tell
+        // the plugin the client cert is NOT required (appends
+        // client-cert-not-required), reinforcing the stripped config.
+        certIsRequired: !forceBypassCert,
         bypassPackages: [],
       );
 

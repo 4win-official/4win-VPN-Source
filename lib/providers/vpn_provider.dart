@@ -608,7 +608,10 @@ class VpnProvider with ChangeNotifier {
   }
 
   /// Connect to selected or best server (one by one - RESTORED WORKING VERSION)
-  Future<void> connect() async {
+  ///
+  /// [forceBypassCert] — set when the user confirmed "connect anyway" after an
+  /// OpenVPN certificate warning; passed through to the OpenVPN connect path.
+  Future<void> connect({bool forceBypassCert = false}) async {
     if (_status == VpnConnectionStatus.connecting || _status == VpnConnectionStatus.connected) {
       return;
     }
@@ -624,7 +627,7 @@ class VpnProvider with ChangeNotifier {
       return;
     } else if (_selectedProtocol == 'openvpn') {
       // ✅ OpenVPN: Use selected OpenVPN config
-      await _connectOpenVpn();
+      await _connectOpenVpn(forceBypassCert: forceBypassCert);
       return;
     } else if (_selectedProtocol == 'slowdns') {
       // ✅ Slow DNS: Use selected Slow DNS config
@@ -884,7 +887,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   /// Connect via OpenVPN
-  Future<void> _connectOpenVpn() async {
+  Future<void> _connectOpenVpn({bool forceBypassCert = false}) async {
     if (_selectedOpenVpnConfig == null) {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Please select an OpenVPN config first';
@@ -983,7 +986,10 @@ class VpnProvider with ChangeNotifier {
       };
 
       // Connect using OpenVPN with timeout
-      final connected = await OpenVpnConnection.connect(_selectedOpenVpnConfig!).timeout(
+      final connected = await OpenVpnConnection.connect(
+        _selectedOpenVpnConfig!,
+        forceBypassCert: forceBypassCert,
+      ).timeout(
         const Duration(seconds: 30),
         onTimeout: () {
           if (kDebugMode) {
