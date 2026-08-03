@@ -1000,7 +1000,14 @@ class VpnProvider with ChangeNotifier {
         },
       );
       
-      if (!connected) {
+      // IMPORTANT: the tunnel state is driven by the stage callback above, which
+      // may have ALREADY reached `connected` (the native connect future can
+      // resolve slowly / time out even though the VPN is up — e.g. after the
+      // system consent + certificate dialogs). Only surface a failure when we
+      // are NOT already connected, otherwise we'd flash a bogus error over a
+      // live, working connection.
+      if (!connected &&
+          _status != VpnConnectionStatus.connected) {
         connectionTimeoutTimer?.cancel();
         _status = VpnConnectionStatus.error;
         final nativeErr = OpenVpnConnection.lastError;
@@ -1013,16 +1020,20 @@ class VpnProvider with ChangeNotifier {
       if (kDebugMode) {
         debugPrint('⏱️ OpenVPN connection timeout');
       }
-      _status = VpnConnectionStatus.error;
-      _errorMessage = 'Connection timeout. Please try again.';
-      notifyListeners();
+      if (_status != VpnConnectionStatus.connected) {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Connection timeout. Please try again.';
+        notifyListeners();
+      }
     } catch (e) {
       if (kDebugMode) {
         debugPrint('⚠️ Failed to connect OpenVPN: $e');
       }
-      _status = VpnConnectionStatus.error;
-      _errorMessage = 'Failed to connect: ${e.toString()}';
-      notifyListeners();
+      if (_status != VpnConnectionStatus.connected) {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Failed to connect: ${e.toString()}';
+        notifyListeners();
+      }
     }
   }
 

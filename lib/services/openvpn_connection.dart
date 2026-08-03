@@ -127,19 +127,29 @@ class OpenVpnConnection {
   /// situation where the official OpenVPN app pops up a "connect anyway?"
   /// warning. Returns true when a cert-related error is detected.
   static Future<bool> precheckCertIssue(OpenVpnConfig config) async {
-    try {
-      await initialize();
-      final res = await _nativeChannel.invokeMethod<dynamic>(
-        'validateConfig',
-        {'config': config.normalizedConfig, 'name': config.name},
-      );
-      if (res is Map && res['ok'] != true) {
-        final err = (res['error'] ?? '').toString().toLowerCase();
-        return err.contains('cert') || err.contains('certificate');
+    // Try a few times: on the very first call right after app start the native
+    // MethodChannel handler can still be wiring up, so a single attempt would
+    // silently fail and we'd skip the warning dialog (the user then hit a
+    // pointless timeout on the first tap). Retrying makes the check reliable on
+    // the FIRST tap, matching the official app.
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        final res = await _nativeChannel.invokeMethod<dynamic>(
+          'validateConfig',
+          {'config': config.normalizedConfig, 'name': config.name},
+        );
+        if (res is Map && res['ok'] != true) {
+          final err = (res['error'] ?? '').toString().toLowerCase();
+          return err.contains('cert') || err.contains('certificate');
+        }
+        // Got a definitive OK — no cert issue.
+        return false;
+      } on MissingPluginException {
+        // Handler not registered yet — wait briefly and retry.
+        await Future.delayed(const Duration(milliseconds: 150));
+      } catch (_) {
+        await Future.delayed(const Duration(milliseconds: 150));
       }
-    } catch (_) {
-      // If we can't validate (older build / plugin missing), assume no issue
-      // and let the normal connect path run.
     }
     return false;
   }

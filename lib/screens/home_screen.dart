@@ -324,8 +324,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 // دکمه‌های عمودی سمت چپ (Quick Guide + Check for update) —
                 // زیر نوار عنوان، در ناحیه‌ای که کاربر مشخص کرد.
                 Positioned(
-                  top: MediaQuery.of(context).padding.top + kToolbarHeight - 8,
-                  left: 14,
+                  top: MediaQuery.of(context).padding.top + kToolbarHeight - 6,
+                  left: 10,
                   child: _buildTopLeftActions(iconColor),
                 ),
 
@@ -922,15 +922,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       required String tooltip,
       required VoidCallback? onTap,
     }) {
-      return IconButton(
-        icon: icon,
-        tooltip: tooltip,
-        color: iconColor,
-        iconSize: 22,
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.all(4),
-        constraints: const BoxConstraints(),
-        onPressed: onTap,
+      return Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            // Small square hit area, tightly stacked so the two icons read as
+            // one vertical column directly beneath the "4win VPN" title.
+            padding: const EdgeInsets.all(6),
+            child: SizedBox(width: 22, height: 22, child: Center(child: icon)),
+          ),
+        ),
       );
     }
 
@@ -948,12 +951,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             );
           },
         ),
-        const SizedBox(height: 6),
         item(
           icon: _checkingUpdate
               ? SizedBox(
-                  width: 22,
-                  height: 22,
+                  width: 20,
+                  height: 20,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
                     valueColor: AlwaysStoppedAnimation<Color>(iconColor),
