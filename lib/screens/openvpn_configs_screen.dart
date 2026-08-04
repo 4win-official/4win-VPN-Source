@@ -640,16 +640,13 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
 
     final vpnProvider = Provider.of<VpnProvider>(context, listen: false);
 
-    // Return to the home screen FIRST so the UI stays responsive, THEN kick off
-    // the connection. Awaiting the whole connect() here (which drives native
-    // permission dialogs + the platform connect call) blocked this frame and
-    // made selecting a server feel like a freeze. connect() manages its own
-    // status via notifyListeners(), so we don't need to await it before popping.
-    Navigator.pop(context);
-
-    // Fire-and-forget: the provider updates state through listeners.
+    // Only SELECT the config — do NOT auto-connect. The user connects manually
+    // with the power button on the home screen.
     // ignore: discarded_futures
-    unawaited(vpnProvider.selectOpenVpnConfigAndConnect(config));
+    unawaited(vpnProvider.selectOpenVpnConfig(config));
+
+    // Return to the home screen so the newly selected server is shown.
+    Navigator.pop(context);
   }
 
   /// تست ping به سرور OpenVPN (استفاده از Socket)

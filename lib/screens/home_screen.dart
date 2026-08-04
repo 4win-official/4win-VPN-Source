@@ -324,8 +324,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 // دکمه‌های عمودی سمت چپ (Quick Guide + Check for update) —
                 // زیر نوار عنوان، در ناحیه‌ای که کاربر مشخص کرد.
                 Positioned(
-                  top: MediaQuery.of(context).padding.top + kToolbarHeight - 6,
-                  left: 10,
+                  // Sit the icon column so its top hugs the BOTTOM of the
+                  // "4win VPN" title (which is vertically centred in the
+                  // toolbar), not at the bottom edge of the AppBar.
+                  top: MediaQuery.of(context).padding.top +
+                      (kToolbarHeight / 2) +
+                      12,
+                  left: 12,
                   child: _buildTopLeftActions(iconColor),
                 ),
 

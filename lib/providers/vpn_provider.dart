@@ -1875,6 +1875,17 @@ class VpnProvider with ChangeNotifier {
     }
   }
   
+  /// Select an OpenVPN config WITHOUT connecting. The user connects manually
+  /// via the power button afterwards.
+  Future<void> selectOpenVpnConfig(OpenVpnConfig config) async {
+    _selectedOpenVpnConfig = config;
+    await _openVpnService.setSelectedConfig(config.name);
+    notifyListeners();
+    if (kDebugMode) {
+      debugPrint('✅ OpenVPN Config Selected (no auto-connect): ${config.name}');
+    }
+  }
+
   /// Select OpenVPN config and connect
   Future<void> selectOpenVpnConfigAndConnect(OpenVpnConfig config) async {
     _selectedOpenVpnConfig = config;
