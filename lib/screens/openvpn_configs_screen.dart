@@ -640,13 +640,9 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
 
     final vpnProvider = Provider.of<VpnProvider>(context, listen: false);
 
-    // Only SELECT the config — do NOT auto-connect. The user connects manually
-    // with the power button on the home screen.
+    // Only SELECT the config — do NOT auto-connect and do NOT leave the list.
     // ignore: discarded_futures
     unawaited(vpnProvider.selectOpenVpnConfig(config));
-
-    // Return to the home screen so the newly selected server is shown.
-    Navigator.pop(context);
   }
 
   /// تست ping به سرور OpenVPN (استفاده از Socket)

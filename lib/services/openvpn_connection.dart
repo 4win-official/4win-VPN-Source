@@ -20,6 +20,15 @@ class OpenVpnConnection {
   static DateTime? _connectRequestedAt;
   static bool _sawConnected = false;
 
+  /// Monotonic token bumped on every connect() AND disconnect(). An in-flight
+  /// connect captures its token; if disconnect() (or a newer connect) bumps it,
+  /// the stale attempt is abandoned and its late connected/error callbacks are
+  /// ignored. This is what makes "disconnect while connecting" actually stop the
+  /// background attempt and keeps a failed config from poisoning later attempts.
+  static int _generation = 0;
+  static int get generation => _generation;
+  static bool _userStopped = false;
+
   /// Native channel to validate an OpenVPN config with the REAL ics-openvpn
   /// parser/checkProfile before we hand it to the plugin (whose connect path
   /// silently swallows parse errors). Lets us surface the actual reason a
@@ -164,6 +173,8 @@ class OpenVpnConnection {
     OpenVpnConfig config, {
     bool forceBypassCert = false,
   }) async {
+    final int myGen = ++_generation;
+    _userStopped = false;
     try {
       // Open the grace window BEFORE initialize(), because initialize() itself
       // queries the engine and emits a `disconnected` default status that must
@@ -172,6 +183,12 @@ class OpenVpnConnection {
       _sawConnected = false;
 
       await initialize();
+
+      // If the user cancelled while we were initializing, abort cleanly.
+      if (myGen != _generation || _userStopped) {
+        if (kDebugMode) debugPrint('🚫 OpenVPN connect $myGen aborted (stale)');
+        return false;
+      }
 
       // Parse ONCE (the model caches these) — never in a rebuild path.
       final username = config.effectiveUsername;
@@ -287,6 +304,15 @@ class OpenVpnConnection {
         if (kDebugMode) debugPrint('⚠️ OpenVPN native validate failed: $e');
       }
 
+      // If the user tapped disconnect during validation, don't start the tunnel.
+      if (myGen != _generation || _userStopped) {
+        if (kDebugMode) debugPrint('🚫 OpenVPN connect $myGen aborted pre-start');
+        try {
+          _openvpn.disconnect();
+        } catch (_) {}
+        return false;
+      }
+
       // AWAIT the native connect so a real parse/checkProfile error surfaces
       // here as an exception instead of becoming a swallowed unhandled async
       // error (which is why failures were previously invisible).
@@ -324,8 +350,14 @@ class OpenVpnConnection {
   
   /// Disconnect from OpenVPN
   static Future<bool> disconnect() async {
+    // Invalidate any in-flight connect attempt so its late callbacks/results
+    // are ignored and it stops trying in the background.
+    _generation++;
+    _userStopped = true;
     try {
       if (!_initialized) {
+        _connectRequestedAt = null;
+        _sawConnected = false;
         return true;
       }
       

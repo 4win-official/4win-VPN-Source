@@ -899,6 +899,16 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
+    // Always tear down any prior/stale native OpenVPN session first, so a
+    // previously FAILED config can't wedge later attempts (fixes "after one
+    // failure nothing connects anymore").
+    try {
+      await OpenVpnConnection.disconnect();
+    } catch (_) {}
+
+    // Capture the generation AFTER the reset disconnect above (which bumps it).
+    final int myGen = OpenVpnConnection.generation + 1;
+
     try {
       _status = VpnConnectionStatus.connecting;
       _errorMessage = null;
@@ -914,7 +924,9 @@ class VpnProvider with ChangeNotifier {
       // OpenVPN app, which keeps trying rather than bailing early).
       Timer? connectionTimeoutTimer;
       connectionTimeoutTimer = Timer(const Duration(seconds: 25), () {
-        if (_status == VpnConnectionStatus.connecting) {
+        // Only fire if THIS attempt is still the active one and still connecting.
+        if (OpenVpnConnection.generation == myGen &&
+            _status == VpnConnectionStatus.connecting) {
           if (kDebugMode) {
             debugPrint('⏱️ Connection timeout - still connecting after 25s');
           }
@@ -936,6 +948,14 @@ class VpnProvider with ChangeNotifier {
       OpenVpnConnection.onStageChanged = (VPNStage? stage) {
         if (kDebugMode) {
           debugPrint('🔵 OpenVPN Stage: $stage');
+        }
+
+        // Ignore late events from a superseded/cancelled attempt.
+        if (OpenVpnConnection.generation != myGen) {
+          if (kDebugMode) {
+            debugPrint('   ↳ ignoring stale stage (gen mismatch)');
+          }
+          return;
         }
         
         // Update status based on stage
@@ -1007,7 +1027,9 @@ class VpnProvider with ChangeNotifier {
       // are NOT already connected, otherwise we'd flash a bogus error over a
       // live, working connection.
       if (!connected &&
-          _status != VpnConnectionStatus.connected) {
+          OpenVpnConnection.generation == myGen &&
+          _status != VpnConnectionStatus.connected &&
+          _status != VpnConnectionStatus.disconnected) {
         connectionTimeoutTimer?.cancel();
         _status = VpnConnectionStatus.error;
         final nativeErr = OpenVpnConnection.lastError;

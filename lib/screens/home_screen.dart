@@ -329,7 +329,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   // toolbar), not at the bottom edge of the AppBar.
                   top: MediaQuery.of(context).padding.top +
                       (kToolbarHeight / 2) +
-                      12,
+                      2,
                   left: 12,
                   child: _buildTopLeftActions(iconColor),
                 ),
