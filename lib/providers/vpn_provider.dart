@@ -886,176 +886,140 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  /// Connect via OpenVPN
+  /// Connect via OpenVPN — retries up to 5 times, keeps retrying until it
+  /// connects OR hits a hard auth failure (wrong user/pass), only then giving up.
   Future<void> _connectOpenVpn({bool forceBypassCert = false}) async {
     if (_selectedOpenVpnConfig == null) {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Please select an OpenVPN config first';
       notifyListeners();
-      
-      if (kDebugMode) {
-        debugPrint('❌ No OpenVPN config selected');
-      }
+      if (kDebugMode) debugPrint('❌ No OpenVPN config selected');
       return;
     }
 
-    // Always tear down any prior/stale native OpenVPN session first, so a
-    // previously FAILED config can't wedge later attempts (fixes "after one
-    // failure nothing connects anymore").
+    // Tear down any prior/stale native session first.
     try {
       await OpenVpnConnection.disconnect();
     } catch (_) {}
 
-    // Capture the generation AFTER the reset disconnect above (which bumps it).
-    final int myGen = OpenVpnConnection.generation + 1;
+    _status = VpnConnectionStatus.connecting;
+    _errorMessage = null;
+    notifyListeners();
 
-    try {
-      _status = VpnConnectionStatus.connecting;
-      _errorMessage = null;
+    // Live traffic counters (persist across retries).
+    OpenVpnConnection.onByteCount = (int bytesIn, int bytesOut) {
+      _totalDownloadBytes = bytesIn;
+      _totalUploadBytes = bytesOut;
       notifyListeners();
+    };
 
-      if (kDebugMode) {
-        debugPrint('🚀 Connecting to OpenVPN: ${_selectedOpenVpnConfig!.name}');
+    const int maxAttempts = 5;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Abort the whole loop if the user cancelled meanwhile.
+      if (_status == VpnConnectionStatus.disconnected ||
+          _status == VpnConnectionStatus.disconnecting) {
+        return;
       }
 
-      // ✅ Connection timeout watchdog (25 seconds). Real servers over a slow
-      // network can legitimately take >15s to hand out the tunnel config, so we
-      // give it a bit more headroom before declaring failure (like the official
-      // OpenVPN app, which keeps trying rather than bailing early).
-      Timer? connectionTimeoutTimer;
-      connectionTimeoutTimer = Timer(const Duration(seconds: 25), () {
-        // Only fire if THIS attempt is still the active one and still connecting.
-        if (OpenVpnConnection.generation == myGen &&
-            _status == VpnConnectionStatus.connecting) {
-          if (kDebugMode) {
-            debugPrint('⏱️ Connection timeout - still connecting after 25s');
-          }
-          _status = VpnConnectionStatus.error;
-          _errorMessage =
-              'Connection timeout. Please try again or check the server.';
-          notifyListeners();
-        }
-      });
+      if (kDebugMode) {
+        debugPrint('🚀 OpenVPN connect attempt $attempt/$maxAttempts: '
+            '${_selectedOpenVpnConfig!.name}');
+      }
 
-      // Live traffic counters straight from the OpenVPN core (bytes in/out).
-      OpenVpnConnection.onByteCount = (int bytesIn, int bytesOut) {
-        _totalDownloadBytes = bytesIn;
-        _totalUploadBytes = bytesOut;
-        notifyListeners();
-      };
+      final completer = Completer<bool>();
+      final int myGen = OpenVpnConnection.generation + 1;
 
-      // Initialize OpenVPN with stage callback
+      void finish(bool ok) {
+        if (!completer.isCompleted) completer.complete(ok);
+      }
+
       OpenVpnConnection.onStageChanged = (VPNStage? stage) {
-        if (kDebugMode) {
-          debugPrint('🔵 OpenVPN Stage: $stage');
-        }
+        if (OpenVpnConnection.generation != myGen) return;
+        if (kDebugMode) debugPrint('🔵 OpenVPN Stage: $stage');
 
-        // Ignore late events from a superseded/cancelled attempt.
-        if (OpenVpnConnection.generation != myGen) {
-          if (kDebugMode) {
-            debugPrint('   ↳ ignoring stale stage (gen mismatch)');
-          }
-          return;
-        }
-        
-        // Update status based on stage
         if (stage == VPNStage.connected) {
-          connectionTimeoutTimer?.cancel(); // ✅ اتصال موفق - cancel timeout
           _status = VpnConnectionStatus.connected;
-          _connectedServer = null; // OpenVPN mode has no traditional VPN server
-          _errorMessage = null; // Clear any previous errors
+          _connectedServer = null;
+          _errorMessage = null;
           _startDurationTimer();
           _startPingTimer();
           notifyListeners();
+          finish(true);
+        } else if (stage == VPNStage.error || stage == VPNStage.denied) {
+          // Fail THIS attempt (loop decides whether to retry).
+          finish(false);
         } else if (stage == VPNStage.disconnected) {
-          connectionTimeoutTimer?.cancel();
-          _status = VpnConnectionStatus.disconnected;
-          _stopDurationTimer();
-          _stopPingTimer();
-          notifyListeners();
-        } else if (stage == VPNStage.error) {
-          connectionTimeoutTimer?.cancel();
-          _status = VpnConnectionStatus.error;
-          _errorMessage = 'Connection failed. Tap to retry.';
-          _stopDurationTimer();
-          _stopPingTimer();
-          notifyListeners();
-        } else if (stage == VPNStage.denied) {
-          connectionTimeoutTimer?.cancel();
-          _status = VpnConnectionStatus.error;
-          _errorMessage = 'VPN permission denied';
-          _stopDurationTimer();
-          _stopPingTimer();
-          notifyListeners();
-        } else if (stage == VPNStage.connecting ||
-                   stage == VPNStage.prepare ||
-                   stage == VPNStage.authenticating ||
-                   stage == VPNStage.authentication ||
-                   stage == VPNStage.wait_connection ||
-                   stage == VPNStage.vpn_generate_config ||
-                   stage == VPNStage.get_config ||
-                   stage == VPNStage.tcp_connect ||
-                   stage == VPNStage.udp_connect ||
-                   stage == VPNStage.assign_ip ||
-                   stage == VPNStage.resolve) {
-          // All of these are legitimate intermediate stages of a real OpenVPN
-          // handshake — keep the UI in "connecting" until we reach connected.
-          _status = VpnConnectionStatus.connecting;
-          notifyListeners();
+          // Ignored here; spurious ones are already filtered natively.
+        } else {
+          // Any legitimate intermediate handshake stage → keep "connecting".
+          if (_status != VpnConnectionStatus.connected) {
+            _status = VpnConnectionStatus.connecting;
+            notifyListeners();
+          }
         }
       };
 
-      // Connect using OpenVPN with timeout
-      final connected = await OpenVpnConnection.connect(
-        _selectedOpenVpnConfig!,
-        forceBypassCert: forceBypassCert,
-      ).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {
-          if (kDebugMode) {
-            debugPrint('⏱️ OpenVPN connection timeout (30s)');
-          }
-          connectionTimeoutTimer?.cancel();
-          return false;
-        },
-      );
-      
-      // IMPORTANT: the tunnel state is driven by the stage callback above, which
-      // may have ALREADY reached `connected` (the native connect future can
-      // resolve slowly / time out even though the VPN is up — e.g. after the
-      // system consent + certificate dialogs). Only surface a failure when we
-      // are NOT already connected, otherwise we'd flash a bogus error over a
-      // live, working connection.
-      if (!connected &&
-          OpenVpnConnection.generation == myGen &&
-          _status != VpnConnectionStatus.connected &&
-          _status != VpnConnectionStatus.disconnected) {
-        connectionTimeoutTimer?.cancel();
+      // Per-attempt watchdog (18s) so a silently-stalled attempt retries.
+      final watchdog = Timer(const Duration(seconds: 18), () => finish(false));
+
+      try {
+        await OpenVpnConnection.connect(
+          _selectedOpenVpnConfig!,
+          forceBypassCert: forceBypassCert,
+        );
+      } catch (e) {
+        if (kDebugMode) debugPrint('⚠️ attempt $attempt threw: $e');
+        finish(false);
+      }
+
+      final ok = await completer.future;
+      watchdog.cancel();
+
+      if (ok) {
+        if (kDebugMode) debugPrint('✅ OpenVPN connected on attempt $attempt');
+        return; // connected — done
+      }
+
+      // HARD auth failure → stop immediately, do NOT keep retrying.
+      if (OpenVpnConnection.authFailed) {
         _status = VpnConnectionStatus.error;
-        final nativeErr = OpenVpnConnection.lastError;
-        _errorMessage = (nativeErr != null && nativeErr.isNotEmpty)
-            ? 'OpenVPN error: $nativeErr'
-            : 'Failed to establish OpenVPN connection. Please check your config and try again.';
+        _errorMessage = 'Authentication failed. Wrong username or password.';
+        _stopDurationTimer();
+        _stopPingTimer();
         notifyListeners();
+        if (kDebugMode) debugPrint('🛑 Auth failed — stop retrying');
+        return;
       }
-    } on TimeoutException {
-      if (kDebugMode) {
-        debugPrint('⏱️ OpenVPN connection timeout');
+
+      // User cancelled during the attempt.
+      if (_status == VpnConnectionStatus.disconnected ||
+          _status == VpnConnectionStatus.disconnecting) {
+        return;
       }
-      if (_status != VpnConnectionStatus.connected) {
-        _status = VpnConnectionStatus.error;
-        _errorMessage = 'Connection timeout. Please try again.';
+
+      // Otherwise retry (unless we've exhausted attempts). Reset native session
+      // between tries so the next attempt starts clean.
+      try {
+        await OpenVpnConnection.disconnect();
+      } catch (_) {}
+      if (attempt < maxAttempts) {
+        _status = VpnConnectionStatus.connecting;
         notifyListeners();
+        await Future.delayed(const Duration(milliseconds: 800));
       }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('⚠️ Failed to connect OpenVPN: $e');
-      }
-      if (_status != VpnConnectionStatus.connected) {
-        _status = VpnConnectionStatus.error;
-        _errorMessage = 'Failed to connect: ${e.toString()}';
-        notifyListeners();
-      }
+    }
+
+    // Exhausted all attempts without connecting and without an auth failure.
+    if (_status != VpnConnectionStatus.connected &&
+        _status != VpnConnectionStatus.disconnected) {
+      _status = VpnConnectionStatus.error;
+      final nativeErr = OpenVpnConnection.lastError;
+      _errorMessage = (nativeErr != null && nativeErr.isNotEmpty)
+          ? 'OpenVPN error: $nativeErr'
+          : 'Connection timeout after $maxAttempts attempts. Please try another config.';
+      _stopDurationTimer();
+      _stopPingTimer();
+      notifyListeners();
     }
   }
 

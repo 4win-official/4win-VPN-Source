@@ -39,6 +39,12 @@ class OpenVpnConnection {
   /// The last real error reported by native validation (for the UI/logs).
   static String? lastError;
 
+  /// Set true when the core reports an authentication failure (wrong
+  /// username/password). This is a HARD, non-retryable error — the caller must
+  /// stop retrying immediately and tell the user their credentials are wrong,
+  /// exactly like the official OpenVPN app.
+  static bool authFailed = false;
+
   /// Callback for status changes
   static void Function(VPNStage?)? onStageChanged;
 
@@ -101,6 +107,23 @@ class OpenVpnConnection {
 
           if (stage == VPNStage.connected) {
             _sawConnected = true;
+          }
+
+          // Detect an AUTH FAILURE (wrong user/pass). ics-openvpn signals it via
+          // the message ("AUTH_FAILED", "auth-failure") and/or the `denied`
+          // stage after the authentication phase. Mark it so the retry loop
+          // stops immediately.
+          final msg = message.toLowerCase();
+          if (msg.contains('auth_failed') ||
+              msg.contains('auth failed') ||
+              msg.contains('auth-failure') ||
+              msg.contains('authentication failed') ||
+              (stage == VPNStage.denied && msg.contains('auth'))) {
+            authFailed = true;
+            lastError = 'Authentication failed. Wrong username or password.';
+            _currentStage = VPNStage.error;
+            if (onStageChanged != null) onStageChanged!(VPNStage.error);
+            return;
           }
 
           _currentStage = stage;
@@ -175,6 +198,7 @@ class OpenVpnConnection {
   }) async {
     final int myGen = ++_generation;
     _userStopped = false;
+    authFailed = false;
     try {
       // Open the grace window BEFORE initialize(), because initialize() itself
       // queries the engine and emits a `disconnected` default status that must

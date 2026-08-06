@@ -327,9 +327,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   // Sit the icon column so its top hugs the BOTTOM of the
                   // "4win VPN" title (which is vertically centred in the
                   // toolbar), not at the bottom edge of the AppBar.
-                  top: MediaQuery.of(context).padding.top +
-                      (kToolbarHeight / 2) +
-                      2,
+                  top: MediaQuery.of(context).padding.top + 28,
                   left: 12,
                   child: _buildTopLeftActions(iconColor),
                 ),
