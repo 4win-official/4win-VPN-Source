@@ -95,6 +95,7 @@ class VpnProvider with ChangeNotifier {
   VpnConnectionStatus _status = VpnConnectionStatus.disconnected;
   bool _isLoadingServers = false;
   String? _errorMessage;
+  Timer? _errorAutoClearTimer;
   StreamSubscription<VpnConnectionStatus>? _statusSubscription;
   Timer? _durationTimer;
   Duration _connectionDuration = Duration.zero;
@@ -117,6 +118,34 @@ class VpnProvider with ChangeNotifier {
   // Xray traffic polling (proxy uplink/downlink from the core)
   Timer? _xrayTrafficTimer;
 
+  /// Auto-clear any error message 10 seconds after it appears, so stale errors
+  /// never linger on screen (even after a successful reconnect). Called on
+  /// every notifyListeners via the override below.
+  void _syncErrorAutoClear() {
+    final hasError = _errorMessage != null && _errorMessage!.isNotEmpty;
+    if (hasError) {
+      if (_errorAutoClearTimer == null || !_errorAutoClearTimer!.isActive) {
+        _errorAutoClearTimer = Timer(const Duration(seconds: 10), () {
+          _errorMessage = null;
+          // If we're still sitting on an error state, drop back to disconnected.
+          if (_status == VpnConnectionStatus.error) {
+            _status = VpnConnectionStatus.disconnected;
+          }
+          notifyListeners();
+        });
+      }
+    } else {
+      _errorAutoClearTimer?.cancel();
+      _errorAutoClearTimer = null;
+    }
+  }
+
+  @override
+  void notifyListeners() {
+    _syncErrorAutoClear();
+    super.notifyListeners();
+  }
+
   // Getters
   List<VpnServer> get servers => _servers;
   VpnServer? get selectedServer => _selectedServer;
@@ -138,10 +167,28 @@ class VpnProvider with ChangeNotifier {
 
   VpnProvider() {
     _init();
-    // بارگیری پروتکل انتخابی
-    loadSelectedProtocol();
+    // بارگیری پروتکل انتخابی و در صورت نیاز اتصال خودکار به آخرین سرور OpenVPN
+    _startupRestore();
     // بارگیری سرورهای ایکس‌ری
     loadXrayServers();
+  }
+
+  /// On launch: restore the selected protocol, and if it's OpenVPN, load the
+  /// saved configs (which restores the LAST selected config) and auto-connect
+  /// to it — so the app reconnects to the last server the user used.
+  Future<void> _startupRestore() async {
+    await loadSelectedProtocol();
+    try {
+      await loadOpenVpnConfigs();
+    } catch (_) {}
+    if (_selectedProtocol == 'openvpn' && _selectedOpenVpnConfig != null) {
+      // Small delay so the UI is up before the connect flow starts.
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (_status == VpnConnectionStatus.disconnected) {
+        // ignore: discarded_futures
+        connect();
+      }
+    }
   }
 
   void _init() {
