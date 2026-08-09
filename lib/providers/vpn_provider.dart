@@ -173,22 +173,14 @@ class VpnProvider with ChangeNotifier {
     loadXrayServers();
   }
 
-  /// On launch: restore the selected protocol, and if it's OpenVPN, load the
-  /// saved configs (which restores the LAST selected config) and auto-connect
-  /// to it — so the app reconnects to the last server the user used.
+  /// On launch: restore the selected protocol and load the saved OpenVPN
+  /// configs so the LAST selected config is remembered/preselected. We do NOT
+  /// auto-connect — the user must press the power button to connect.
   Future<void> _startupRestore() async {
     await loadSelectedProtocol();
     try {
       await loadOpenVpnConfigs();
     } catch (_) {}
-    if (_selectedProtocol == 'openvpn' && _selectedOpenVpnConfig != null) {
-      // Small delay so the UI is up before the connect flow starts.
-      await Future.delayed(const Duration(milliseconds: 600));
-      if (_status == VpnConnectionStatus.disconnected) {
-        // ignore: discarded_futures
-        connect();
-      }
-    }
   }
 
   void _init() {
@@ -933,8 +925,10 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  /// Connect via OpenVPN — retries up to 5 times, keeps retrying until it
-  /// connects OR hits a hard auth failure (wrong user/pass), only then giving up.
+  /// Connect via OpenVPN. Keeps retrying every 4 seconds (restarting the whole
+  /// connect from scratch, silently — no UI churn) until it either connects OR
+  /// hits a HARD auth failure (wrong user/pass). The client cert requirement is
+  /// always bypassed (the user has already consented once).
   Future<void> _connectOpenVpn({bool forceBypassCert = false}) async {
     if (_selectedOpenVpnConfig == null) {
       _status = VpnConnectionStatus.error;
@@ -960,16 +954,18 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
     };
 
-    const int maxAttempts = 5;
-    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-      // Abort the whole loop if the user cancelled meanwhile.
+    int attempt = 0;
+    while (true) {
+      attempt++;
+
+      // Stop if the user cancelled meanwhile.
       if (_status == VpnConnectionStatus.disconnected ||
           _status == VpnConnectionStatus.disconnecting) {
         return;
       }
 
       if (kDebugMode) {
-        debugPrint('🚀 OpenVPN connect attempt $attempt/$maxAttempts: '
+        debugPrint('🚀 OpenVPN connect attempt $attempt: '
             '${_selectedOpenVpnConfig!.name}');
       }
 
@@ -993,12 +989,11 @@ class VpnProvider with ChangeNotifier {
           notifyListeners();
           finish(true);
         } else if (stage == VPNStage.error || stage == VPNStage.denied) {
-          // Fail THIS attempt (loop decides whether to retry).
           finish(false);
         } else if (stage == VPNStage.disconnected) {
-          // Ignored here; spurious ones are already filtered natively.
+          // ignored — spurious ones filtered natively
         } else {
-          // Any legitimate intermediate handshake stage → keep "connecting".
+          // Keep the UI on "connecting" during the whole retry cycle.
           if (_status != VpnConnectionStatus.connected) {
             _status = VpnConnectionStatus.connecting;
             notifyListeners();
@@ -1006,13 +1001,14 @@ class VpnProvider with ChangeNotifier {
         }
       };
 
-      // Per-attempt watchdog (18s) so a silently-stalled attempt retries.
-      final watchdog = Timer(const Duration(seconds: 18), () => finish(false));
+      // Per-attempt watchdog so a silently-stalled attempt is restarted.
+      final watchdog = Timer(const Duration(seconds: 15), () => finish(false));
 
       try {
         await OpenVpnConnection.connect(
           _selectedOpenVpnConfig!,
-          forceBypassCert: forceBypassCert,
+          // Always bypass the cert requirement (user consented once).
+          forceBypassCert: true,
         );
       } catch (e) {
         if (kDebugMode) debugPrint('⚠️ attempt $attempt threw: $e');
@@ -1024,10 +1020,10 @@ class VpnProvider with ChangeNotifier {
 
       if (ok) {
         if (kDebugMode) debugPrint('✅ OpenVPN connected on attempt $attempt');
-        return; // connected — done
+        return;
       }
 
-      // HARD auth failure → stop immediately, do NOT keep retrying.
+      // HARD auth failure → stop immediately and tell the user.
       if (OpenVpnConnection.authFailed) {
         _status = VpnConnectionStatus.error;
         _errorMessage = 'Authentication failed. Wrong username or password.';
@@ -1044,29 +1040,14 @@ class VpnProvider with ChangeNotifier {
         return;
       }
 
-      // Otherwise retry (unless we've exhausted attempts). Reset native session
-      // between tries so the next attempt starts clean.
+      // Reset the native session and retry after 4s — silently (UI stays on
+      // "connecting", no error shown).
       try {
         await OpenVpnConnection.disconnect();
       } catch (_) {}
-      if (attempt < maxAttempts) {
-        _status = VpnConnectionStatus.connecting;
-        notifyListeners();
-        await Future.delayed(const Duration(milliseconds: 800));
-      }
-    }
-
-    // Exhausted all attempts without connecting and without an auth failure.
-    if (_status != VpnConnectionStatus.connected &&
-        _status != VpnConnectionStatus.disconnected) {
-      _status = VpnConnectionStatus.error;
-      final nativeErr = OpenVpnConnection.lastError;
-      _errorMessage = (nativeErr != null && nativeErr.isNotEmpty)
-          ? 'OpenVPN error: $nativeErr'
-          : 'Connection timeout after $maxAttempts attempts. Please try another config.';
-      _stopDurationTimer();
-      _stopPingTimer();
+      _status = VpnConnectionStatus.connecting;
       notifyListeners();
+      await Future.delayed(const Duration(seconds: 4));
     }
   }
 

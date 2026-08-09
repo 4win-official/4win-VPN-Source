@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/vpn_provider.dart';
 import '../providers/theme_provider.dart';
-import '../services/openvpn_connection.dart';
 import '../widgets/snow_animation.dart';
 import '../widgets/pixel_effect.dart';
 import '../widgets/rain_animation.dart';
@@ -324,11 +323,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 // دکمه‌های عمودی سمت چپ (Quick Guide + Check for update) —
                 // زیر نوار عنوان، در ناحیه‌ای که کاربر مشخص کرد.
                 Positioned(
-                  // Sit the icon column so its top hugs the BOTTOM of the
-                  // "4win VPN" title (which is vertically centred in the
-                  // toolbar), not at the bottom edge of the AppBar.
-                  top: MediaQuery.of(context).padding.top + 6,
-                  left: 12,
+                  // Hug the icon column right under the "4win VPN" title. The
+                  // title text is vertically centred in the toolbar; its
+                  // baseline sits at roughly statusBar + toolbar/2 + fontSize/2.
+                  // Placing the icons a little above the toolbar bottom makes
+                  // them look attached to the bottom of the title text.
+                  top: MediaQuery.of(context).padding.top + kToolbarHeight - 8,
+                  left: 16,
                   child: _buildTopLeftActions(iconColor),
                 ),
 
@@ -336,7 +337,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Column(
                   children: [
                     Expanded(
-                      child: Center(
+                      child: Align(
+                        // Center horizontally, but bias vertically slightly
+                        // BELOW center so the power button sits centered and a
+                        // touch lower, as requested.
+                        alignment: const Alignment(0.0, 0.15),
                         child: Consumer<VpnProvider>(
                           builder: (context, provider, _) {
                     // Show loading when servers are being fetched on startup
@@ -361,136 +366,152 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       );
                     }
                     
+                    // Standard centered layout:
+                    //  - The power button is the fixed visual anchor and sits
+                    //    in the true center of the screen (slightly below via
+                    //    the Stack alignment used by the caller).
+                    //  - Protocol selector + status text sit in a fixed-height
+                    //    zone ABOVE the button.
+                    //  - Stats / errors sit in a fixed-height zone BELOW the
+                    //    button. Because both zones have fixed heights, the
+                    //    button never moves when text appears or disappears.
                     return Column(
                       mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Protocol Selector Button
-                        Consumer<VpnProvider>(
-                          builder: (context, vpnProvider, _) {
-                            return GestureDetector(
-                              onTap: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => const ProtocolSelectorDialog(),
-                                );
-                              },
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 32),
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                decoration: BoxDecoration(
-                                  color: isDark 
-                                      ? const Color(0xFF1A1A1A).withValues(alpha: 0.5)
-                                      : Colors.white.withValues(alpha: 0.9),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: isDark 
-                                        ? Colors.white.withValues(alpha: 0.2)
-                                        : Colors.black.withValues(alpha: 0.1),
-                                    width: 1,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          vpnProvider.selectedProtocol == 'sstp'
-                                              ? Icons.vpn_key
-                                              : vpnProvider.selectedProtocol == 'openvpn'
-                                                  ? Icons.shield
-                                                  : vpnProvider.selectedProtocol == 'slowdns'
-                                                      ? Icons.cloud_queue
-                                                      : vpnProvider.selectedProtocol == 'xray'
-                                                          ? Icons.rocket_launch
-                                                          : Icons.dns,
-                                          color: vpnProvider.selectedProtocol == 'sstp'
-                                              ? Colors.green
-                                              : vpnProvider.selectedProtocol == 'openvpn'
-                                                  ? Colors.purple
-                                                  : vpnProvider.selectedProtocol == 'slowdns'
-                                                      ? Colors.orange
-                                                      : vpnProvider.selectedProtocol == 'xray'
-                                                          ? Colors.tealAccent.shade700
-                                                          : Colors.blue,
-                                          size: 20,
+                        // ===== TOP ZONE (fixed height): protocol + status =====
+                        SizedBox(
+                          height: 150,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              // Protocol Selector Button
+                              Consumer<VpnProvider>(
+                                builder: (context, vpnProvider, _) {
+                                  return GestureDetector(
+                                    onTap: () {
+                                      showDialog(
+                                        context: context,
+                                        builder: (context) => const ProtocolSelectorDialog(),
+                                      );
+                                    },
+                                    child: Container(
+                                      margin: const EdgeInsets.symmetric(horizontal: 32),
+                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                      decoration: BoxDecoration(
+                                        color: isDark
+                                            ? const Color(0xFF1A1A1A).withValues(alpha: 0.5)
+                                            : Colors.white.withValues(alpha: 0.9),
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: isDark
+                                              ? Colors.white.withValues(alpha: 0.2)
+                                              : Colors.black.withValues(alpha: 0.1),
+                                          width: 1,
                                         ),
-                                        const SizedBox(width: 12),
-                                        Text(
-                                          'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : "DNS changer"}',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            color: isDark ? Colors.white : Colors.black87,
-                                            fontWeight: FontWeight.w600,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                vpnProvider.selectedProtocol == 'sstp'
+                                                    ? Icons.vpn_key
+                                                    : vpnProvider.selectedProtocol == 'openvpn'
+                                                        ? Icons.shield
+                                                        : vpnProvider.selectedProtocol == 'slowdns'
+                                                            ? Icons.cloud_queue
+                                                            : vpnProvider.selectedProtocol == 'xray'
+                                                                ? Icons.rocket_launch
+                                                                : Icons.dns,
+                                                color: vpnProvider.selectedProtocol == 'sstp'
+                                                    ? Colors.green
+                                                    : vpnProvider.selectedProtocol == 'openvpn'
+                                                        ? Colors.purple
+                                                        : vpnProvider.selectedProtocol == 'slowdns'
+                                                            ? Colors.orange
+                                                            : vpnProvider.selectedProtocol == 'xray'
+                                                                ? Colors.tealAccent.shade700
+                                                                : Colors.blue,
+                                                size: 20,
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Text(
+                                                'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : "DNS changer"}',
+                                                style: TextStyle(
+                                                  fontSize: 14,
+                                                  color: isDark ? Colors.white : Colors.black87,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                        ),
-                                      ],
+                                          Icon(
+                                            Icons.arrow_forward_ios,
+                                            size: 16,
+                                            color: isDark ? Colors.white54 : Colors.black54,
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    Icon(
-                                      Icons.arrow_forward_ios,
-                                      size: 16,
-                                      color: isDark ? Colors.white54 : Colors.black54,
-                                    ),
-                                  ],
+                                  );
+                                },
+                              ),
+
+                              const SizedBox(height: 18),
+
+                              // Connection Status Text
+                              Text(
+                                _getStatusText(provider.status),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: isDark ? Colors.white70 : Colors.black54,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                            );
-                          },
-                        ),
-                        
-                        const SizedBox(height: 24),
-                        
-                        // Connection Status Text
-                        Text(
-                          _getStatusText(provider.status),
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: isDark ? Colors.white70 : Colors.black54,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        // Active Xray config name (under the status text).
-                        if (provider.selectedProtocol == 'xray' &&
-                            provider.activeXrayServer != null) ...[
-                          const SizedBox(height: 6),
-                          Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 24),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.dns,
-                                    size: 15,
-                                    color: isDark
-                                        ? Colors.white54
-                                        : Colors.black45),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    provider.activeXrayServer!.remark.isEmpty
-                                        ? provider
-                                            .activeXrayServer!.address
-                                        : provider
-                                            .activeXrayServer!.remark,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: isDark
-                                          ? Colors.white
-                                          : Colors.black87,
-                                    ),
+                              // Active Xray config name (under the status text).
+                              if (provider.selectedProtocol == 'xray' &&
+                                  provider.activeXrayServer != null) ...[
+                                const SizedBox(height: 6),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 24),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.dns,
+                                          size: 15,
+                                          color: isDark
+                                              ? Colors.white54
+                                              : Colors.black45),
+                                      const SizedBox(width: 6),
+                                      Flexible(
+                                        child: Text(
+                                          provider.activeXrayServer!.remark.isEmpty
+                                              ? provider.activeXrayServer!.address
+                                              : provider.activeXrayServer!.remark,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: isDark
+                                                ? Colors.white
+                                                : Colors.black87,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
-                            ),
+                            ],
                           ),
-                        ],
-                        const SizedBox(height: 40),
-                        
-                        // Connect Button
+                        ),
+
+                        // ===== CENTER: Connect Button (fixed, always centered) =====
                         GestureDetector(
                           onTap: () => _handleConnectTap(context, provider),
                           onLongPress: () => _handleLongPress(context),
@@ -554,65 +575,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ),
                           ),
                         ),
-                        
-                        const SizedBox(height: 40),
-                        
-                        // Data Usage Info (SSTP، Direct DNS، Xray و OpenVPN)
-                        if (provider.isConnected &&
-                            (provider.selectedProtocol == 'sstp' ||
-                                provider.selectedProtocol == 'direct_dns' ||
-                                provider.selectedProtocol == 'xray' ||
-                                provider.selectedProtocol == 'openvpn'))
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 32),
-                            child: Text(
-                              provider.dataUsage,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: isDark ? Colors.white70 : Colors.black87,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        
-                        // Connection Duration
-                        if (provider.isConnected && provider.connectionDuration.inSeconds > 0)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 16),
+
+                        // ===== BOTTOM ZONE (fixed height): stats / errors =====
+                        SizedBox(
+                          height: 150,
+                          child: SingleChildScrollView(
                             child: Column(
                               children: [
-                                Text(
-                                  _formatDuration(provider.connectionDuration),
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: isDark ? Colors.white54 : Colors.black54,
-                                    fontWeight: FontWeight.w500,
+                                const SizedBox(height: 20),
+                                // Data Usage Info
+                                if (provider.isConnected &&
+                                    (provider.selectedProtocol == 'sstp' ||
+                                        provider.selectedProtocol == 'direct_dns' ||
+                                        provider.selectedProtocol == 'xray' ||
+                                        provider.selectedProtocol == 'openvpn'))
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                                    child: Text(
+                                      provider.dataUsage,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: isDark ? Colors.white70 : Colors.black87,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
                                   ),
-                                ),
-                                // Show ping. For Xray it's TAP-TO-PING (no auto
-                                // 3s timer); other protocols auto-refresh.
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: _buildPingIndicator(provider, isDark),
-                                ),
+                                // Connection Duration
+                                if (provider.isConnected && provider.connectionDuration.inSeconds > 0)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 12),
+                                    child: Column(
+                                      children: [
+                                        Text(
+                                          _formatDuration(provider.connectionDuration),
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: isDark ? Colors.white54 : Colors.black54,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 8),
+                                          child: _buildPingIndicator(provider, isDark),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                // Error Message
+                                if (provider.errorMessage != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 12, left: 32, right: 32),
+                                    child: Text(
+                                      provider.errorMessage!,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isDark ? Colors.red[300]! : Colors.red,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
                               ],
                             ),
                           ),
-                        
-                        // Error Message
-                        if (provider.errorMessage != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 16, left: 32, right: 32),
-                            child: Text(
-                              provider.errorMessage!,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark ? Colors.red[300]! : Colors.red,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
+                        ),
                       ],
                     );
                   },
@@ -1139,7 +1165,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _handleConnectTap(BuildContext context, VpnProvider provider) async {
+  void _handleConnectTap(BuildContext context, VpnProvider provider) {
     if (provider.isConnecting) {
       // وقتی در حال اتصال است، اگر کاربر تپ کند، قطع شود
       provider.disconnect();
@@ -1151,52 +1177,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
 
-    // OpenVPN: before connecting, check whether the config has a client
-    // certificate problem. If it does, ask the user (like the official OpenVPN
-    // app) whether to connect anyway; on confirm we connect while bypassing the
-    // certificate requirement.
-    if (provider.selectedProtocol == 'openvpn' &&
-        provider.selectedOpenVpnConfig != null) {
-      final hasCertIssue = await OpenVpnConnection.precheckCertIssue(
-        provider.selectedOpenVpnConfig!,
-      );
-      if (!mounted) return;
-      if (hasCertIssue) {
-        final proceed = await _showCertWarningDialog(context);
-        if (proceed != true) return;
-        provider.connect(forceBypassCert: true);
-        return;
-      }
-    }
-
+    // Just connect. For OpenVPN the cert requirement is bypassed automatically
+    // inside the provider (the user consents once by pressing connect), and it
+    // retries silently every 4s until it connects or hits an auth failure.
     provider.connect();
-  }
-
-  Future<bool?> _showCertWarningDialog(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        icon: const Icon(Icons.verified_user_outlined,
-            color: Colors.orangeAccent, size: 36),
-        title: const Text('Certificate problem'),
-        content: const Text(
-          'This config has a client-certificate issue. Do you still want to '
-          'connect anyway?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Connect anyway'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _handleLongPress(BuildContext context) async {

@@ -78,6 +78,23 @@ class OpenVpnConnection {
             debugPrint('🔵 OpenVPN Stage: $stage — $message');
           }
 
+          // 🔴 AUTH FAILURE detection FIRST (before any grace-window filtering),
+          // because after "AUTH_FAILED" ics-openvpn quickly drops to NOPROCESS
+          // (disconnected), which the grace window would otherwise swallow. The
+          // raw native status string arrives in `message` (e.g. "AUTH_FAILED").
+          final msg = message.toLowerCase();
+          if (msg.contains('auth_failed') ||
+              msg.contains('authfailed') ||
+              msg.contains('auth failed') ||
+              msg.contains('auth-failure') ||
+              msg.contains('authentication failed')) {
+            authFailed = true;
+            lastError = 'Authentication failed. Wrong username or password.';
+            _currentStage = VPNStage.error;
+            if (onStageChanged != null) onStageChanged!(VPNStage.error);
+            return;
+          }
+
           // 🔴 CRITICAL: filter the SPURIOUS early `disconnected`.
           //
           // The native core emits `disconnected` (its DEFAULT status) as soon as
@@ -107,23 +124,6 @@ class OpenVpnConnection {
 
           if (stage == VPNStage.connected) {
             _sawConnected = true;
-          }
-
-          // Detect an AUTH FAILURE (wrong user/pass). ics-openvpn signals it via
-          // the message ("AUTH_FAILED", "auth-failure") and/or the `denied`
-          // stage after the authentication phase. Mark it so the retry loop
-          // stops immediately.
-          final msg = message.toLowerCase();
-          if (msg.contains('auth_failed') ||
-              msg.contains('auth failed') ||
-              msg.contains('auth-failure') ||
-              msg.contains('authentication failed') ||
-              (stage == VPNStage.denied && msg.contains('auth'))) {
-            authFailed = true;
-            lastError = 'Authentication failed. Wrong username or password.';
-            _currentStage = VPNStage.error;
-            if (onStageChanged != null) onStageChanged!(VPNStage.error);
-            return;
           }
 
           _currentStage = stage;
