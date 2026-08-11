@@ -33,9 +33,86 @@ class ThemeSelectionScreen extends StatelessWidget {
       body: SafeArea(
         child: Consumer<ThemeProvider>(
           builder: (context, themeProvider, _) {
+            // Day/Night toggle now lives here (moved off the home screen).
+            // Disabled when the active theme forces a fixed mode (snow/rain).
+            final bool toggleLocked =
+                themeProvider.selectedTheme == AppTheme.snow ||
+                    themeProvider.selectedTheme == AppTheme.rain;
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // ── Day / Night mode switch ──────────────────────────────
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.black12,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          themeProvider.isDarkMode
+                              ? Icons.dark_mode
+                              : Icons.light_mode,
+                          color: Colors.amber,
+                          size: 28,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              themeProvider.isDarkMode
+                                  ? 'Night mode'
+                                  : 'Day mode',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              toggleLocked
+                                  ? 'This theme uses a fixed mode'
+                                  : 'Switch between light and dark',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color:
+                                    isDark ? Colors.white54 : Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: themeProvider.isDarkMode,
+                        onChanged: toggleLocked
+                            ? null
+                            : (_) => themeProvider.toggleTheme(),
+                        activeThumbColor: Colors.amber,
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
                 // تم سیستم (دیفالت)
                 _ThemeCard(
                   title: 'System Default',

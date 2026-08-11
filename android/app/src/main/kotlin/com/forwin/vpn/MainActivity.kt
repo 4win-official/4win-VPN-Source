@@ -12,6 +12,8 @@ import io.flutter.plugin.common.MethodChannel
 import id.laskarmedia.openvpn_flutter.OpenVPNFlutterPlugin
 import de.blinkt.openvpn.VpnProfile
 import de.blinkt.openvpn.core.ConfigParser
+import de.blinkt.openvpn.core.VpnStatus
+import de.blinkt.openvpn.core.ConnectionStatus
 import java.io.StringReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -34,6 +36,14 @@ class MainActivity: FlutterActivity() {
     // The import MethodChannel, kept so we can proactively notify Flutter when a
     // new file arrives while the app is already running (onNewIntent).
     private var importChannel: MethodChannel? = null
+
+    // The OpenVPN MethodChannel, kept so the native VpnStatus StateListener can
+    // proactively push an "authFailed" event to Flutter the instant ics-openvpn
+    // reports LEVEL_AUTH_FAILED — the ONLY 100% reliable auth-failure signal
+    // (the plugin's own status string mapping is lossy). This is what makes the
+    // app detect a wrong username/password exactly like the official app.
+    private var openvpnChannel: MethodChannel? = null
+    private var openvpnStateListener: VpnStatus.StateListener? = null
     
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         // OpenVPN permission handler
@@ -57,8 +67,16 @@ class MainActivity: FlutterActivity() {
         // and return the real error string to Dart, so we can (a) see exactly
         // why a config is rejected and (b) show the user a meaningful message
         // instead of a silent failure.
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OPENVPN_CHANNEL)
-            .setMethodCallHandler { call, result ->
+        val openvpnCh = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OPENVPN_CHANNEL)
+        openvpnChannel = openvpnCh
+
+        // Register a global ics-openvpn state listener. updateState() delivers the
+        // real ConnectionStatus enum, so we can detect LEVEL_AUTH_FAILED directly
+        // (wrong username/password) and push it to Flutter. This is far more
+        // reliable than parsing the lowercased status string the plugin forwards.
+        registerOpenVpnStateListener(openvpnCh)
+
+        openvpnCh.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "validateConfig" -> {
                         val config = call.argument<String>("config") ?: ""
@@ -285,6 +303,54 @@ class MainActivity: FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /**
+     * Attaches a [VpnStatus.StateListener] to the ics-openvpn core (bundled in
+     * the openvpn_library AAR). Every state transition delivers the real
+     * [ConnectionStatus] level, so we can reliably detect an authentication
+     * failure (LEVEL_AUTH_FAILED — wrong username/password) and forward it to
+     * Flutter via the OpenVPN MethodChannel ("onOpenVpnState"). Flutter uses
+     * this as the authoritative auth-failed signal.
+     */
+    private fun registerOpenVpnStateListener(channel: MethodChannel) {
+        // Remove any previously registered listener (hot restart / re-attach).
+        openvpnStateListener?.let {
+            try { VpnStatus.removeStateListener(it) } catch (_: Exception) {}
+        }
+        val listener = object : VpnStatus.StateListener {
+            override fun updateState(
+                state: String?,
+                logmessage: String?,
+                localizedResId: Int,
+                level: ConnectionStatus?,
+                intent: Intent?
+            ) {
+                val stateName = state ?: ""
+                val levelName = level?.name ?: ""
+                val isAuthFailed = level == ConnectionStatus.LEVEL_AUTH_FAILED ||
+                    stateName.contains("AUTH_FAILED", ignoreCase = true) ||
+                    levelName.contains("AUTH_FAILED", ignoreCase = true)
+                runOnUiThread {
+                    try {
+                        val map = HashMap<String, Any?>()
+                        map["state"] = stateName
+                        map["level"] = levelName
+                        map["message"] = logmessage ?: ""
+                        map["authFailed"] = isAuthFailed
+                        channel.invokeMethod("onOpenVpnState", map)
+                    } catch (_: Exception) {}
+                }
+            }
+
+            override fun setConnectedVPN(uuid: String?) {}
+        }
+        openvpnStateListener = listener
+        try {
+            VpnStatus.addStateListener(listener)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "addStateListener failed: ${e.message}")
         }
     }
 

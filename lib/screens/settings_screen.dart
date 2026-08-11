@@ -3,10 +3,26 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../models/dns_server.dart';
+import '../services/update_service.dart';
+import '../widgets/update_dialog.dart';
 import 'slowdns_configs_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  /// When set, the settings page shows ONLY this protocol's section (used by
+  /// the per-protocol gear icon in the protocol selector), independent of the
+  /// currently-selected protocol.
+  final String? initialProtocol;
+
+  /// When true, the page shows only the GLOBAL settings that affect every
+  /// protocol (Security + Updates + About) and hides all protocol-specific
+  /// sections. Used by the gear icon at the top of the protocol selector.
+  final bool generalOnly;
+
+  const SettingsScreen({
+    super.key,
+    this.initialProtocol,
+    this.generalOnly = false,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -48,10 +64,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // 3-second ping. Default: http://www.google.com/gen_204
   final _xrayTestUrlController = TextEditingController();
 
+  // Update check (moved here from the home screen).
+  final UpdateService _updateService = UpdateService();
+  bool _checkingUpdate = false;
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
+  }
+
+  /// Manual "check for update" against GitHub Releases. Shows the update dialog
+  /// if a newer version exists, otherwise a "you're on the latest" snackbar.
+  Future<void> _checkForUpdate() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      final updateInfo = await _updateService.checkForUpdate();
+      final currentVersion = await _updateService.getCurrentVersion();
+      if (!mounted) return;
+      if (updateInfo != null) {
+        await UpdateDialog.show(
+          context,
+          updateInfo: updateInfo,
+          currentVersion: currentVersion,
+        );
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('You are on the latest version (v$currentVersion)'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not check for updates. Try again later.'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
   }
 
   @override
@@ -735,7 +794,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Settings',
+          widget.generalOnly
+              ? 'General Settings'
+              : (widget.initialProtocol != null
+                  ? '${_protocolDisplayName(widget.initialProtocol!)} Settings'
+                  : 'Settings'),
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
             fontSize: 20,
@@ -746,11 +809,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: SafeArea(
         child: Consumer<VpnProvider>(
           builder: (context, provider, _) {
+            // The protocol whose section we show. When opened from a
+            // per-protocol gear, it's fixed to that protocol; otherwise it
+            // follows the currently-selected protocol. When [generalOnly] is
+            // set (top gear = global settings) we hide ALL protocol sections.
+            final String effProto =
+                widget.initialProtocol ?? provider.selectedProtocol;
+            final bool showProto = !widget.generalOnly;
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 // SSTP-specific settings
-                if (provider.selectedProtocol == 'sstp') ...[
+                if (showProto && effProto == 'sstp') ...[
                   _SettingsSection(
                     title: 'SSTP Settings',
                     children: [
@@ -1309,7 +1379,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
                 
                 // DNS-specific settings
-                if (provider.selectedProtocol == 'direct_dns') ...[
+                if (showProto && effProto == 'direct_dns') ...[
                   _SettingsSection(
                     title: 'DNS changer Settings',
                     children: [
@@ -1326,7 +1396,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
                 
                 // OpenVPN-specific settings
-                if (provider.selectedProtocol == 'openvpn') ...[
+                if (showProto && effProto == 'openvpn') ...[
                   _SettingsSection(
                     title: 'OpenVPN Settings',
                     children: [
@@ -1382,7 +1452,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
 
                 // Slow DNS-specific settings
-                if (provider.selectedProtocol == 'slowdns') ...[
+                if (showProto && effProto == 'slowdns') ...[
                   _SettingsSection(
                     title: 'Slow DNS Settings',
                     children: [
@@ -1443,7 +1513,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
 
                 // Xray-specific settings
-                if (provider.selectedProtocol == 'xray') ...[
+                if (showProto && effProto == 'xray') ...[
                   _SettingsSection(
                     title: 'Xray Settings',
                     children: [
@@ -1860,14 +1930,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 
                 const SizedBox(height: 24),
-                
+
+                // Updates — global setting shown only in the general/global
+                // settings page (moved here from the home screen top-left icon).
+                if (widget.generalOnly) ...[
+                  _SettingsSection(
+                    title: 'Updates',
+                    children: [
+                      Text(
+                        'Check GitHub for a newer version of 4win VPN.',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _checkingUpdate ? null : _checkForUpdate,
+                          icon: _checkingUpdate
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.black),
+                                  ),
+                                )
+                              : const Icon(Icons.system_update),
+                          label: Text(_checkingUpdate
+                              ? 'Checking…'
+                              : 'Check for update'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            backgroundColor: isDark
+                                ? const Color(0xFF00FF88)
+                                : Colors.blue,
+                            foregroundColor: Colors.black,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
                 // App Info
                 _SettingsSection(
                   title: 'About',
                   children: [
-                    _InfoRow('Protocol', _protocolDisplayName(provider.selectedProtocol), isDark),
+                    _InfoRow('Protocol', _protocolDisplayName(effProto), isDark),
                     // Show servers only for SSTP
-                    if (provider.selectedProtocol == 'sstp')
+                    if (effProto == 'sstp')
                       _InfoRow('Servers', '${provider.servers.length} available', isDark),
                   ],
                 ),

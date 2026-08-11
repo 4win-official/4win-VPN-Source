@@ -32,9 +32,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final UpdateService _updateService = UpdateService();
 
-  /// آیا الان در حال بررسی دستی آپدیت هستیم (برای نمایش لودینگ روی آیکون)
-  bool _checkingUpdate = false;
-
   @override
   void initState() {
     super.initState();
@@ -81,47 +78,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     } catch (_) {
       // خطا در بررسی آپدیت را بی‌صدا رد کن - نباید تجربه کاربر مختل شود
-    }
-  }
-
-  /// بررسی دستی آپدیت با زدن آیکون بروزرسانی زیر نوشته‌ی «4win VPN».
-  /// اگر نسخه جدیدی باشد دیالوگ آپدیت نمایش داده می‌شود، در غیر این صورت پیام
-  /// «شما آخرین نسخه را دارید» نشان داده می‌شود.
-  Future<void> _checkForUpdateManually() async {
-    if (_checkingUpdate) return;
-    setState(() => _checkingUpdate = true);
-    try {
-      final updateInfo = await _updateService.checkForUpdate();
-      final currentVersion = await _updateService.getCurrentVersion();
-      if (!mounted) return;
-
-      if (updateInfo != null) {
-        await UpdateDialog.show(
-          context,
-          updateInfo: updateInfo,
-          currentVersion: currentVersion,
-        );
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('You are on the latest version (v$currentVersion)'),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not check for updates. Try again later.'),
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _checkingUpdate = false);
     }
   }
 
@@ -184,6 +140,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         backgroundColor: Colors.transparent, // شفاف - یکپارچه
         elevation: 0,
+        // Quick Guide (help) icon sits as the AppBar leading, right in front of
+        // the "4win VPN" title — up at the top, exactly where the user wants it.
+        leadingWidth: 48,
+        leading: IconButton(
+          padding: EdgeInsets.zero,
+          icon: Icon(Icons.help_outline, color: iconColor),
+          tooltip: 'Quick Guide',
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const GuideScreen()),
+            );
+          },
+        ),
+        titleSpacing: 0,
         title: Text(
           '4win VPN',
           style: TextStyle(
@@ -227,17 +198,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
           ),
           
-          // Dark Mode Toggle (فقط اگر تم برفی نباشد - تم پیکسلی می‌تونه دارک/لایت داشته باشه)
-          if (themeProvider.selectedTheme != AppTheme.snow)
-            IconButton(
-              icon: Icon(
-                themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                color: iconColor,
-              ),
-              tooltip: 'Toggle Theme',
-              onPressed: () => themeProvider.toggleTheme(),
-            ),
-          
+          // Dark/Light toggle removed from home — it now lives inside the Theme
+          // selection screen (opened via the palette icon).
+
           // Donate Button - animated rainbow heart to grab attention
           RainbowHeartButton(
             tooltip: 'Support Us',
@@ -320,19 +283,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 
-                // دکمه‌های عمودی سمت چپ (Quick Guide + Check for update) —
-                // زیر نوار عنوان، در ناحیه‌ای که کاربر مشخص کرد.
-                Positioned(
-                  // Hug the icon column right under the "4win VPN" title. The
-                  // title text is vertically centred in the toolbar; its
-                  // baseline sits at roughly statusBar + toolbar/2 + fontSize/2.
-                  // Placing the icons a little above the toolbar bottom makes
-                  // them look attached to the bottom of the title text.
-                  top: MediaQuery.of(context).padding.top + kToolbarHeight - 8,
-                  left: 16,
-                  child: _buildTopLeftActions(iconColor),
-                ),
-
                 // محتوای اصلی
                 Column(
                   children: [
@@ -943,61 +893,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// The ping row under the timer. For Xray this is a tappable button
   /// (tap-to-ping); the first time it shows "click to ping". Every subsequent
   /// tap runs a fresh measurement. Other protocols keep the auto display.
-  /// دو دکمه‌ی «Quick Guide» و «Check for update» به‌صورت عمودی، سمت چپ صفحه،
-  /// زیر نوار عنوان (همان‌جایی که کاربر با خط قرمز مشخص کرد).
-  Widget _buildTopLeftActions(Color iconColor) {
-    Widget item({
-      required Widget icon,
-      required String tooltip,
-      required VoidCallback? onTap,
-    }) {
-      return Tooltip(
-        message: tooltip,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(20),
-          child: Padding(
-            // Small square hit area, tightly stacked so the two icons read as
-            // one vertical column directly beneath the "4win VPN" title.
-            padding: const EdgeInsets.all(6),
-            child: SizedBox(width: 22, height: 22, child: Center(child: icon)),
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        item(
-          icon: Icon(Icons.help_outline, color: iconColor, size: 22),
-          tooltip: 'Quick Guide',
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const GuideScreen()),
-            );
-          },
-        ),
-        item(
-          icon: _checkingUpdate
-              ? SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(iconColor),
-                  ),
-                )
-              : Icon(Icons.system_update, color: iconColor, size: 22),
-          tooltip: 'Check for update',
-          onTap: _checkingUpdate ? null : _checkForUpdateManually,
-        ),
-      ],
-    );
-  }
-
   Widget _buildPingIndicator(VpnProvider provider, bool isDark) {
     final ping = provider.currentPing;
 

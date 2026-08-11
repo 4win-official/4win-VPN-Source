@@ -2,9 +2,55 @@ import 'dart:ui'; // For ImageFilter
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
+import '../screens/settings_screen.dart';
 
 class ProtocolSelectorDialog extends StatelessWidget {
   const ProtocolSelectorDialog({super.key});
+
+  /// Open the per-protocol settings page for [protocol].
+  void _openProtocolSettings(BuildContext context, String protocol) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SettingsScreen(initialProtocol: protocol),
+      ),
+    );
+  }
+
+  /// Open the GLOBAL settings (affect every protocol) + updates.
+  void _openGlobalSettings(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SettingsScreen(generalOnly: true),
+      ),
+    );
+  }
+
+  /// A small round gear button used both at the top (global) and per-protocol.
+  Widget _gearButton(
+    BuildContext context, {
+    required VoidCallback onTap,
+    required bool isDark,
+    required String tooltip,
+    Color? color,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(
+            Icons.settings,
+            size: 22,
+            color: color ?? (isDark ? Colors.white54 : Colors.black54),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,15 +81,31 @@ class ProtocolSelectorDialog extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      'Select Protocol',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
+                    // Header: title + GLOBAL settings gear (affects all protocols).
+                    Row(
+                      children: [
+                        const SizedBox(width: 34), // balance the trailing gear
+                        Expanded(
+                          child: Text(
+                            'Select Protocol',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                        ),
+                        _gearButton(
+                          context,
+                          isDark: isDark,
+                          tooltip: 'General settings (all protocols)',
+                          color: isDark ? Colors.white : Colors.black87,
+                          onTap: () => _openGlobalSettings(context),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 12),
 
                     // Xray Option (real Xray core / v2rayNG) — DEFAULT, shown first
                     ListTile(
@@ -104,10 +166,20 @@ class ProtocolSelectorDialog extends StatelessWidget {
                           color: isDark ? Colors.white60 : Colors.black54,
                         ),
                       ),
-                      trailing: vpnProvider.selectedProtocol == 'xray'
-                          ? Icon(Icons.check_circle,
-                              color: Colors.tealAccent.shade700)
-                          : null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (vpnProvider.selectedProtocol == 'xray')
+                            Icon(Icons.check_circle,
+                                color: Colors.tealAccent.shade700),
+                          _gearButton(
+                            context,
+                            isDark: isDark,
+                            tooltip: 'Xray settings',
+                            onTap: () => _openProtocolSettings(context, 'xray'),
+                          ),
+                        ],
+                      ),
                       onTap: () {
                         vpnProvider.switchProtocol('xray');
                         Navigator.pop(context); // Auto-close
@@ -142,9 +214,19 @@ class ProtocolSelectorDialog extends StatelessWidget {
                           color: isDark ? Colors.white60 : Colors.black54,
                         ),
                       ),
-                      trailing: vpnProvider.selectedProtocol == 'sstp'
-                          ? const Icon(Icons.check_circle, color: Colors.green)
-                          : null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (vpnProvider.selectedProtocol == 'sstp')
+                            const Icon(Icons.check_circle, color: Colors.green),
+                          _gearButton(
+                            context,
+                            isDark: isDark,
+                            tooltip: 'SSTP settings',
+                            onTap: () => _openProtocolSettings(context, 'sstp'),
+                          ),
+                        ],
+                      ),
                       onTap: () {
                         vpnProvider.switchProtocol('sstp');
                         Navigator.pop(context); // Auto-close
@@ -179,9 +261,20 @@ class ProtocolSelectorDialog extends StatelessWidget {
                           color: isDark ? Colors.white60 : Colors.black54,
                         ),
                       ),
-                      trailing: vpnProvider.selectedProtocol == 'direct_dns'
-                          ? const Icon(Icons.check_circle, color: Colors.blue)
-                          : null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (vpnProvider.selectedProtocol == 'direct_dns')
+                            const Icon(Icons.check_circle, color: Colors.blue),
+                          _gearButton(
+                            context,
+                            isDark: isDark,
+                            tooltip: 'DNS changer settings',
+                            onTap: () =>
+                                _openProtocolSettings(context, 'direct_dns'),
+                          ),
+                        ],
+                      ),
                       onTap: () {
                         vpnProvider.switchProtocol('direct_dns');
                         Navigator.pop(context); // Auto-close
@@ -216,9 +309,19 @@ class ProtocolSelectorDialog extends StatelessWidget {
                           color: isDark ? Colors.white60 : Colors.black54,
                         ),
                       ),
-                      trailing: vpnProvider.selectedProtocol == 'openvpn'
-                          ? const Icon(Icons.check_circle, color: Colors.purple)
-                          : null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (vpnProvider.selectedProtocol == 'openvpn')
+                            const Icon(Icons.check_circle,
+                                color: Colors.purple),
+                          _gearButton(context,
+                              isDark: isDark,
+                              tooltip: 'OpenVPN settings',
+                              onTap: () =>
+                                  _openProtocolSettings(context, 'openvpn')),
+                        ],
+                      ),
                       onTap: () {
                         vpnProvider.switchProtocol('openvpn');
                         Navigator.pop(context); // Auto-close
@@ -286,9 +389,19 @@ class ProtocolSelectorDialog extends StatelessWidget {
                           color: isDark ? Colors.white60 : Colors.black54,
                         ),
                       ),
-                      trailing: vpnProvider.selectedProtocol == 'slowdns'
-                          ? const Icon(Icons.check_circle, color: Colors.orange)
-                          : null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (vpnProvider.selectedProtocol == 'slowdns')
+                            const Icon(Icons.check_circle,
+                                color: Colors.orange),
+                          _gearButton(context,
+                              isDark: isDark,
+                              tooltip: 'Slow DNS settings',
+                              onTap: () =>
+                                  _openProtocolSettings(context, 'slowdns')),
+                        ],
+                      ),
                       onTap: () {
                         vpnProvider.switchProtocol('slowdns');
                         Navigator.pop(context); // Auto-close

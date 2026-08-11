@@ -66,6 +66,13 @@ class VpnProvider with ChangeNotifier {
   bool _xrayRefreshing = false;
   bool get xrayRefreshing => _xrayRefreshing;
 
+  // Monotonic token bumped on every Xray connect start AND on disconnect. An
+  // in-flight Xray connect (which may spend seconds delay-testing a whole
+  // group) captures its token and bails out the moment the token changes — that
+  // is what makes "tap power to cancel while connecting" actually stop the
+  // group test and NOT connect afterwards.
+  int _xrayConnectGen = 0;
+
   // Per-group refresh spinner (updating a single subscription link).
   final Set<String> _xrayRefreshingGroups = {};
   bool xrayGroupRefreshingFor(String group) =>
@@ -1391,6 +1398,9 @@ class VpnProvider with ChangeNotifier {
       {int rounds = 1}) async {
     if (servers.isEmpty || _xrayGroupTesting) return;
     _xrayGroupTesting = true;
+    // Snapshot the connect token so a delay-test launched by a group connect
+    // stops as soon as the user cancels (disconnect bumps _xrayConnectGen).
+    final int testGen = _xrayConnectGen;
     // Mark only the group(s) these servers belong to as "testing" so the
     // spinner shows on the tapped group only, not every group.
     final groups = servers.map((s) => s.group).toSet();
@@ -1425,6 +1435,11 @@ class VpnProvider with ChangeNotifier {
 
       for (var round = 0; round < totalRounds; round++) {
         for (var i = 0; i < servers.length; i += batchSize) {
+          // Abort the whole test if the user cancelled the connect meanwhile.
+          if (testGen != _xrayConnectGen) {
+            if (kDebugMode) debugPrint('🚫 group delay-test aborted (cancelled)');
+            return;
+          }
           final batch = servers.sublist(
               i, (i + batchSize).clamp(0, servers.length));
           for (final s in batch) {
@@ -1557,6 +1572,15 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
+    // Capture this connect attempt's token. If the user taps power to cancel
+    // (disconnect) while we're still delay-testing a group, the token changes
+    // and every checkpoint below aborts cleanly instead of connecting anyway.
+    final int myGen = ++_xrayConnectGen;
+    bool cancelled() =>
+        myGen != _xrayConnectGen ||
+        _status == VpnConnectionStatus.disconnecting ||
+        _status == VpnConnectionStatus.disconnected;
+
     try {
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
@@ -1568,6 +1592,11 @@ class VpnProvider with ChangeNotifier {
       XrayServer? serverToConnect = _selectedXrayServer;
       if (_selectedXrayServer == null && groupHasServers) {
         final fastest = await _pickFastestFreeServer();
+        // User cancelled while the group was being tested → stop, do NOT connect.
+        if (cancelled()) {
+          if (kDebugMode) debugPrint('🚫 Xray connect cancelled during test');
+          return;
+        }
         if (fastest != null) {
           serverToConnect = fastest; // session-only, NOT persisted
         } else {
@@ -1586,12 +1615,22 @@ class VpnProvider with ChangeNotifier {
       final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
       final fragHost = prefs.getString('xray_fragment_host') ?? '';
 
+      if (cancelled()) {
+        if (kDebugMode) debugPrint('🚫 Xray connect cancelled pre-permission');
+        return;
+      }
+
       // Request VPN permission.
       final granted = await XrayConnection.requestPermission();
       if (!granted) {
         _status = VpnConnectionStatus.error;
         _errorMessage = 'VPN permission denied';
         notifyListeners();
+        return;
+      }
+
+      if (cancelled()) {
+        if (kDebugMode) debugPrint('🚫 Xray connect cancelled pre-connect');
         return;
       }
 
@@ -1611,6 +1650,15 @@ class VpnProvider with ChangeNotifier {
       }
 
       final connected = await XrayConnection.connect(configJson);
+      // If the user cancelled meanwhile, tear the just-started tunnel down and
+      // stay disconnected instead of flipping to "connected".
+      if (cancelled()) {
+        if (kDebugMode) debugPrint('🚫 Xray connected late after cancel — tearing down');
+        try {
+          await XrayConnection.disconnect();
+        } catch (_) {}
+        return;
+      }
       if (connected) {
         _status = VpnConnectionStatus.connected;
         _connectedServer = null; // Xray mode
@@ -1637,6 +1685,10 @@ class VpnProvider with ChangeNotifier {
     if (_status == VpnConnectionStatus.disconnecting || _status == VpnConnectionStatus.disconnected) {
       return;
     }
+
+    // Invalidate any in-flight Xray connect (e.g. a group delay-test in
+    // progress) so it aborts instead of connecting after the user cancelled.
+    _xrayConnectGen++;
 
     _status = VpnConnectionStatus.disconnecting;
     notifyListeners();

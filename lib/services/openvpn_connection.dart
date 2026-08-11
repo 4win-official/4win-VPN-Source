@@ -48,13 +48,44 @@ class OpenVpnConnection {
   /// Callback for status changes
   static void Function(VPNStage?)? onStageChanged;
 
+  /// True once we've attached the native OpenVPN state-channel handler.
+  static bool _nativeStateHandlerAttached = false;
+
+  /// Attach a handler on the native OPENVPN_CHANNEL so the app receives the
+  /// authoritative ics-openvpn state events pushed from MainActivity
+  /// ("onOpenVpnState"). The native side reports LEVEL_AUTH_FAILED directly, so
+  /// this is the RELIABLE wrong-username/password signal (the plugin's own
+  /// status-string mapping is lossy and was missing auth failures).
+  static void _attachNativeStateHandler() {
+    if (_nativeStateHandlerAttached) return;
+    _nativeStateHandlerAttached = true;
+    _nativeChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onOpenVpnState') {
+        final args = call.arguments;
+        if (args is Map) {
+          final authFail = args['authFailed'] == true;
+          if (authFail) {
+            authFailed = true;
+            lastError = 'Authentication failed. Wrong username or password.';
+            _currentStage = VPNStage.error;
+            if (onStageChanged != null) onStageChanged!(VPNStage.error);
+          }
+        }
+      }
+      return null;
+    });
+  }
+
   /// Callback for live byte counters (bytesIn, bytesOut) reported by the core.
   static void Function(int bytesIn, int bytesOut)? onByteCount;
   
   /// Initialize OpenVPN
   static Future<void> initialize() async {
+    // Always ensure the native state handler is attached (cheap, idempotent) so
+    // auth-failure events are received even before/without full init.
+    _attachNativeStateHandler();
     if (_initialized) return;
-    
+
     try {
       _openvpn = OpenVPN(
         onVpnStatusChanged: (data) {
