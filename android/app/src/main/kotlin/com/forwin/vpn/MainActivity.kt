@@ -14,6 +14,7 @@ import de.blinkt.openvpn.VpnProfile
 import de.blinkt.openvpn.core.ConfigParser
 import de.blinkt.openvpn.core.VpnStatus
 import de.blinkt.openvpn.core.ConnectionStatus
+import de.blinkt.openvpn.core.LogItem
 import java.io.StringReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -44,6 +45,12 @@ class MainActivity: FlutterActivity() {
     // app detect a wrong username/password exactly like the official app.
     private var openvpnChannel: MethodChannel? = null
     private var openvpnStateListener: VpnStatus.StateListener? = null
+    // A log listener as a SECOND, redundant auth-failure signal: the OpenVPN
+    // core always writes an "AUTH_FAILED" / "auth-failure" log line when the
+    // server rejects the credentials, even in edge cases where the state
+    // transition to LEVEL_AUTH_FAILED is missed. Detecting either guarantees we
+    // catch a wrong username/password like the official app does.
+    private var openvpnLogListener: VpnStatus.LogListener? = null
     
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         // OpenVPN permission handler
@@ -351,6 +358,48 @@ class MainActivity: FlutterActivity() {
             VpnStatus.addStateListener(listener)
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "addStateListener failed: ${e.message}")
+        }
+
+        // ── Redundant auth-failure detection via the core LOG stream ──────────
+        // The core writes an explicit log line when the server rejects the
+        // credentials (typically containing "AUTH_FAILED" or "auth-failure").
+        // Watching the log guarantees we catch a wrong username/password even in
+        // the rare case the state transition is coalesced/missed.
+        openvpnLogListener?.let {
+            try { VpnStatus.removeLogListener(it) } catch (_: Exception) {}
+        }
+        val logListener = object : VpnStatus.LogListener {
+            override fun newLog(item: LogItem?) {
+                if (item == null) return
+                val text = try {
+                    item.getString(applicationContext) ?: item.toString()
+                } catch (_: Exception) {
+                    item.toString()
+                }
+                val lower = text.lowercase()
+                val isAuthFailed = lower.contains("auth_failed") ||
+                    lower.contains("auth-failure") ||
+                    lower.contains("authenticate/decrypt packet error") ||
+                    (lower.contains("auth") && lower.contains("failed"))
+                if (isAuthFailed) {
+                    runOnUiThread {
+                        try {
+                            val map = HashMap<String, Any?>()
+                            map["state"] = "AUTH_FAILED"
+                            map["level"] = "LEVEL_AUTH_FAILED"
+                            map["message"] = text
+                            map["authFailed"] = true
+                            channel.invokeMethod("onOpenVpnState", map)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+        openvpnLogListener = logListener
+        try {
+            VpnStatus.addLogListener(logListener)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "addLogListener failed: ${e.message}")
         }
     }
 

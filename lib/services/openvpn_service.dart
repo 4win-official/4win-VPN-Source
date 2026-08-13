@@ -87,6 +87,27 @@ class OpenVpnService {
     }
   }
   
+  /// Update an existing config (matched by name). Used e.g. after the user
+  /// enters username/password at connect time so the credentials are persisted
+  /// and reused on subsequent connects.
+  Future<bool> updateConfig(OpenVpnConfig config) async {
+    try {
+      final configs = await loadConfigs();
+      final idx = configs.indexWhere((c) => c.name == config.name);
+      if (idx >= 0) {
+        configs[idx] = config;
+      } else {
+        configs.add(config);
+      }
+      return await saveConfigs(configs);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to update OpenVPN config: $e');
+      }
+      return false;
+    }
+  }
+
   /// Remove a config
   Future<bool> removeConfig(String name) async {
     try {

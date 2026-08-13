@@ -36,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _concurrentTests = 100;
   bool _parallelConnection = false; // سوییچ اتصال موازی
   bool _killSwitch = false; // Kill Switch
+  bool _trafficCompression = false; // فشرده‌سازی ترافیک (LZ4) برای OpenVPN
   bool _useCustomServer = false; // سوییچ استفاده از سرور اختصاصی
   bool _deepScan = false; // اسکن عمیق (برای اینترنت ضعیف/محدودیت دولتی)
   String _mtuMode = 'off'; // حالت MTU: off | auto | manual
@@ -140,6 +141,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _concurrentTests = prefs.getInt('concurrent_tests') ?? 100;
       _parallelConnection = prefs.getBool('parallel_connection') ?? false;
       _killSwitch = prefs.getBool('kill_switch') ?? false;
+      _trafficCompression = prefs.getBool('traffic_compression') ?? false;
       _useCustomServer = prefs.getBool('use_custom_server') ?? false;
       _deepScan = prefs.getBool('deep_scan') ?? false;
       // مهاجرت از سوییچ قدیمی auto_mtu به حالت سه‌گانه جدید
@@ -768,6 +770,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setInt('concurrent_tests', _concurrentTests);
     await prefs.setBool('parallel_connection', _parallelConnection);
     await prefs.setBool('kill_switch', _killSwitch);
+    await prefs.setBool('traffic_compression', _trafficCompression);
     await prefs.setBool('use_custom_server', _useCustomServer);
     
     if (mounted) {
@@ -1930,6 +1933,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 
                 const SizedBox(height: 24),
+
+                // Traffic Compression — global setting (affects all protocols
+                // that support it; currently applied to OpenVPN configs). Adds
+                // an LZ4 compression layer to the tunnel, which can cut data
+                // usage on compressible traffic.
+                if (widget.generalOnly) ...[
+                  _SettingsSection(
+                    title: 'Data',
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Traffic Compression',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _trafficCompression
+                                      ? 'LZ4 compression on — can reduce data usage up to ~30%'
+                                      : 'Compress tunnel traffic (LZ4) to save data',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black38,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch(
+                            value: _trafficCompression,
+                            onChanged: (value) {
+                              setState(() => _trafficCompression = value);
+                            },
+                            activeTrackColor: isDark
+                                ? const Color(0xFF00FF88)
+                                : Colors.blue,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
 
                 // Updates — global setting shown only in the general/global
                 // settings page (moved here from the home screen top-left icon).

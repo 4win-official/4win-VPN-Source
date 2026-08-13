@@ -96,6 +96,14 @@ class VpnProvider with ChangeNotifier {
   List<OpenVpnConfig> get openVpnConfigs => _openVpnConfigs;
   OpenVpnConfig? get selectedOpenVpnConfig => _selectedOpenVpnConfig;
 
+  /// Set by the UI. When an OpenVPN config REQUIRES username/password auth but
+  /// none were supplied at import time, the connect path calls this so the UI
+  /// can prompt the user for credentials (exactly like the official OpenVPN
+  /// app, which asks at connect time). Returning null means the user cancelled
+  /// → the connection is aborted. Returning a (user, pass) pair injects them.
+  Future<({String username, String password})?> Function(OpenVpnConfig config)?
+      onOpenVpnCredentialsRequired;
+
   List<VpnServer> _servers = [];
   VpnServer? _selectedServer;
   VpnServer? _connectedServer;
@@ -937,6 +945,13 @@ class VpnProvider with ChangeNotifier {
   /// hits a HARD auth failure (wrong user/pass). The client cert requirement is
   /// always bypassed (the user has already consented once).
   Future<void> _connectOpenVpn({bool forceBypassCert = false}) async {
+    // Apply the global Traffic Compression toggle before building the config.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      OpenVpnConfig.trafficCompressionEnabled =
+          prefs.getBool('traffic_compression') ?? false;
+    } catch (_) {}
+
     if (_selectedOpenVpnConfig == null) {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Please select an OpenVPN config first';
@@ -945,14 +960,70 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
+    // ── Prompt for credentials at connect time (like the official app) ──
+    // If the config requires username/password auth but none were entered at
+    // import time (and none are embedded in the file), ask the user NOW rather
+    // than firing a doomed connection that just retries forever.
+    final cfg = _selectedOpenVpnConfig!;
+    final hasUser = (cfg.effectiveUsername ?? '').isNotEmpty;
+    final hasPass = (cfg.effectivePassword ?? '').isNotEmpty;
+    if (cfg.requiresAuth && (!hasUser || !hasPass)) {
+      final cb = onOpenVpnCredentialsRequired;
+      if (cb != null) {
+        final creds = await cb(cfg);
+        if (creds == null) {
+          // User cancelled the credentials prompt → abort cleanly.
+          _status = VpnConnectionStatus.disconnected;
+          notifyListeners();
+          return;
+        }
+        // Persist the entered credentials on the config so subsequent
+        // connects (and the retry loop) reuse them.
+        final updated = OpenVpnConfig(
+          name: cfg.name,
+          config: cfg.config,
+          username: creds.username,
+          password: creds.password,
+          addedAt: cfg.addedAt,
+        );
+        _selectedOpenVpnConfig = updated;
+        try {
+          await _openVpnService.updateConfig(updated);
+        } catch (_) {}
+        final idx = _openVpnConfigs.indexWhere((c) => c.name == cfg.name);
+        if (idx >= 0) _openVpnConfigs[idx] = updated;
+      }
+    }
+
     // Tear down any prior/stale native session first.
     try {
       await OpenVpnConnection.disconnect();
     } catch (_) {}
 
+    // Clear the session-sticky auth-failed flag EXACTLY once, now that this is
+    // a fresh user-initiated connection. (The internal retry loop must NOT
+    // clear it, so a late auth-failure isn't lost between attempts.)
+    OpenVpnConnection.beginSession();
+
     _status = VpnConnectionStatus.connecting;
     _errorMessage = null;
     notifyListeners();
+
+    // The instant the native core reports an auth failure, stop the whole
+    // retry cycle and surface the error — like the official OpenVPN app.
+    // `_finishCurrentAttempt` lets the auth callback complete the in-flight
+    // attempt's completer immediately (so we don't wait for the 15s watchdog).
+    bool authAborted = false;
+    void Function(bool)? finishCurrentAttempt;
+    OpenVpnConnection.onAuthFailed = () {
+      authAborted = true;
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Authentication failed. Wrong username or password.';
+      _stopDurationTimer();
+      _stopPingTimer();
+      notifyListeners();
+      finishCurrentAttempt?.call(false);
+    };
 
     // Live traffic counters (persist across retries).
     OpenVpnConnection.onByteCount = (int bytesIn, int bytesOut) {
@@ -965,9 +1036,21 @@ class VpnProvider with ChangeNotifier {
     while (true) {
       attempt++;
 
+      // Auth failed at any point → stop the whole cycle immediately.
+      if (authAborted || OpenVpnConnection.authFailed) {
+        OpenVpnConnection.onAuthFailed = null;
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Authentication failed. Wrong username or password.';
+        _stopDurationTimer();
+        _stopPingTimer();
+        notifyListeners();
+        return;
+      }
+
       // Stop if the user cancelled meanwhile.
       if (_status == VpnConnectionStatus.disconnected ||
           _status == VpnConnectionStatus.disconnecting) {
+        OpenVpnConnection.onAuthFailed = null;
         return;
       }
 
@@ -982,6 +1065,9 @@ class VpnProvider with ChangeNotifier {
       void finish(bool ok) {
         if (!completer.isCompleted) completer.complete(ok);
       }
+
+      // Expose this attempt's finisher to the auth-failure callback.
+      finishCurrentAttempt = finish;
 
       OpenVpnConnection.onStageChanged = (VPNStage? stage) {
         if (OpenVpnConnection.generation != myGen) return;
@@ -1026,12 +1112,14 @@ class VpnProvider with ChangeNotifier {
       watchdog.cancel();
 
       if (ok) {
+        OpenVpnConnection.onAuthFailed = null;
         if (kDebugMode) debugPrint('✅ OpenVPN connected on attempt $attempt');
         return;
       }
 
       // HARD auth failure → stop immediately and tell the user.
-      if (OpenVpnConnection.authFailed) {
+      if (authAborted || OpenVpnConnection.authFailed) {
+        OpenVpnConnection.onAuthFailed = null;
         _status = VpnConnectionStatus.error;
         _errorMessage = 'Authentication failed. Wrong username or password.';
         _stopDurationTimer();
@@ -1044,6 +1132,7 @@ class VpnProvider with ChangeNotifier {
       // User cancelled during the attempt.
       if (_status == VpnConnectionStatus.disconnected ||
           _status == VpnConnectionStatus.disconnecting) {
+        OpenVpnConnection.onAuthFailed = null;
         return;
       }
 

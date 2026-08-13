@@ -11,6 +11,13 @@
 /// We now parse the config EXACTLY ONCE (lazily, cached) and every getter reads
 /// from that cache. This is what makes selection instant.
 class OpenVpnConfig {
+  /// Global "Traffic Compression" toggle (from General Settings). When true, an
+  /// LZ4 compression directive is injected into every OpenVPN profile that does
+  /// not already declare its own compression, so the tunnel compresses traffic
+  /// (can reduce data usage on compressible payloads). Set by VpnProvider from
+  /// the persisted `traffic_compression` preference before a connect.
+  static bool trafficCompressionEnabled = false;
+
   final String name; // نام کانفیگ
   final String config; // محتوای فایل .ovpn
   final String? username; // نام کاربری (اختیاری)
@@ -146,12 +153,37 @@ class OpenVpnConfig {
   ///   2. inject `<auth-user-pass>` ONLY when the user supplied credentials and
   ///      the config carries no auth directive of its own.
   /// Always terminated by a newline.
-  String? _normalizedCache;
-  String get normalizedConfig {
-    final cached = _normalizedCache;
-    if (cached != null) return cached;
+  /// Whitespace/junk sanitizer. Some real-world configs (e.g. exported from
+  /// Hiddify / cg-dialup) carry Windows CRLF line endings AND thousands of
+  /// trailing blank lines. Those blank lines are harmless to the core but are
+  /// CATASTROPHIC for our `dotAll` regexes (`configWithoutClientCert`), which
+  /// then chew through ~15k empty lines ON THE UI THREAD — the app freezes
+  /// (hang) and then ANR-crashes. This is exactly the "connects everywhere but
+  /// hangs+crashes in our app" report. We normalise line endings and collapse
+  /// runs of blank lines ONCE, up front, so nothing downstream ever sees them.
+  static String _sanitize(String raw) {
+    // Normalise CRLF/CR → LF.
+    String s = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    // Trim trailing spaces/tabs on each line.
+    s = s.replaceAll(RegExp(r'[ \t]+$', multiLine: true), '');
+    // Collapse 2+ consecutive blank lines into a single blank line.
+    s = s.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    return s.trim();
+  }
 
-    String normalized = config;
+  String? _normalizedCache;
+  bool? _normalizedCompression;
+  String get normalizedConfig {
+    // Cache is keyed on the global compression toggle so flipping it in
+    // settings actually takes effect on the next connect.
+    final cached = _normalizedCache;
+    if (cached != null &&
+        _normalizedCompression == trafficCompressionEnabled) {
+      return cached;
+    }
+
+    // 🔴 STEP 0 — sanitize first (fixes the hang/crash on bloated configs).
+    String normalized = _sanitize(config);
 
     // Fix 1: whole-line `proto tcp` → `proto tcp-client`.
     normalized = normalized.replaceAllMapped(
@@ -159,31 +191,48 @@ class OpenVpnConfig {
       (m) => '${m.group(1)}tcp-client',
     );
 
+    // Fix 1a: clamp a runaway `connect-retry-max` (some configs ship
+    // `connect-retry-max 9999`, which makes the core spin internally for a very
+    // long time and appear hung). We own the retry loop ourselves, so cap it.
+    normalized = normalized.replaceAll(
+      RegExp(r'^\s*connect-retry-max\s+\d+.*$', multiLine: true),
+      'connect-retry-max 3',
+    );
+
     // Fix 1b: The official OpenVPN app connects even when a config references a
     // client cert/key FILE that isn't present (it shows a warning and proceeds).
-    // ics-openvpn instead rejects such a profile with `missing_certificates`
-    // (auth type becomes USERPASS_CERTIFICATES=5 but the file paths are empty),
+    // ics-openvpn instead rejects such a profile with `missing_certificates`,
     // so the tunnel never starts. To mirror the official app, strip FILE-based
-    // `cert <file>` / `key <file>` / `pkcs12 <file>` directives. Inline
-    // `<cert>` / `<key>` / `<pkcs12>` blocks (which carry a real certificate)
-    // are left untouched. This makes the profile parse as pure user/pass
-    // (auth type USERPASS=3), which passes checkProfile and connects.
-    final bool hasInlineCert = normalized.contains('<cert>') ||
-        normalized.contains('<key>') ||
-        normalized.contains('<pkcs12>');
-    if (!hasInlineCert) {
+    // `cert <file>` / `key <file>` / `pkcs12 <file>` directives.
+    //
+    // 🔴 CRITICAL: an INLINE `<cert>` block with NO matching `<key>` (exactly
+    // this Hiddify config) is INVALID for a certificate auth type — ics-openvpn
+    // either rejects it or STALLS waiting for a private key that never comes.
+    // Since the config authenticates with username/password (`<auth-user-pass>`
+    // present), the client certificate is not actually needed. So: only treat
+    // it as a real inline-cert profile when BOTH `<cert>` and `<key>` exist.
+    // Otherwise we strip the lone `<cert>`/`<key>` block so the profile parses
+    // as pure user/pass (auth type 3) and connects — like the official app.
+    final bool hasInlineCert = normalized.contains('<cert>');
+    final bool hasInlineKey = normalized.contains('<key>');
+    final bool hasInlinePkcs12 = normalized.contains('<pkcs12>');
+    final bool validInlineCertPair =
+        (hasInlineCert && hasInlineKey) || hasInlinePkcs12;
+    if (!validInlineCertPair) {
+      // Remove any lone inline <cert>/<key> blocks (they'd stall the core).
+      for (final tag in ['cert', 'key']) {
+        normalized = normalized.replaceAll(
+          RegExp('<$tag>.*?</$tag>\\s*', dotAll: true),
+          '',
+        );
+      }
+      // Remove file-based cert/key/pkcs12 directives.
       normalized = normalized.replaceAll(
-        RegExp(r'^\s*cert\s+\S.*$', multiLine: true),
-        '',
-      );
+          RegExp(r'^\s*cert\s+\S.*$', multiLine: true), '');
       normalized = normalized.replaceAll(
-        RegExp(r'^\s*key\s+\S.*$', multiLine: true),
-        '',
-      );
+          RegExp(r'^\s*key\s+\S.*$', multiLine: true), '');
       normalized = normalized.replaceAll(
-        RegExp(r'^\s*pkcs12\s+\S.*$', multiLine: true),
-        '',
-      );
+          RegExp(r'^\s*pkcs12\s+\S.*$', multiLine: true), '');
     }
 
     // Fix 2: add credentials only if provided and config has none of its own.
@@ -203,13 +252,29 @@ class OpenVpnConfig {
       }
     }
 
-    // ALWAYS end with a newline. This is what makes the plugin's
-    // `config += "client-cert-not-required"` (appended when certIsRequired ==
-    // false) land on its OWN line instead of being glued onto the last config
-    // line — the difference between a profile that parses and one that stalls.
+    // Fix 3: Traffic Compression (global setting). Inject an LZ4 compression
+    // directive when the user enabled it AND the config declares no compression
+    // of its own. `compress lz4-v2` is the modern, safe form ics-openvpn
+    // supports; when the peer doesn't negotiate it, it degrades gracefully.
+    if (trafficCompressionEnabled) {
+      final hasComp = normalized.contains(RegExp(
+          r'^\s*(compress|comp-lzo)\b',
+          multiLine: true));
+      if (!hasComp) {
+        normalized = 'compress lz4-v2\n$normalized';
+      }
+    } else {
+      // If OFF, strip any compression the config shipped with so the toggle is
+      // authoritative across all protocols/configs.
+      normalized = normalized.replaceAll(
+          RegExp(r'^\s*(compress|comp-lzo)\b.*$', multiLine: true), '');
+    }
+
+    // ALWAYS end with a newline (see plugin's client-cert-not-required append).
     if (!normalized.endsWith('\n')) normalized = '$normalized\n';
 
     _normalizedCache = normalized;
+    _normalizedCompression = trafficCompressionEnabled;
     return normalized;
   }
 

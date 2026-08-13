@@ -38,9 +38,93 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // بررسی خودکار آپدیت هنگام ورود به اپ + نمایش راهنما در اولین اجرا
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Prompt for OpenVPN credentials at connect time when the config needs
+      // them but none were entered at import (like the official OpenVPN app).
+      if (mounted) {
+        context.read<VpnProvider>().onOpenVpnCredentialsRequired =
+            _promptOpenVpnCredentials;
+      }
       await _maybeShowGuide();
       await _checkForUpdate();
     });
+  }
+
+  /// Shows a username/password dialog for an OpenVPN config that requires auth
+  /// but has no stored credentials. Returns null if the user cancels.
+  Future<({String username, String password})?> _promptOpenVpnCredentials(
+      config) async {
+    final userCtrl = TextEditingController(
+        text: (config.effectiveUsername ?? '').toString());
+    final passCtrl = TextEditingController(
+        text: (config.effectivePassword ?? '').toString());
+    bool obscure = true;
+    final result =
+        await showDialog<({String username, String password})?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('Enter Credentials'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'This config requires a username and password.',
+                style: TextStyle(
+                    fontSize: 13, color: Theme.of(ctx).hintColor),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: userCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Username',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: passCtrl,
+                obscureText: obscure,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(obscure
+                        ? Icons.visibility
+                        : Icons.visibility_off),
+                    onPressed: () => setD(() => obscure = !obscure),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final u = userCtrl.text.trim();
+                final p = passCtrl.text;
+                if (u.isEmpty || p.isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                        content:
+                            Text('Username and password are required')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, (username: u, password: p));
+              },
+              child: const Text('Connect'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return result;
   }
 
   /// در اولین اجرای اپ، راهنمای تصویری به‌صورت خودکار نمایش داده می‌شود تا

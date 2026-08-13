@@ -43,7 +43,26 @@ class OpenVpnConnection {
   /// username/password). This is a HARD, non-retryable error — the caller must
   /// stop retrying immediately and tell the user their credentials are wrong,
   /// exactly like the official OpenVPN app.
+  ///
+  /// IMPORTANT: this flag is SESSION-STICKY. It is reset ONLY when the user
+  /// starts a brand-new connection via [beginSession] (or on [disconnect]),
+  /// NOT on each internal retry `connect()`. Otherwise an auth-failure that
+  /// arrives slightly late (after the retry loop already started the next
+  /// attempt) would be wiped by that attempt's reset and the loop would spin
+  /// forever — which is exactly why wrong credentials were never detected.
   static bool authFailed = false;
+
+  /// Optional callback fired the instant an auth failure is detected natively,
+  /// so the retry loop can abort immediately instead of waiting for the next
+  /// iteration. Set by the connect path.
+  static void Function()? onAuthFailed;
+
+  /// Reset per-user-connection state. Called by the provider at the very start
+  /// of a user-initiated OpenVPN connect (before the retry loop), so the
+  /// auth-failed flag is cleared exactly once per user action.
+  static void beginSession() {
+    authFailed = false;
+  }
 
   /// Callback for status changes
   static void Function(VPNStage?)? onStageChanged;
@@ -68,6 +87,7 @@ class OpenVpnConnection {
             authFailed = true;
             lastError = 'Authentication failed. Wrong username or password.';
             _currentStage = VPNStage.error;
+            if (onAuthFailed != null) onAuthFailed!();
             if (onStageChanged != null) onStageChanged!(VPNStage.error);
           }
         }
@@ -122,6 +142,7 @@ class OpenVpnConnection {
             authFailed = true;
             lastError = 'Authentication failed. Wrong username or password.';
             _currentStage = VPNStage.error;
+            if (onAuthFailed != null) onAuthFailed!();
             if (onStageChanged != null) onStageChanged!(VPNStage.error);
             return;
           }
@@ -229,7 +250,9 @@ class OpenVpnConnection {
   }) async {
     final int myGen = ++_generation;
     _userStopped = false;
-    authFailed = false;
+    // NOTE: do NOT reset `authFailed` here. It is session-sticky and cleared
+    // only by beginSession()/disconnect(), so a late auth-failure from the
+    // previous attempt isn't wiped by the next retry. See the field docs.
     try {
       // Open the grace window BEFORE initialize(), because initialize() itself
       // queries the engine and emits a `disconnected` default status that must
@@ -409,6 +432,7 @@ class OpenVpnConnection {
     // are ignored and it stops trying in the background.
     _generation++;
     _userStopped = true;
+    authFailed = false;
     try {
       if (!_initialized) {
         _connectRequestedAt = null;
