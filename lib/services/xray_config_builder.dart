@@ -26,11 +26,27 @@ class XrayConfigBuilder {
     String fragmentLength = '10-20',
     String fragmentInterval = '10-20',
     String fragmentHost = '',
+    bool trafficCompression = false,
   }) {
     final outbounds = <Map<String, dynamic>>[];
 
     // 1) Main proxy outbound parsed from the share link.
     final proxy = _buildProxyOutbound(server);
+
+    // Traffic-compression (data-saver) for Xray: enable mux.cool multiplexing
+    // on the proxy outbound. Xray has NO payload-compression codec for the
+    // arbitrary (already-encrypted) traffic it tunnels, so LZ4-style byte
+    // compression is impossible here; mux is the real, effective client-side
+    // knob — it funnels many logical streams down one connection, cutting the
+    // per-connection TLS/handshake overhead and reducing total bytes on the
+    // wire for the many-small-request traffic (web pages, chat, API calls)
+    // where a data-saver actually helps.
+    if (trafficCompression) {
+      proxy['mux'] = <String, dynamic>{
+        'enabled': true,
+        'concurrency': 8,
+      };
+    }
 
     // Optional Fakehost: override the TLS SNI (serverName) so the ClientHello
     // that DPI sees carries a benign domain instead of the real destination.

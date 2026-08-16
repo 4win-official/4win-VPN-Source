@@ -1934,10 +1934,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 
                 const SizedBox(height: 24),
 
-                // Traffic Compression — global setting (affects all protocols
-                // that support it; currently applied to OpenVPN configs). Adds
-                // an LZ4 compression layer to the tunnel, which can cut data
-                // usage on compressible traffic.
+                // Traffic Compression — global data-saver setting applied to
+                // every protocol that can reduce data on the client side:
+                //   • OpenVPN  → real LZ4 (`compress lz4-v2`) tunnel compression
+                //   • Xray     → mux.cool multiplexing (cuts per-connection
+                //                overhead; Xray has no payload codec)
+                // SSTP / SlowDNS / Direct-DNS carry already-encrypted traffic
+                // with no client-side compression codec, so the switch is a
+                // no-op there — enabling it never hurts.
                 if (widget.generalOnly) ...[
                   _SettingsSection(
                     title: 'Data',
@@ -1960,8 +1964,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 const SizedBox(height: 4),
                                 Text(
                                   _trafficCompression
-                                      ? 'LZ4 compression on — can reduce data usage up to ~30%'
-                                      : 'Compress tunnel traffic (LZ4) to save data',
+                                      ? 'On — LZ4 for OpenVPN + Mux for Xray, can reduce data usage'
+                                      : 'Compress tunnel traffic to save data (all protocols)',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: isDark
@@ -2041,10 +2045,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SettingsSection(
                   title: 'About',
                   children: [
-                    _InfoRow('Protocol', _protocolDisplayName(effProto), isDark),
-                    // Show servers only for SSTP
-                    if (effProto == 'sstp')
-                      _InfoRow('Servers', '${provider.servers.length} available', isDark),
+                    if (widget.generalOnly) ...[
+                      // General settings apply to ALL protocols — make that
+                      // explicit instead of showing a single protocol name
+                      // (which made users think it was one protocol's settings).
+                      _InfoRow('Applies to', 'All protocols', isDark),
+                      _InfoRow('App', '4win VPN', isDark),
+                    ] else ...[
+                      _InfoRow(
+                          'Protocol', _protocolDisplayName(effProto), isDark),
+                      // Show servers only for SSTP
+                      if (effProto == 'sstp')
+                        _InfoRow('Servers',
+                            '${provider.servers.length} available', isDark),
+                    ],
                   ],
                 ),
                 

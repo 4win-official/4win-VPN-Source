@@ -1703,6 +1703,7 @@ class VpnProvider with ChangeNotifier {
       final fragLength = prefs.getString('xray_fragment_length') ?? '10-20';
       final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
       final fragHost = prefs.getString('xray_fragment_host') ?? '';
+      final trafficCompression = prefs.getBool('traffic_compression') ?? false;
 
       if (cancelled()) {
         if (kDebugMode) debugPrint('🚫 Xray connect cancelled pre-permission');
@@ -1731,6 +1732,7 @@ class VpnProvider with ChangeNotifier {
         fragmentLength: fragLength,
         fragmentInterval: fragInterval,
         fragmentHost: fragHost,
+        trafficCompression: trafficCompression,
       );
 
       if (kDebugMode) {
