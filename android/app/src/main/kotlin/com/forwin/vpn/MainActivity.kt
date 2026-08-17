@@ -52,6 +52,40 @@ class MainActivity: FlutterActivity() {
     // catch a wrong username/password like the official app does.
     private var openvpnLogListener: VpnStatus.LogListener? = null
     
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        // ── Force the app to open in ITS OWN task ────────────────────────────
+        // When another app (Telegram, a file manager, OpenVPN, …) launches us
+        // via a VIEW/SEND intent WITHOUT FLAG_ACTIVITY_NEW_TASK, Android places
+        // our activity on top of the CALLER's task. The user then sees our app
+        // "inside" Telegram, back goes to Telegram, and the mixed task can even
+        // crash. We detect that case (the launching intent is an inbound
+        // VIEW/SEND that lacks NEW_TASK) and relaunch ourselves in a brand-new,
+        // independent task, carrying the same data, then finish this instance.
+        val launchIntent = intent
+        val action = launchIntent?.action
+        val isInboundFile = action == Intent.ACTION_VIEW || action == Intent.ACTION_SEND
+        val lacksNewTask = launchIntent != null &&
+            (launchIntent.flags and Intent.FLAG_ACTIVITY_NEW_TASK) == 0
+        if (isInboundFile && lacksNewTask) {
+            try {
+                val relaunch = Intent(launchIntent)
+                relaunch.setClass(this, MainActivity::class.java)
+                relaunch.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_NEW_DOCUMENT or
+                        Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+                )
+                super.onCreate(savedInstanceState)
+                startActivity(relaunch)
+                finish()
+                return
+            } catch (_: Exception) {
+                // Fall through to normal startup if relaunch fails.
+            }
+        }
+        super.onCreate(savedInstanceState)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         // OpenVPN permission handler
         OpenVPNFlutterPlugin.connectWhileGranted(requestCode == 24 && resultCode == RESULT_OK)

@@ -1039,6 +1039,13 @@ class VpnProvider with ChangeNotifier {
       // Auth failed at any point → stop the whole cycle immediately.
       if (authAborted || OpenVpnConnection.authFailed) {
         OpenVpnConnection.onAuthFailed = null;
+        OpenVpnConnection.onStageChanged = null;
+        // Kill the native tunnel so ics-openvpn's own connect-retry does NOT
+        // keep reconnecting behind our back and flip the UI back to
+        // "connecting". (resetAuthState:true — this is a terminal stop.)
+        try {
+          await OpenVpnConnection.disconnect();
+        } catch (_) {}
         _status = VpnConnectionStatus.error;
         _errorMessage = 'Authentication failed. Wrong username or password.';
         _stopDurationTimer();
@@ -1051,6 +1058,7 @@ class VpnProvider with ChangeNotifier {
       if (_status == VpnConnectionStatus.disconnected ||
           _status == VpnConnectionStatus.disconnecting) {
         OpenVpnConnection.onAuthFailed = null;
+        OpenVpnConnection.onStageChanged = null;
         return;
       }
 
@@ -1120,6 +1128,12 @@ class VpnProvider with ChangeNotifier {
       // HARD auth failure → stop immediately and tell the user.
       if (authAborted || OpenVpnConnection.authFailed) {
         OpenVpnConnection.onAuthFailed = null;
+        OpenVpnConnection.onStageChanged = null;
+        // Kill the native tunnel so its own connect-retry can't restart the
+        // "connecting" loop after we've decided auth failed.
+        try {
+          await OpenVpnConnection.disconnect();
+        } catch (_) {}
         _status = VpnConnectionStatus.error;
         _errorMessage = 'Authentication failed. Wrong username or password.';
         _stopDurationTimer();
@@ -1137,10 +1151,24 @@ class VpnProvider with ChangeNotifier {
       }
 
       // Reset the native session and retry after 4s — silently (UI stays on
-      // "connecting", no error shown).
+      // "connecting", no error shown). Do NOT clear the auth-failed state here,
+      // so a wrong-password detected late (during teardown) still aborts.
       try {
-        await OpenVpnConnection.disconnect();
+        await OpenVpnConnection.disconnect(resetAuthState: false);
       } catch (_) {}
+      if (authAborted || OpenVpnConnection.authFailed) {
+        OpenVpnConnection.onAuthFailed = null;
+        OpenVpnConnection.onStageChanged = null;
+        try {
+          await OpenVpnConnection.disconnect();
+        } catch (_) {}
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Authentication failed. Wrong username or password.';
+        _stopDurationTimer();
+        _stopPingTimer();
+        notifyListeners();
+        return;
+      }
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
       await Future.delayed(const Duration(seconds: 4));

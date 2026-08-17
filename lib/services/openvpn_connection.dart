@@ -506,15 +506,22 @@ class OpenVpnConnection {
   }
   
   /// Disconnect from OpenVPN
-  static Future<bool> disconnect() async {
+  static Future<bool> disconnect({bool resetAuthState = true}) async {
     // Invalidate any in-flight connect attempt so its late callbacks/results
     // are ignored and it stops trying in the background.
     _generation++;
     _userStopped = true;
-    authFailed = false;
-    _sawAuthenticating = false;
-    _authWatchdog?.cancel();
-    _authWatchdog = null;
+    // Only clear the auth-failure state on a real user-initiated disconnect.
+    // The internal retry loop calls disconnect(resetAuthState: false) between
+    // attempts — if it cleared the flag there, a wrong-password would be
+    // "forgotten" and the loop would keep reconnecting forever, and only the
+    // very first attempt could ever detect the failure.
+    if (resetAuthState) {
+      authFailed = false;
+      _sawAuthenticating = false;
+      _authWatchdog?.cancel();
+      _authWatchdog = null;
+    }
     try {
       if (!_initialized) {
         _connectRequestedAt = null;
