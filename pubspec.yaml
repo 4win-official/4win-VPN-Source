@@ -74,6 +74,9 @@ dependencies:
   # File system path (for downloading APK update)
   path_provider: ^2.1.4
 
+  # Pick a custom background image for the default theme
+  image_picker: ^1.1.2
+
   # Open downloaded APK to trigger install intent
   open_filex: ^4.5.0
 

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:openvpn_flutter/openvpn_flutter.dart';
@@ -33,18 +32,6 @@ class OpenVpnConnection {
   /// True once the tunnel has entered the "authenticating" phase (raw core
   /// state AUTH → plugin stage "authenticating"). ics-openvpn's bundled
   /// VPNHelper does NOT map the AUTH_FAILED core state to any plugin stage, so
-  /// when the server rejects the credentials the plugin stays silent and just
-  /// drops back to disconnected/reconnect/noprocess. We use that transition —
-  /// "was authenticating, never reached connected, now dropping" — as a
-  /// RELIABLE client-side auth-failure signal that does not depend on the flaky
-  /// native AUTH_FAILED string reaching Dart.
-  static bool _sawAuthenticating = false;
-
-  /// Watchdog that fires if we sit in the "authenticating" phase too long
-  /// without connecting — another strong wrong-credentials symptom (the server
-  /// keeps renegotiating / the auth handshake never completes).
-  static Timer? _authWatchdog;
-
   /// Native channel to validate an OpenVPN config with the REAL ics-openvpn
   /// parser/checkProfile before we hand it to the plugin (whose connect path
   /// silently swallows parse errors). Lets us surface the actual reason a
@@ -78,21 +65,15 @@ class OpenVpnConnection {
   /// auth-failed flag is cleared exactly once per user action.
   static void beginSession() {
     authFailed = false;
-    _sawAuthenticating = false;
-    _authWatchdog?.cancel();
-    _authWatchdog = null;
   }
 
   /// Central auth-failure trigger. Idempotent — sets the sticky flag, records
-  /// the message, cancels the watchdog, notifies the retry loop and flips the
-  /// stage to error exactly once.
+  /// the message, notifies the retry loop and flips the stage to error once.
   static void _markAuthFailed() {
     if (authFailed) return;
     authFailed = true;
     lastError = 'Authentication failed. Wrong username or password.';
     _currentStage = VPNStage.error;
-    _authWatchdog?.cancel();
-    _authWatchdog = null;
     if (onAuthFailed != null) onAuthFailed!();
     if (onStageChanged != null) onStageChanged!(VPNStage.error);
   }
@@ -164,61 +145,16 @@ class OpenVpnConnection {
           // raw native status string arrives in `message` (e.g. "AUTH_FAILED").
           final msg = message.toLowerCase();
           final stageStr = stage.toString().toLowerCase();
+          // ONLY treat as auth failure when the core EXPLICITLY says so
+          // (raw AUTH_FAILED status / native LEVEL_AUTH_FAILED). No heuristics —
+          // a healthy config briefly passing through "authenticating" then a
+          // transient drop must NOT be mistaken for wrong credentials.
           if (msg.contains('auth_failed') ||
               msg.contains('authfailed') ||
               msg.contains('auth failed') ||
               msg.contains('auth-failure') ||
               msg.contains('authentication failed') ||
               stageStr.contains('auth_failed')) {
-            _markAuthFailed();
-            return;
-          }
-
-          // ── HEURISTIC auth-failure detection (the reliable path) ────────────
-          // ics-openvpn's bundled VPNHelper maps the core AUTH state to the
-          // plugin stage "authenticating" but has NO case for the AUTH_FAILED
-          // core state — so on wrong credentials the plugin NEVER emits an
-          // auth-failed stage/message; it silently drops back to
-          // disconnected / no_connection / reconnect. We therefore infer the
-          // failure from the transition:
-          //   authenticating  →  (disconnected | noconnection | reconnect | error)
-          // while we NEVER reached "connected". That transition, or repeatedly
-          // bouncing on "authenticating", is a wrong-username/password.
-          final isAuthStage = stageStr.contains('authenticating') ||
-              (stageStr.contains('auth') && !stageStr.contains('failed'));
-          if (stage == VPNStage.authenticating || isAuthStage) {
-            _sawAuthenticating = true;
-            // Arm/refresh a watchdog: if we are still stuck authenticating (or
-            // bouncing through it) after 12s without ever connecting, treat it
-            // as an auth failure and stop.
-            _authWatchdog?.cancel();
-            _authWatchdog = Timer(const Duration(seconds: 12), () {
-              if (!_sawConnected && !authFailed) {
-                if (kDebugMode) {
-                  debugPrint('🛑 Stuck authenticating >12s → treat as auth fail');
-                }
-                _markAuthFailed();
-              }
-            });
-          }
-
-          // If we had entered the authenticating phase and now drop WITHOUT ever
-          // having connected → the server rejected the credentials.
-          final droppedAfterAuth = _sawAuthenticating &&
-              !_sawConnected &&
-              (stage == VPNStage.disconnected ||
-                  stage == VPNStage.exiting ||
-                  stage == VPNStage.error ||
-                  stage == VPNStage.denied ||
-                  stageStr.contains('noconnection') ||
-                  stageStr.contains('no_connection') ||
-                  stageStr.contains('noprocess') ||
-                  stageStr.contains('disconnected'));
-          if (droppedAfterAuth) {
-            if (kDebugMode) {
-              debugPrint('🛑 Dropped after authenticating (never connected) '
-                  '→ auth failure');
-            }
             _markAuthFailed();
             return;
           }
@@ -252,9 +188,6 @@ class OpenVpnConnection {
 
           if (stage == VPNStage.connected) {
             _sawConnected = true;
-            _sawAuthenticating = false;
-            _authWatchdog?.cancel();
-            _authWatchdog = null;
           }
 
           _currentStage = stage;
@@ -518,9 +451,6 @@ class OpenVpnConnection {
     // very first attempt could ever detect the failure.
     if (resetAuthState) {
       authFailed = false;
-      _sawAuthenticating = false;
-      _authWatchdog?.cancel();
-      _authWatchdog = null;
     }
     try {
       if (!_initialized) {

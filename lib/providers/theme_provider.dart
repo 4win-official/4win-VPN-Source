@@ -12,13 +12,27 @@ enum AppTheme {
 class ThemeProvider with ChangeNotifier {
   static const String _darkModeKey = 'is_dark_mode';
   static const String _themeKey = 'selected_theme';
-  
+  // Custom background images for the DEFAULT (system) theme only — one per
+  // brightness, so day and night can each have their own picture.
+  static const String _customBgLightKey = 'custom_bg_light';
+  static const String _customBgDarkKey = 'custom_bg_dark';
+
   bool _isDarkMode = false;
   AppTheme _selectedTheme = AppTheme.system;
+  String? _customBgLightPath;
+  String? _customBgDarkPath;
 
   bool get isDarkMode => _isDarkMode;
   AppTheme get selectedTheme => _selectedTheme;
   bool get isThemeActive => _selectedTheme != AppTheme.system;
+
+  /// The custom background image path for the CURRENT brightness — but ONLY for
+  /// the default (system) theme. Other themes have their own fixed visuals, so
+  /// this returns null for them. Returns null when the user hasn't set one.
+  String? get customBackgroundPath {
+    if (_selectedTheme != AppTheme.system) return null;
+    return _isDarkMode ? _customBgDarkPath : _customBgLightPath;
+  }
 
   ThemeProvider() {
     _loadSettings();
@@ -29,6 +43,30 @@ class ThemeProvider with ChangeNotifier {
     _isDarkMode = prefs.getBool(_darkModeKey) ?? false;
     final themeIndex = prefs.getInt(_themeKey) ?? 0;
     _selectedTheme = AppTheme.values[themeIndex];
+    _customBgLightPath = prefs.getString(_customBgLightKey);
+    _customBgDarkPath = prefs.getString(_customBgDarkKey);
+    notifyListeners();
+  }
+
+  /// Save a custom background image path for the current brightness (default
+  /// theme only). Pass null to clear it.
+  Future<void> setCustomBackground(String? path) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_isDarkMode) {
+      _customBgDarkPath = path;
+      if (path == null) {
+        await prefs.remove(_customBgDarkKey);
+      } else {
+        await prefs.setString(_customBgDarkKey, path);
+      }
+    } else {
+      _customBgLightPath = path;
+      if (path == null) {
+        await prefs.remove(_customBgLightKey);
+      } else {
+        await prefs.setString(_customBgLightKey, path);
+      }
+    }
     notifyListeners();
   }
 

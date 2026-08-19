@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -217,9 +218,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         : (isDark ? Colors.white : Colors.black87);
     
     // تم پیکسلی می‌تونه دارک یا لایت باشه (بر خلاف تم برفی که فقط دارک است)
-    
+
+    // When the user picked a custom background (default theme only), let it show
+    // through: make the Scaffold transparent instead of painting a solid color.
+    final hasCustomBackground = themeProvider.customBackgroundPath != null &&
+        themeProvider.customBackgroundPath!.isNotEmpty &&
+        File(themeProvider.customBackgroundPath!).existsSync();
+
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: hasCustomBackground ? Colors.transparent : bgColor,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent, // شفاف - یکپارچه
@@ -324,8 +331,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         top: false, // اجازه به محتوا برای رفتن زیر AppBar
         child: Consumer<VpnProvider>(
           builder: (context, provider, _) {
+            // Custom user background — ONLY for the default (system) theme.
+            // Separate image per day/night. Rendered behind everything.
+            final customBg = themeProvider.customBackgroundPath;
+            final hasCustomBg = customBg != null &&
+                customBg.isNotEmpty &&
+                File(customBg).existsSync();
             return Stack(
               children: [
+                if (hasCustomBg)
+                  Positioned.fill(
+                    child: Image.file(
+                      File(customBg),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  ),
                 // انیمیشن برف (فقط در تم برفی)
                 if (isSnowTheme)
                   const Positioned.fill(

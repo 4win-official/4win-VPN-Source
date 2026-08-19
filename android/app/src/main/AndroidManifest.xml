@@ -27,7 +27,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleInstance"
+            android:launchMode="singleTask"
             android:taskAffinity="com.forwin.vpn"
             android:allowTaskReparenting="true"
             android:theme="@style/LaunchTheme"
@@ -46,10 +46,26 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+        </activity>
 
-            <!-- ===== Open .ovpn files (Telegram / file managers / email) ===== -->
-            <!-- 1) VIEW by file:// or content:// with the .ovpn extension.
-                 .ovpn files are usually delivered with a generic/empty MIME
+        <!-- ===== Import trampoline ===================================== -->
+        <!-- All .ovpn/.open file VIEW & SEND intents from OTHER apps land here
+             (NOT on MainActivity) so we can relaunch the app in its OWN task and
+             never appear embedded inside the caller. This activity carries no
+             Flutter engine; it forwards the intent to MainActivity and finishes.
+             taskAffinity="" keeps it out of MainActivity's task, and
+             excludeFromRecents/noHistory keep it invisible. -->
+        <activity
+            android:name=".ImportActivity"
+            android:exported="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:label="Import to 4win VPN">
+
+            <!-- 1) VIEW by file:// or content:// with the .ovpn/.open extension.
+                 Such files are usually delivered with a generic/empty MIME
                  type, so we match by the path pattern. -->
             <intent-filter android:label="Import to 4win VPN">
                 <action android:name="android.intent.action.VIEW" />
@@ -63,6 +79,10 @@
                 <data android:pathPattern=".*\\..*\\.ovpn" />
                 <data android:pathPattern=".*\\..*\\..*\\.ovpn" />
                 <data android:pathPattern=".*\\..*\\..*\\..*\\.ovpn" />
+                <data android:pathPattern=".*\\.open" />
+                <data android:pathPattern=".*\\..*\\.open" />
+                <data android:pathPattern=".*\\..*\\..*\\.open" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.open" />
             </intent-filter>
 
             <!-- 2) VIEW by the OpenVPN MIME type (some senders set this). -->
@@ -81,6 +101,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/x-openvpn-profile" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
         
