@@ -1012,7 +1012,7 @@ class VpnProvider with ChangeNotifier {
     // The instant the native core reports an auth failure, stop the whole
     // retry cycle and surface the error — like the official OpenVPN app.
     // `_finishCurrentAttempt` lets the auth callback complete the in-flight
-    // attempt's completer immediately (so we don't wait for the 15s watchdog).
+    // attempt's completer immediately (so we don't wait for the 4s watchdog).
     bool authAborted = false;
     void Function(bool)? finishCurrentAttempt;
     OpenVpnConnection.onAuthFailed = () {
@@ -1102,8 +1102,10 @@ class VpnProvider with ChangeNotifier {
         }
       };
 
-      // Per-attempt watchdog so a silently-stalled attempt is restarted.
-      final watchdog = Timer(const Duration(seconds: 15), () => finish(false));
+      // Per-attempt watchdog: if the config hasn't reached "connected" within
+      // 4s, time out, fully tear the tunnel down and restart from scratch —
+      // silently (the UI stays on "connecting").
+      final watchdog = Timer(const Duration(seconds: 4), () => finish(false));
 
       try {
         await OpenVpnConnection.connect(
@@ -1171,7 +1173,8 @@ class VpnProvider with ChangeNotifier {
       }
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
-      await Future.delayed(const Duration(seconds: 4));
+      // Short pause before the next attempt (UI still shows "connecting").
+      await Future.delayed(const Duration(milliseconds: 800));
     }
   }
 

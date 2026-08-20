@@ -426,6 +426,19 @@ class MainActivity: FlutterActivity() {
      */
     private fun handleIncomingIntent(incoming: Intent?): Boolean {
         if (incoming == null) return false
+
+        // Preferred path: ImportActivity already read the file (where it held
+        // the caller's Uri permission) and handed us the config as plain-text
+        // extras. This avoids forwarding a content:// Uri whose grant would not
+        // survive the hop and used to crash us with a SecurityException.
+        val forwardedContent = incoming.getStringExtra(ImportActivity.EXTRA_OVPN_CONTENT)
+        if (!forwardedContent.isNullOrBlank()) {
+            pendingOvpnName =
+                incoming.getStringExtra(ImportActivity.EXTRA_OVPN_NAME) ?: "Imported"
+            pendingOvpnContent = forwardedContent
+            return true
+        }
+
         val action = incoming.action
         val rawUri: Uri? = when (action) {
             Intent.ACTION_VIEW -> incoming.data
