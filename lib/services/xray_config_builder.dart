@@ -33,18 +33,25 @@ class XrayConfigBuilder {
     // 1) Main proxy outbound parsed from the share link.
     final proxy = _buildProxyOutbound(server);
 
-    // Traffic-compression (data-saver) for Xray: enable mux.cool multiplexing
-    // on the proxy outbound. Xray has NO payload-compression codec for the
-    // arbitrary (already-encrypted) traffic it tunnels, so LZ4-style byte
-    // compression is impossible here; mux is the real, effective client-side
-    // knob — it funnels many logical streams down one connection, cutting the
-    // per-connection TLS/handshake overhead and reducing total bytes on the
-    // wire for the many-small-request traffic (web pages, chat, API calls)
-    // where a data-saver actually helps.
-    if (trafficCompression) {
+    // Data-saver for Xray: mux.cool multiplexing on the proxy outbound. Xray has
+    // NO payload-compression codec for the (already-encrypted) traffic it
+    // tunnels, so byte compression is impossible here; mux is the real
+    // client-side knob — it funnels many logical streams down one connection,
+    // cutting per-connection TLS/handshake overhead and total bytes on the wire
+    // for the many-small-request traffic (web, chat, APIs) a data-saver helps.
+    //
+    // 🔴 CRITICAL: mux.cool is INCOMPATIBLE with XTLS flow (xtls-rprx-vision).
+    // Enabling it on a Vision config makes Xray refuse to connect at all. So we
+    // only enable mux when the config has NO XTLS flow; on Vision configs the
+    // toggle is a safe no-op (the tunnel keeps working, just without mux).
+    if (trafficCompression && !_hasXtlsFlow(proxy)) {
       proxy['mux'] = <String, dynamic>{
         'enabled': true,
         'concurrency': 8,
+        // xudpConcurrency lets UDP (QUIC/HTTP3, video, calls) also share the
+        // muxed connection instead of opening a socket each; further savings.
+        'xudpConcurrency': 8,
+        'xudpProxyUDP443': 'reject',
       };
     }
 
@@ -290,6 +297,29 @@ class XrayConfigBuilder {
       };
     }
     proxy['streamSettings'] = stream;
+  }
+
+  /// True when the proxy outbound uses an XTLS flow (e.g. `xtls-rprx-vision`).
+  /// mux.cool must NOT be enabled on such outbounds — Xray refuses to start.
+  static bool _hasXtlsFlow(Map<String, dynamic> proxy) {
+    try {
+      final settings = proxy['settings'];
+      if (settings is! Map) return false;
+      final vnext = settings['vnext'];
+      if (vnext is! List) return false;
+      for (final node in vnext) {
+        if (node is! Map) continue;
+        final users = node['users'];
+        if (users is! List) continue;
+        for (final u in users) {
+          if (u is Map) {
+            final flow = (u['flow'] ?? '').toString();
+            if (flow.contains('xtls') || flow.contains('vision')) return true;
+          }
+        }
+      }
+    } catch (_) {}
+    return false;
   }
 
   /// Build the main proxy outbound from the server's share link.

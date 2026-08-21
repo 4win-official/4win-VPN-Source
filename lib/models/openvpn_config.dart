@@ -12,10 +12,11 @@
 /// from that cache. This is what makes selection instant.
 class OpenVpnConfig {
   /// Global "Traffic Compression" toggle (from General Settings). When true, an
-  /// LZ4 compression directive is injected into every OpenVPN profile that does
-  /// not already declare its own compression, so the tunnel compresses traffic
-  /// (can reduce data usage on compressible payloads). Set by VpnProvider from
-  /// the persisted `traffic_compression` preference before a connect.
+  /// When enabled, `allow-compression asym` is added so the client can safely
+  /// decompress server-sent data (the download direction) to reduce data usage,
+  /// without forcing outbound compression that could break the tunnel. Set by
+  /// VpnProvider from the persisted `traffic_compression` preference before a
+  /// connect.
   static bool trafficCompressionEnabled = false;
 
   final String name; // نام کانفیگ
@@ -252,22 +253,33 @@ class OpenVpnConfig {
       }
     }
 
-    // Fix 3: Traffic Compression (global setting). Inject an LZ4 compression
-    // directive when the user enabled it AND the config declares no compression
-    // of its own. `compress lz4-v2` is the modern, safe form ics-openvpn
-    // supports; when the peer doesn't negotiate it, it degrades gracefully.
+    // Data-saver for OpenVPN.
+    //
+    // FORCING a compression algorithm (e.g. `compress lz4-v2`) is unsafe: if the
+    // server hasn't enabled that exact algorithm the framing byte mismatches and
+    // the tunnel either drops packets (visible quality drop) or fails outright.
+    // Modern OpenVPN discourages pushing compression at all for this reason.
+    //
+    // The safe, universal knob is `allow-compression asym`: it lets the client
+    // DECOMPRESS data the server chooses to send compressed (that's the download
+    // direction — the bulk of a user's traffic and where a data-saver pays off)
+    // WITHOUT ever forcing outbound compression that could corrupt framing. If
+    // the server sends nothing compressed, it is a harmless no-op — so it never
+    // breaks a working config, unlike a forced `compress` line.
+    //
+    // We always strip any compression directives the profile shipped with, then
+    // add exactly one authoritative directive based on the toggle, so the switch
+    // behaves identically across every OpenVPN config.
+    normalized = normalized.replaceAll(
+        RegExp(r'^\s*(compress|comp-lzo|allow-compression)\b.*$',
+            multiLine: true),
+        '');
+    normalized = normalized.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
     if (trafficCompressionEnabled) {
-      final hasComp = normalized.contains(RegExp(
-          r'^\s*(compress|comp-lzo)\b',
-          multiLine: true));
-      if (!hasComp) {
-        normalized = 'compress lz4-v2\n$normalized';
-      }
+      normalized = 'allow-compression asym\n$normalized';
     } else {
-      // If OFF, strip any compression the config shipped with so the toggle is
-      // authoritative across all protocols/configs.
-      normalized = normalized.replaceAll(
-          RegExp(r'^\s*(compress|comp-lzo)\b.*$', multiLine: true), '');
+      // Explicitly forbid compression so a working tunnel is never altered.
+      normalized = 'allow-compression no\n$normalized';
     }
 
     // ALWAYS end with a newline (see plugin's client-cert-not-required append).
