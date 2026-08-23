@@ -132,6 +132,17 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Xray VPN Service for secure proxy" />
         </service>
+
+        <!-- Xray Proxy Service (plain foreground service — NOT a VpnService, so
+             proxy mode shows no VPN key icon). Runs a local 127.0.0.1:4444 proxy. -->
+        <service
+            android:name=".XrayProxyService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Xray local proxy service" />
+        </service>
         
         <!-- ===== OpenVPN core service override =====
              The openvpn_flutter plugin declares de.blinkt.openvpn.core.OpenVPNService

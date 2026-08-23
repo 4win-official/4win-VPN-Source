@@ -18,10 +18,16 @@ class XrayConnection {
   }
 
   /// Start the Xray core with a full Xray JSON config.
-  static Future<bool> connect(String configJson) async {
+  ///
+  /// When [proxyMode] is true the native service runs the core WITHOUT a system
+  /// VpnService tunnel — it only serves a local SOCKS/HTTP proxy on
+  /// 127.0.0.1:4444, so no VPN key icon appears.
+  static Future<bool> connect(String configJson,
+      {bool proxyMode = false}) async {
     try {
       final result = await platform.invokeMethod('connectXray', {
         'configJson': configJson,
+        'proxyMode': proxyMode,
       });
       return result == true;
     } catch (e) {

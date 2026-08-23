@@ -35,6 +35,8 @@ class XrayVpnService : VpnService() {
         const val ACTION_CONNECT = "com.forwin.vpn.XRAY_CONNECT"
         const val ACTION_DISCONNECT = "com.forwin.vpn.XRAY_DISCONNECT"
         const val EXTRA_CONFIG_JSON = "config_json"
+        // Kept for source/binary compatibility with callers; VPN mode only.
+        const val EXTRA_PROXY_MODE = "proxy_mode"
 
         private const val TAG = "XrayVpnService"
         private const val NOTIFICATION_ID = 2
@@ -115,7 +117,8 @@ class XrayVpnService : VpnService() {
         // Catch Throwable (not just Exception) so a native UnsatisfiedLinkError
         // or Go panic surfaced as an Error doesn't crash the whole app.
         try {
-            // 1) Build the TUN interface.
+            // 1) Build the TUN interface (system-wide VPN). Proxy mode is handled
+            //    by the separate XrayProxyService, so this service always tunnels.
             val builder = Builder()
                 .setSession("4win VPN - Xray")
                 .setMtu(VPN_MTU)
@@ -146,6 +149,7 @@ class XrayVpnService : VpnService() {
                 stopXray()
                 return
             }
+            val tunFd = tun.fd
 
             // 2) Initialize the core environment.
             //
@@ -163,11 +167,13 @@ class XrayVpnService : VpnService() {
             android.util.Log.d(TAG, "initCoreEnv done, "
                 + "version=${runCatching { Libv2ray.checkVersionX() }.getOrNull()}")
 
-            // 3) Create the core controller and start the loop with the TUN fd.
+            // 3) Create the core controller and start the loop. In VPN mode the
+            //    core binds its tun inbound to tunFd; in proxy mode tunFd is -1
+            //    and the config has no tun inbound, so the core just serves the
+            //    local SOCKS/HTTP proxy.
             val controller = Libv2ray.newCoreController(XrayCallback())
             coreController = controller
 
-            val tunFd = tun.fd
             android.util.Log.d(TAG, "Starting Xray core (tunFd=$tunFd, "
                 + "version=${runCatching { Libv2ray.checkVersionX() }.getOrNull()})")
             controller.startLoop(config, tunFd)

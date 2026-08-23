@@ -27,6 +27,8 @@ class XrayConfigBuilder {
     String fragmentInterval = '10-20',
     String fragmentHost = '',
     bool trafficCompression = false,
+    bool proxyMode = false,
+    int proxyPort = 4444,
   }) {
     final outbounds = <Map<String, dynamic>>[];
 
@@ -125,27 +127,46 @@ class XrayConfigBuilder {
       'settings': {'response': {'type': 'http'}},
     });
 
-    final config = <String, dynamic>{
-      'stats': <String, dynamic>{},
-      'log': {'loglevel': 'warning'},
-      'policy': {
-        'levels': {
-          '8': {
-            'handshake': 4,
-            'connIdle': 300,
-            'uplinkOnly': 1,
-            'downlinkOnly': 1,
+    // Inbounds depend on the connection mode.
+    //  • VPN mode   → SOCKS (for local apps) + the TUN inbound that binds to the
+    //                 VpnService fd and tunnels the WHOLE device.
+    //  • Proxy mode → NO tun inbound at all. Only a local SOCKS + HTTP proxy on
+    //                 127.0.0.1:<proxyPort>. Nothing touches a system tunnel, so
+    //                 no VPN key icon appears; apps opt in by pointing at the
+    //                 local proxy. (matches v2rayNG's "proxy only" mode.)
+    final List<Map<String, dynamic>> inbounds;
+    if (proxyMode) {
+      inbounds = [
+        {
+          'tag': 'socks',
+          'port': proxyPort,
+          'listen': '127.0.0.1',
+          'protocol': 'socks',
+          'settings': {
+            'auth': 'noauth',
+            'udp': true,
+            'userLevel': 8,
+          },
+          'sniffing': {
+            'enabled': true,
+            'destOverride': ['http', 'tls', 'quic'],
           },
         },
-        'system': {
-          'statsOutboundUplink': true,
-          'statsOutboundDownlink': true,
+        // HTTP proxy on the SAME port+1 so plain-HTTP-only apps also work.
+        {
+          'tag': 'http',
+          'port': proxyPort + 1,
+          'listen': '127.0.0.1',
+          'protocol': 'http',
+          'settings': {'userLevel': 8},
+          'sniffing': {
+            'enabled': true,
+            'destOverride': ['http', 'tls', 'quic'],
+          },
         },
-      },
-      'dns': {
-        'servers': ['1.1.1.1', '8.8.8.8', 'localhost'],
-      },
-      'inbounds': [
+      ];
+    } else {
+      inbounds = [
         // SOCKS inbound (kept for proxy-sharing / local apps).
         {
           'tag': 'socks',
@@ -181,7 +202,30 @@ class XrayConfigBuilder {
             'destOverride': ['http', 'tls', 'quic'],
           },
         },
-      ],
+      ];
+    }
+
+    final config = <String, dynamic>{
+      'stats': <String, dynamic>{},
+      'log': {'loglevel': 'warning'},
+      'policy': {
+        'levels': {
+          '8': {
+            'handshake': 4,
+            'connIdle': 300,
+            'uplinkOnly': 1,
+            'downlinkOnly': 1,
+          },
+        },
+        'system': {
+          'statsOutboundUplink': true,
+          'statsOutboundDownlink': true,
+        },
+      },
+      'dns': {
+        'servers': ['1.1.1.1', '8.8.8.8', 'localhost'],
+      },
+      'inbounds': inbounds,
       'outbounds': outbounds,
       'routing': {
         'domainStrategy': 'AsIs',

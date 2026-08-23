@@ -1734,20 +1734,26 @@ class VpnProvider with ChangeNotifier {
       final fragLength = prefs.getString('xray_fragment_length') ?? '10-20';
       final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
       final fragHost = prefs.getString('xray_fragment_host') ?? '';
-      final trafficCompression = prefs.getBool('traffic_compression') ?? false;
+      // Connection mode: 'vpn' (system tunnel) or 'proxy' (local 127.0.0.1:4444
+      // SOCKS/HTTP, no VPN icon). Global setting shared by the whole app.
+      final proxyMode =
+          (prefs.getString('connection_mode') ?? 'vpn') == 'proxy';
 
       if (cancelled()) {
         if (kDebugMode) debugPrint('🚫 Xray connect cancelled pre-permission');
         return;
       }
 
-      // Request VPN permission.
-      final granted = await XrayConnection.requestPermission();
-      if (!granted) {
-        _status = VpnConnectionStatus.error;
-        _errorMessage = 'VPN permission denied';
-        notifyListeners();
-        return;
+      // Request VPN permission — ONLY needed for VPN (system-tunnel) mode.
+      // Proxy mode establishes no VpnService interface, so no permission dialog.
+      if (!proxyMode) {
+        final granted = await XrayConnection.requestPermission();
+        if (!granted) {
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'VPN permission denied';
+          notifyListeners();
+          return;
+        }
       }
 
       if (cancelled()) {
@@ -1763,15 +1769,17 @@ class VpnProvider with ChangeNotifier {
         fragmentLength: fragLength,
         fragmentInterval: fragInterval,
         fragmentHost: fragHost,
-        trafficCompression: trafficCompression,
+        proxyMode: proxyMode,
       );
 
       if (kDebugMode) {
         debugPrint('🚀 Connecting Xray: ${serverToConnect.remark} '
-            '(${serverToConnect.protocol}) fragment=$fragEnabled');
+            '(${serverToConnect.protocol}) fragment=$fragEnabled '
+            'mode=${proxyMode ? "proxy" : "vpn"}');
       }
 
-      final connected = await XrayConnection.connect(configJson);
+      final connected =
+          await XrayConnection.connect(configJson, proxyMode: proxyMode);
       // If the user cancelled meanwhile, tear the just-started tunnel down and
       // stay disconnected instead of flipping to "connected".
       if (cancelled()) {

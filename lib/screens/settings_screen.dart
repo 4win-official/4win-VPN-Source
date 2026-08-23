@@ -36,7 +36,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _concurrentTests = 100;
   bool _parallelConnection = false; // سوییچ اتصال موازی
   bool _killSwitch = false; // Kill Switch
-  bool _trafficCompression = false; // فشرده‌سازی ترافیک (LZ4) برای OpenVPN
+  bool _trafficCompression = false; // فشرده‌سازی ترافیک (فقط OpenVPN)
+  String _connectionMode = 'vpn'; // vpn (تونل کل گوشی) | proxy (لوکال 127.0.0.1:4444)
   bool _useCustomServer = false; // سوییچ استفاده از سرور اختصاصی
   bool _deepScan = false; // اسکن عمیق (برای اینترنت ضعیف/محدودیت دولتی)
   String _mtuMode = 'off'; // حالت MTU: off | auto | manual
@@ -142,6 +143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _parallelConnection = prefs.getBool('parallel_connection') ?? false;
       _killSwitch = prefs.getBool('kill_switch') ?? false;
       _trafficCompression = prefs.getBool('traffic_compression') ?? false;
+      _connectionMode = prefs.getString('connection_mode') ?? 'vpn';
       _useCustomServer = prefs.getBool('use_custom_server') ?? false;
       _deepScan = prefs.getBool('deep_scan') ?? false;
       // مهاجرت از سوییچ قدیمی auto_mtu به حالت سه‌گانه جدید
@@ -771,6 +773,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('parallel_connection', _parallelConnection);
     await prefs.setBool('kill_switch', _killSwitch);
     await prefs.setBool('traffic_compression', _trafficCompression);
+    await prefs.setString('connection_mode', _connectionMode);
     await prefs.setBool('use_custom_server', _useCustomServer);
     
     if (mounted) {
@@ -1449,6 +1452,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                       ),
+                      const Divider(height: 24),
+                      // Traffic Compression — OpenVPN ONLY. Adds a safe
+                      // `allow-compression asym` directive so the client can
+                      // decompress server-sent data to save mobile data. Does
+                      // NOT affect any other protocol.
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Traffic Compression',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _trafficCompression
+                                      ? 'On — compresses OpenVPN traffic to save data'
+                                      : 'Compress OpenVPN traffic to save data',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black38,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch(
+                            value: _trafficCompression,
+                            onChanged: (value) {
+                              setState(() => _trafficCompression = value);
+                            },
+                            activeTrackColor: isDark
+                                ? const Color(0xFF00FF88)
+                                : Colors.blue,
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                   const SizedBox(height: 24),
@@ -1934,58 +1983,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 
                 const SizedBox(height: 24),
 
-                // Traffic Compression — global data-saver setting applied to
-                // every protocol that can reduce data on the client side:
-                //   • OpenVPN  → real LZ4 (`compress lz4-v2`) tunnel compression
-                //   • Xray     → mux.cool multiplexing (cuts per-connection
-                //                overhead; Xray has no payload codec)
-                // SSTP / SlowDNS / Direct-DNS carry already-encrypted traffic
-                // with no client-side compression codec, so the switch is a
-                // no-op there — enabling it never hurts.
+                // Connection Mode — global setting.
+                //   • VPN mode   → the whole device is tunnelled (system VPN,
+                //                  the VPN key icon appears).
+                //   • Proxy mode → the core runs a LOCAL proxy on
+                //                  127.0.0.1:4444 instead; no system tunnel and
+                //                  no VPN icon. Apps opt in by using the proxy.
+                //                  (Applies to Xray; other protocols always run
+                //                  as a system VPN.)
                 if (widget.generalOnly) ...[
                   _SettingsSection(
-                    title: 'Data',
+                    title: 'Connection Mode',
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Traffic Compression',
-                                  style: TextStyle(
-                                    color: isDark
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _trafficCompression
-                                      ? 'On — LZ4 for OpenVPN + Mux for Xray, can reduce data usage'
-                                      : 'Compress tunnel traffic to save data (all protocols)',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: isDark
-                                        ? Colors.white38
-                                        : Colors.black38,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Switch(
-                            value: _trafficCompression,
-                            onChanged: (value) {
-                              setState(() => _trafficCompression = value);
-                            },
-                            activeTrackColor: isDark
-                                ? const Color(0xFF00FF88)
-                                : Colors.blue,
-                          ),
-                        ],
+                      _ConnModeTile(
+                        title: 'VPN mode',
+                        subtitle: 'Tunnel the whole device (system VPN)',
+                        icon: Icons.vpn_lock,
+                        selected: _connectionMode == 'vpn',
+                        isDark: isDark,
+                        onTap: () =>
+                            setState(() => _connectionMode = 'vpn'),
+                      ),
+                      const SizedBox(height: 8),
+                      _ConnModeTile(
+                        title: 'Proxy mode',
+                        subtitle: 'Local proxy on 127.0.0.1:4444 (no VPN icon)',
+                        icon: Icons.dns,
+                        selected: _connectionMode == 'proxy',
+                        isDark: isDark,
+                        onTap: () =>
+                            setState(() => _connectionMode = 'proxy'),
                       ),
                     ],
                   ),
@@ -2091,6 +2118,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// A selectable tile used by the "Connection Mode" section (VPN / Proxy).
+class _ConnModeTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _ConnModeTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = isDark ? const Color(0xFF00FF88) : Colors.blue;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? accent
+                : (isDark ? Colors.white24 : Colors.black26),
+            width: selected ? 2 : 1,
+          ),
+          color: selected
+              ? accent.withValues(alpha: 0.08)
+              : Colors.transparent,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: selected ? accent : (isDark ? Colors.white54 : Colors.black45), size: 24),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white38 : Colors.black45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              selected ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: selected ? accent : (isDark ? Colors.white38 : Colors.black26),
+              size: 22,
+            ),
+          ],
         ),
       ),
     );

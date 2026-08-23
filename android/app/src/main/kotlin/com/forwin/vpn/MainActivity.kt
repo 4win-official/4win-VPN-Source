@@ -231,10 +231,21 @@ class MainActivity: FlutterActivity() {
                 }
                 "connectXray" -> {
                     val configJson = call.argument<String>("configJson") ?: ""
+                    val proxyMode = call.argument<Boolean>("proxyMode") ?: false
 
-                    val intent = Intent(this, XrayVpnService::class.java).apply {
-                        action = XrayVpnService.ACTION_CONNECT
-                        putExtra(XrayVpnService.EXTRA_CONFIG_JSON, configJson)
+                    // Proxy mode uses a PLAIN foreground service (no VpnService),
+                    // so Android shows no VPN key icon; VPN mode uses XrayVpnService.
+                    val intent = if (proxyMode) {
+                        Intent(this, XrayProxyService::class.java).apply {
+                            action = XrayProxyService.ACTION_CONNECT
+                            putExtra(XrayProxyService.EXTRA_CONFIG_JSON, configJson)
+                        }
+                    } else {
+                        Intent(this, XrayVpnService::class.java).apply {
+                            action = XrayVpnService.ACTION_CONNECT
+                            putExtra(XrayVpnService.EXTRA_CONFIG_JSON, configJson)
+                            putExtra(XrayVpnService.EXTRA_PROXY_MODE, false)
+                        }
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         startForegroundService(intent)
@@ -244,19 +255,30 @@ class MainActivity: FlutterActivity() {
                     result.success(true)
                 }
                 "disconnectXray" -> {
-                    val intent = Intent(this, XrayVpnService::class.java).apply {
+                    // Stop BOTH services so a disconnect works regardless of the
+                    // mode the current session was started in.
+                    startService(Intent(this, XrayVpnService::class.java).apply {
                         action = XrayVpnService.ACTION_DISCONNECT
-                    }
-                    startService(intent)
+                    })
+                    startService(Intent(this, XrayProxyService::class.java).apply {
+                        action = XrayProxyService.ACTION_DISCONNECT
+                    })
                     result.success(true)
                 }
                 "isXrayRunning" -> {
-                    result.success(XrayVpnService.isServiceRunning)
+                    result.success(
+                        XrayVpnService.isServiceRunning ||
+                            XrayProxyService.isServiceRunning
+                    )
                 }
                 "queryXrayStats" -> {
                     // Returns cumulative proxy traffic [uplinkBytes, downlinkBytes]
                     // since connect, polled by Flutter to show data usage.
-                    val stats = XrayVpnService.queryTrafficStats()
+                    val stats = if (XrayProxyService.isServiceRunning) {
+                        XrayProxyService.queryTrafficStats()
+                    } else {
+                        XrayVpnService.queryTrafficStats()
+                    }
                     val map = HashMap<String, Any>()
                     map["uplink"] = stats[0]
                     map["downlink"] = stats[1]
