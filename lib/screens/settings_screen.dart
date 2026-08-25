@@ -2007,12 +2007,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(height: 8),
                       _ConnModeTile(
                         title: 'Proxy mode',
-                        subtitle: 'Local proxy on 127.0.0.1:4444 (no VPN icon)',
+                        subtitle: 'Local proxy 127.0.0.1:4444 (no VPN icon) • Xray only',
                         icon: Icons.dns,
                         selected: _connectionMode == 'proxy',
                         isDark: isDark,
                         onTap: () =>
                             setState(() => _connectionMode = 'proxy'),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Proxy mode applies to the whole app. Only the Xray '
+                        'protocol can run as a local proxy; SSTP, DNS Changer, '
+                        'OpenVPN and Slow DNS always require VPN mode.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white38 : Colors.black45,
+                        ),
                       ),
                     ],
                   ),

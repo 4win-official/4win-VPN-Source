@@ -674,6 +674,23 @@ class VpnProvider with ChangeNotifier {
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
 
+    // 🌐 CONNECTION MODE (global). Proxy mode = run a LOCAL proxy on
+    // 127.0.0.1:4444 with NO system tunnel / no VPN icon. Only Xray can do that;
+    // SSTP / DNS-changer / OpenVPN / SlowDNS are IP-layer tunnel protocols that
+    // can ONLY run as a system VPN, so in proxy mode we refuse them with a clear
+    // message instead of silently falling back to a full VPN tunnel (which is
+    // what made the setting look ignored).
+    final modePrefs = await SharedPreferences.getInstance();
+    final proxyMode = (modePrefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+    if (proxyMode && _selectedProtocol != 'xray') {
+      _status = VpnConnectionStatus.error;
+      _errorMessage =
+          'Proxy mode only supports Xray. Switch to the Xray protocol, '
+          'or turn on VPN mode in Settings to use this protocol.';
+      notifyListeners();
+      return;
+    }
+
     // 🔀 PROTOCOL DETECTION: Direct DNS, OpenVPN, Slow DNS, or SSTP
     if (_selectedProtocol == 'direct_dns') {
       // ✅ Direct DNS: Use selected DNS server
