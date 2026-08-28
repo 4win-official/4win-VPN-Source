@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:io';
 import '../providers/vpn_provider.dart';
@@ -429,162 +428,6 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     );
   }
 
-  Future<void> _showAddConfigDialog() async {
-    final nameController = TextEditingController();
-    final configController = TextEditingController();
-    final usernameController = TextEditingController();
-    final passwordController = TextEditingController();
-    bool obscurePassword = true;
-
-    await showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Add OpenVPN Config'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Config Name',
-                    hintText: 'My VPN Server',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: configController,
-                  decoration: InputDecoration(
-                    labelText: 'Config File Content (.ovpn)',
-                    hintText: 'Paste your .ovpn file content here',
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.content_paste),
-                      onPressed: () async {
-                        final clipboardData =
-                            await Clipboard.getData(Clipboard.kTextPlain);
-                        if (clipboardData != null &&
-                            clipboardData.text != null) {
-                          configController.text = clipboardData.text!;
-                          
-                          // Auto-extract name if empty
-                          if (nameController.text.isEmpty) {
-                            final extractedName =
-                                OpenVpnService.extractConfigName(
-                                    clipboardData.text!);
-                            nameController.text = extractedName;
-                          }
-                        }
-                      },
-                      tooltip: 'Paste from clipboard',
-                    ),
-                  ),
-                  maxLines: 6,
-                  minLines: 3,
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: usernameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Username (Optional)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: passwordController,
-                  obscureText: obscurePassword,
-                  decoration: InputDecoration(
-                    labelText: 'Password (Optional)',
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        obscurePassword
-                            ? Icons.visibility
-                            : Icons.visibility_off,
-                      ),
-                      onPressed: () {
-                        setDialogState(() {
-                          obscurePassword = !obscurePassword;
-                        });
-                      },
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final name = nameController.text.trim();
-                final config = configController.text.trim();
-
-                if (name.isEmpty || config.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Name and config are required'),
-                    ),
-                  );
-                  return;
-                }
-
-                // Validate config
-                if (!OpenVpnService.validateConfig(config)) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Invalid OpenVPN config format'),
-                    ),
-                  );
-                  return;
-                }
-
-                final newConfig = OpenVpnConfig(
-                  name: name,
-                  config: config,
-                  username: usernameController.text.trim().isEmpty
-                      ? null
-                      : usernameController.text.trim(),
-                  password: passwordController.text.trim().isEmpty
-                      ? null
-                      : passwordController.text.trim(),
-                );
-
-                final success = await _service.addConfig(newConfig);
-
-                if (mounted) {
-                  Navigator.pop(context);
-
-                  if (success) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('✅ Config added successfully'),
-                      ),
-                    );
-                    _loadConfigs();
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('❌ Failed to add config (name may already exist)'),
-                      ),
-                    );
-                  }
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Future<void> _confirmDelete(OpenVpnConfig config) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -804,7 +647,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
+                      color: Colors.blue.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Text(
@@ -965,7 +808,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                         ),
                         leading: CircleAvatar(
                           backgroundColor:
-                              Colors.purple.withOpacity(0.2),
+                              Colors.purple.withValues(alpha: 0.2),
                           child: const Icon(
                             Icons.vpn_key,
                             color: Colors.purple,

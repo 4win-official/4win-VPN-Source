@@ -1,11 +1,11 @@
 {
-    "name": "vpn_swift",
-    "short_name": "vpn_swift",
+    "name": "4win VPN",
+    "short_name": "4win VPN",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "4win VPN - Fast and secure multi-protocol VPN client",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

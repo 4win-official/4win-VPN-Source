@@ -11,6 +11,7 @@ import '../widgets/pixel_effect.dart';
 import '../widgets/rain_animation.dart';
 import '../widgets/autumn_animation.dart';
 import '../widgets/summer_animation.dart';
+import '../widgets/heart_burst.dart';
 import '../widgets/protocol_selector_dialog.dart';
 import '../widgets/rainbow_heart_button.dart';
 import 'donate_screen.dart';
@@ -36,6 +37,11 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final UpdateService _updateService = UpdateService();
+
+  // Pink-theme heart burst: incremented each time the VPN transitions to
+  // "connected" so the HeartBurst widget plays a fresh one-shot animation.
+  int _heartBurstTrigger = 0;
+  VpnConnectionStatus? _lastStatusForHearts;
 
   @override
   void initState() {
@@ -363,6 +369,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         top: false, // اجازه به محتوا برای رفتن زیر AppBar
         child: Consumer<VpnProvider>(
           builder: (context, provider, _) {
+            // Detect the transition into "connected" so the Pink theme can fire
+            // a one-shot heart burst. Done via a post-frame callback to keep the
+            // build pure.
+            if (provider.status != _lastStatusForHearts) {
+              final justConnected = provider.status ==
+                      VpnConnectionStatus.connected &&
+                  _lastStatusForHearts != VpnConnectionStatus.connected;
+              _lastStatusForHearts = provider.status;
+              if (justConnected && isPinkTheme) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    setState(() => _heartBurstTrigger++);
+                  }
+                });
+              }
+            }
+
             // Custom user background — ONLY for the default (system) theme.
             // Separate image per day/night. Rendered behind everything.
             final customBg = themeProvider.customBackgroundPath;
@@ -396,44 +419,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 if (isLiquidGlassTheme)
-                  const Positioned.fill(child: _LiquidGlassBackdrop()),
+                  const Positioned.fill(
+                    child: RepaintBoundary(child: _LiquidGlassBackdrop()),
+                  ),
 
                 if (hasCustomBg)
                   Positioned.fill(
                     child: Image.file(
                       File(customBg),
                       fit: BoxFit.cover,
+                      // Cache decode size to the screen to save memory/CPU.
+                      cacheWidth:
+                          (MediaQuery.of(context).size.width *
+                                  MediaQuery.of(context).devicePixelRatio)
+                              .round(),
                       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                     ),
                   ),
-                // انیمیشن برف (فقط در تم برفی)
+                // انیمیشن برف (فقط در تم برفی) — RepaintBoundary keeps the
+                // continuous animation from repainting the rest of the tree.
                 if (isSnowTheme)
                   const Positioned.fill(
-                    child: SnowAnimation(),
+                    child: RepaintBoundary(child: SnowAnimation()),
                   ),
-                
+
                 // افکت پیکسلی (فقط در تم پیکسلی)
                 if (isPixelTheme)
                   const Positioned.fill(
-                    child: PixelEffect(),
+                    child: RepaintBoundary(child: PixelEffect()),
                   ),
-                
+
                 // انیمیشن باران (فقط در تم بارانی)
                 if (isRainTheme)
                   const Positioned.fill(
-                    child: RainAnimation(),
+                    child: RepaintBoundary(child: RainAnimation()),
                   ),
 
                 // انیمیشن خورشید تابستانی (فقط لایت مود)
                 if (isSummerTheme)
                   const Positioned.fill(
-                    child: SummerAnimation(),
+                    child: RepaintBoundary(child: SummerAnimation()),
                   ),
 
                 // انیمیشن برگ‌ریزان پاییزی
                 if (isAutumnTheme)
                   const Positioned.fill(
-                    child: AutumnAnimation(),
+                    child: RepaintBoundary(child: AutumnAnimation()),
                   ),
                 
                 // نور ملایم از پایین صفحه - با انیمیشن نرم
@@ -682,7 +713,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
 
                         // ===== CENTER: Connect Button (fixed, always centered) =====
-                        GestureDetector(
+                        Stack(
+                          alignment: Alignment.center,
+                          clipBehavior: Clip.none,
+                          children: [
+                            // Pink theme: colourful hearts burst from behind the
+                            // button on connect, then fade out after a moment.
+                            if (isPinkTheme)
+                              HeartBurst(
+                                trigger: _heartBurstTrigger == 0
+                                    ? null
+                                    : _heartBurstTrigger,
+                                size: 340,
+                              ),
+                            GestureDetector(
                           onTap: () => _handleConnectTap(context, provider),
                           onLongPress: () => _handleLongPress(context),
                           child: Container(
@@ -744,6 +788,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     ),
                             ),
                           ),
+                        ),
+                          ],
                         ),
 
                         // ===== BOTTOM ZONE (fixed height): stats / errors =====

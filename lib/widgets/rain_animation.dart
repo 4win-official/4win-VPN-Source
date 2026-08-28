@@ -13,7 +13,6 @@ class _RainAnimationState extends State<RainAnimation> with SingleTickerProvider
   final List<RainDrop> _rainDrops = [];
   final Random _random = Random();
   bool _showLightning = false;
-  int _lightningFlashes = 0;
 
   @override
   void initState() {
@@ -52,7 +51,6 @@ class _RainAnimationState extends State<RainAnimation> with SingleTickerProvider
     
     setState(() {
       _showLightning = true;
-      _lightningFlashes = 0;
     });
     
     // چند بار flash کن (2-4 بار)

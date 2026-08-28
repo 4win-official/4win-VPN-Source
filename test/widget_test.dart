@@ -1,9 +1,8 @@
-// This is a basic Flutter widget test.
+// Basic smoke test for 4win VPN.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// Verifies that the root widget builds without throwing. The app relies on
+// platform channels and shared preferences at runtime, so this stays a light
+// build-only smoke test rather than a full interaction test.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,20 +10,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vpn_swift/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('App builds without crashing', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
-
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // The root MaterialApp should be present after the first frame.
+    expect(find.byType(MaterialApp), findsWidgets);
   });
 }
