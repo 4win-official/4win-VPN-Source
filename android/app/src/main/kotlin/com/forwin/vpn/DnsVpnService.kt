@@ -118,6 +118,9 @@ class DnsVpnService : VpnService() {
                 .addDnsServer(primaryDns)
                 .addDnsServer(secondaryDns)
                 .setBlocking(false)
+
+            // Split Tunneling: apply the user's per-app include/exclude rules.
+            SplitTunnel.apply(applicationContext, builder, packageName)
             
             // CRITICAL: Do NOT add routes - let traffic flow normally
             // Only DNS queries will be intercepted by Android system

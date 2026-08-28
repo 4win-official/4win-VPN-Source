@@ -18,6 +18,7 @@ import 'dns_servers_screen.dart';
 import 'openvpn_configs_screen.dart';
 import 'slowdns_configs_screen.dart';
 import 'xray_servers_screen.dart';
+import 'proxy_servers_screen.dart';
 import 'secret_text_screen.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
@@ -479,7 +480,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                             ? Icons.cloud_queue
                                                             : vpnProvider.selectedProtocol == 'xray'
                                                                 ? Icons.rocket_launch
-                                                                : Icons.dns,
+                                                                : vpnProvider.selectedProtocol == 'proxy'
+                                                                    ? Icons.swap_horiz
+                                                                    : Icons.dns,
                                                 color: vpnProvider.selectedProtocol == 'sstp'
                                                     ? Colors.green
                                                     : vpnProvider.selectedProtocol == 'openvpn'
@@ -488,12 +491,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                             ? Colors.orange
                                                             : vpnProvider.selectedProtocol == 'xray'
                                                                 ? Colors.tealAccent.shade700
-                                                                : Colors.blue,
+                                                                : vpnProvider.selectedProtocol == 'proxy'
+                                                                    ? Colors.tealAccent.shade700
+                                                                    : Colors.blue,
                                                 size: 20,
                                               ),
                                               const SizedBox(width: 12),
                                               Text(
-                                                'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : "DNS changer"}',
+                                                'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : vpnProvider.selectedProtocol == "proxy" ? "Proxy" : "DNS changer"}',
                                                 style: TextStyle(
                                                   fontSize: 14,
                                                   color: isDark ? Colors.white : Colors.black87,
@@ -525,6 +530,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
+                              // Active Proxy server name (under the status text).
+                              if (provider.selectedProtocol == 'proxy' &&
+                                  provider.activeProxyServer != null) ...[
+                                const SizedBox(height: 6),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 24),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.swap_horiz,
+                                          size: 15,
+                                          color: isDark
+                                              ? Colors.white54
+                                              : Colors.black45),
+                                      const SizedBox(width: 6),
+                                      Flexible(
+                                        child: Text(
+                                          provider.activeProxyServer!.remark
+                                                  .isEmpty
+                                              ? provider
+                                                  .activeProxyServer!.address
+                                              : provider
+                                                  .activeProxyServer!.remark,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: isDark
+                                                ? Colors.white
+                                                : Colors.black87,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                               // Active Xray config name (under the status text).
                               if (provider.selectedProtocol == 'xray' &&
                                   provider.activeXrayServer != null) ...[
@@ -643,6 +688,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     (provider.selectedProtocol == 'sstp' ||
                                         provider.selectedProtocol == 'direct_dns' ||
                                         provider.selectedProtocol == 'xray' ||
+                                        provider.selectedProtocol == 'proxy' ||
                                         provider.selectedProtocol == 'openvpn'))
                                   Padding(
                                     padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -812,6 +858,81 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     );
                   }
                   
+                  // Proxy: Always show "Proxy Servers" button (mirrors Xray).
+                  if (provider.selectedProtocol == 'proxy') {
+                    final showNext = provider.proxyGroupSelected;
+                    final serverListBtn = ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ProxyServersScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.swap_horiz),
+                      label: const Text(
+                        'Proxy Servers',
+                        style: TextStyle(fontSize: 16),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: Colors.tealAccent.shade700,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    );
+
+                    final nextBtn = OutlinedButton.icon(
+                      onPressed: provider.isConnecting
+                          ? null
+                          : () async {
+                              await provider.selectNextProxyServer();
+                              final s = provider.selectedProxyServer;
+                              if (!context.mounted || s == null) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      'Next: ${s.remark.isEmpty ? s.address : s.remark}'),
+                                  duration: const Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                      icon: Icon(
+                        Icons.skip_next,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                      label: Text(
+                        'Next',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        side: BorderSide(
+                            color: isDark ? Colors.white24 : Colors.black12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    );
+
+                    return Row(
+                      children: [
+                        Expanded(flex: showNext ? 3 : 1, child: serverListBtn),
+                        if (showNext) ...[
+                          const SizedBox(width: 10),
+                          Expanded(flex: 2, child: nextBtn),
+                        ],
+                      ],
+                    );
+                  }
+
                   // Xray: Always show "Xray Servers" button
                   if (provider.selectedProtocol == 'xray') {
                     final showNext = provider.xrayFreeGroupSelected;

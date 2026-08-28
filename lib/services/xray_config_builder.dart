@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../models/xray_server.dart';
+import '../models/proxy_server.dart';
 
 /// Builds a complete Xray JSON config (the standard Xray config format that
 /// libv2ray / v2rayNG's core consumes via `startLoop`).
@@ -614,5 +615,221 @@ class XrayConfigBuilder {
     final mod = v.length % 4;
     if (mod > 0) v += '=' * (4 - mod);
     return v;
+  }
+
+  // ==================================================================
+  //  PROXY protocol (dedicated SOCKS4 / SOCKS5 / HTTP upstream)
+  // ==================================================================
+  //
+  // The Proxy protocol makes a REAL connection to a plain SOCKS/HTTP proxy.
+  // We reuse the Xray core purely as the proxy *client*: the upstream proxy
+  // becomes an Xray `socks` / `http` OUTBOUND, and (in VPN mode) the TUN
+  // inbound routes the whole device through it. There is NO fragmentation and
+  // NO mux here — a plain proxy has no TLS ClientHello of ours to slice.
+
+  /// Build the Xray `socks` / `http` outbound for a [ProxyServer].
+  static Map<String, dynamic> buildProxyServerOutbound(ProxyServer server) {
+    final hasAuth = server.username.isNotEmpty || server.password.isNotEmpty;
+    switch (server.protocol) {
+      case 'http':
+        return {
+          'protocol': 'http',
+          'settings': {
+            'servers': [
+              {
+                'address': server.address,
+                'port': server.port,
+                if (hasAuth)
+                  'users': [
+                    {
+                      'user': server.username,
+                      'pass': server.password,
+                    }
+                  ],
+              }
+            ],
+          },
+          'streamSettings': <String, dynamic>{'network': 'tcp'},
+        };
+      case 'socks4':
+        // Xray's socks outbound talks SOCKS4/4a/5 automatically; SOCKS4 has no
+        // username/password auth (only an optional userId, which we omit).
+        return {
+          'protocol': 'socks',
+          'settings': {
+            'servers': [
+              {
+                'address': server.address,
+                'port': server.port,
+                'version': '4',
+              }
+            ],
+          },
+          'streamSettings': <String, dynamic>{'network': 'tcp'},
+        };
+      case 'socks5':
+      default:
+        return {
+          'protocol': 'socks',
+          'settings': {
+            'servers': [
+              {
+                'address': server.address,
+                'port': server.port,
+                if (hasAuth)
+                  'users': [
+                    {
+                      'user': server.username,
+                      'pass': server.password,
+                      'level': 8,
+                    }
+                  ],
+              }
+            ],
+          },
+          'streamSettings': <String, dynamic>{'network': 'tcp'},
+        };
+    }
+  }
+
+  /// Build the FULL Xray config for connecting through a [ProxyServer].
+  ///
+  ///  • VPN mode   → SOCKS 10808 + the TUN inbound (whole-device VPN through
+  ///                 the upstream proxy).
+  ///  • Proxy mode → local SOCKS + HTTP on `127.0.0.1:proxyPort` (no VPN icon).
+  static String buildForProxyServer(
+    ProxyServer server, {
+    bool proxyMode = false,
+    int proxyPort = 4444,
+  }) {
+    final proxy = buildProxyServerOutbound(server);
+    proxy['tag'] = 'proxy';
+
+    final outbounds = <Map<String, dynamic>>[
+      proxy,
+      {
+        'tag': 'direct',
+        'protocol': 'freedom',
+        'settings': {'domainStrategy': 'UseIP'},
+      },
+      {
+        'tag': 'block',
+        'protocol': 'blackhole',
+        'settings': {'response': {'type': 'http'}},
+      },
+    ];
+
+    final List<Map<String, dynamic>> inbounds;
+    if (proxyMode) {
+      inbounds = [
+        {
+          'tag': 'socks',
+          'port': proxyPort,
+          'listen': '127.0.0.1',
+          'protocol': 'socks',
+          'settings': {'auth': 'noauth', 'udp': true, 'userLevel': 8},
+          'sniffing': {
+            'enabled': true,
+            'destOverride': ['http', 'tls', 'quic'],
+          },
+        },
+        {
+          'tag': 'http',
+          'port': proxyPort + 1,
+          'listen': '127.0.0.1',
+          'protocol': 'http',
+          'settings': {'userLevel': 8},
+          'sniffing': {
+            'enabled': true,
+            'destOverride': ['http', 'tls', 'quic'],
+          },
+        },
+      ];
+    } else {
+      inbounds = [
+        {
+          'tag': 'socks',
+          'port': 10808,
+          'listen': '127.0.0.1',
+          'protocol': 'socks',
+          'settings': {'auth': 'noauth', 'udp': true, 'userLevel': 8},
+          'sniffing': {
+            'enabled': true,
+            'destOverride': ['http', 'tls', 'quic'],
+          },
+        },
+        {
+          'tag': 'tun',
+          'protocol': 'tun',
+          'settings': {'name': 'xray0', 'MTU': 1500, 'userLevel': 8},
+          'sniffing': {
+            'enabled': true,
+            'destOverride': ['http', 'tls', 'quic'],
+          },
+        },
+      ];
+    }
+
+    final config = <String, dynamic>{
+      'stats': <String, dynamic>{},
+      'log': {'loglevel': 'warning'},
+      'policy': {
+        'levels': {
+          '8': {
+            'handshake': 4,
+            'connIdle': 300,
+            'uplinkOnly': 1,
+            'downlinkOnly': 1,
+          },
+        },
+        'system': {
+          'statsOutboundUplink': true,
+          'statsOutboundDownlink': true,
+        },
+      },
+      'dns': {
+        'servers': ['1.1.1.1', '8.8.8.8', 'localhost'],
+      },
+      'inbounds': inbounds,
+      'outbounds': outbounds,
+      'routing': {
+        'domainStrategy': 'AsIs',
+        'rules': [
+          {
+            'type': 'field',
+            'ip': [
+              '0.0.0.0/8',
+              '10.0.0.0/8',
+              '100.64.0.0/10',
+              '127.0.0.0/8',
+              '169.254.0.0/16',
+              '172.16.0.0/12',
+              '192.168.0.0/16',
+              '::1/128',
+              'fc00::/7',
+              'fe80::/10',
+            ],
+            'outboundTag': 'direct',
+          },
+        ],
+      },
+    };
+
+    return const JsonEncoder.withIndent('  ').convert(config);
+  }
+
+  /// Build a proxy-only config used by the core's measureOutboundDelay (the
+  /// "real delay" test) for a [ProxyServer] — just the proxy outbound, no tun.
+  static String buildProxyServerDelayTest(ProxyServer server) {
+    final proxy = buildProxyServerOutbound(server);
+    proxy['tag'] = 'proxy';
+    final config = <String, dynamic>{
+      'log': {'loglevel': 'none'},
+      'dns': {
+        'servers': ['1.1.1.1', '8.8.8.8', 'localhost'],
+      },
+      'outbounds': [proxy],
+    };
+    return const JsonEncoder.withIndent('  ').convert(config);
   }
 }

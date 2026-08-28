@@ -27,6 +27,7 @@ class MainActivity: FlutterActivity() {
     private val XRAY_CHANNEL = "com.forwin.vpn/xray"
     private val IMPORT_CHANNEL = "com.forwin.vpn/import"
     private val OPENVPN_CHANNEL = "com.forwin.vpn/openvpn"
+    private val APPS_CHANNEL = "com.forwin.vpn/apps"
     private val VPN_REQUEST_CODE = 100
     private val XRAY_REQUEST_CODE = 101
 
@@ -116,6 +117,40 @@ class MainActivity: FlutterActivity() {
                             map["ok"] = false
                             map["error"] = "parse_error: ${e.message}"
                             result.success(map)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Installed-apps channel (Split Tunneling app picker).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APPS_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getInstalledApps" -> {
+                        try {
+                            val pm = applicationContext.packageManager
+                            val apps = pm.getInstalledApplications(0)
+                            val out = ArrayList<Map<String, String>>()
+                            for (ai in apps) {
+                                // Only apps that can access the internet are useful
+                                // to tunnel/bypass; skip our own package.
+                                if (ai.packageName == packageName) continue
+                                val label = try {
+                                    pm.getApplicationLabel(ai).toString()
+                                } catch (_: Throwable) { ai.packageName }
+                                out.add(
+                                    mapOf(
+                                        "package" to ai.packageName,
+                                        "name" to label,
+                                        "system" to
+                                            ((ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0).toString()
+                                    )
+                                )
+                            }
+                            result.success(out)
+                        } catch (e: Throwable) {
+                            result.error("APPS_ERR", e.message, null)
                         }
                     }
                     else -> result.notImplemented()

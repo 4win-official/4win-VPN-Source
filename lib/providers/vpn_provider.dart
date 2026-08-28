@@ -18,6 +18,8 @@ import '../models/xray_server.dart';
 import '../services/xray_service.dart';
 import '../services/xray_connection.dart';
 import '../services/xray_config_builder.dart';
+import '../models/proxy_server.dart';
+import '../services/proxy_service.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -29,11 +31,13 @@ class VpnProvider with ChangeNotifier {
   final OpenVpnService _openVpnService = OpenVpnService();
   final SlowDnsService _slowDnsService = SlowDnsService();
   final XrayServerService _xrayService = XrayServerService();
+  final ProxyServerService _proxyService = ProxyServerService();
   
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
-  // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', or 'xray'
+  // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', 'xray' or
+  // 'proxy' (dedicated SOCKS4/SOCKS5/HTTP proxy protocol).
   String _selectedProtocol = 'xray';
   String get selectedProtocol => _selectedProtocol;
 
@@ -77,6 +81,32 @@ class VpnProvider with ChangeNotifier {
   final Set<String> _xrayRefreshingGroups = {};
   bool xrayGroupRefreshingFor(String group) =>
       _xrayRefreshingGroups.contains(group);
+
+  // ---------- Proxy protocol (dedicated SOCKS4/SOCKS5/HTTP) state ----------
+  List<ProxyServer> _proxyServers = [];
+  ProxyServer? _selectedProxyServer;
+  List<ProxyServer> get proxyServers => _proxyServers;
+  ProxyServer? get selectedProxyServer => _selectedProxyServer;
+  String? _selectedProxyGroup;
+  String? get selectedProxyGroup => _selectedProxyGroup;
+  ProxyServer? _activeProxyServer;
+  ProxyServer? get activeProxyServer =>
+      _activeProxyServer ?? _selectedProxyServer;
+  bool get proxyGroupSelected => _selectedProxyGroup != null;
+  bool proxyGroupSelectedFor(String group) => _selectedProxyGroup == group;
+  final Set<String> _proxyTestingIds = {};
+  Set<String> get proxyTestingIds => _proxyTestingIds;
+  final Set<String> _proxyTestingGroups = {};
+  bool proxyGroupTestingFor(String group) =>
+      _proxyTestingGroups.contains(group);
+  bool _proxyGroupTesting = false;
+  bool get proxyGroupTesting => _proxyGroupTesting;
+  bool _proxyRefreshing = false;
+  bool get proxyRefreshing => _proxyRefreshing;
+  int _proxyConnectGen = 0;
+  final Set<String> _proxyRefreshingGroups = {};
+  bool proxyGroupRefreshingFor(String group) =>
+      _proxyRefreshingGroups.contains(group);
   
   // Slow DNS configs
   List<SlowDnsConfig> _slowDnsConfigs = [];
@@ -186,6 +216,8 @@ class VpnProvider with ChangeNotifier {
     _startupRestore();
     // بارگیری سرورهای ایکس‌ری
     loadXrayServers();
+    // بارگیری سرورهای پراکسی
+    loadProxyServers();
   }
 
   /// On launch: restore the selected protocol and load the saved OpenVPN
@@ -253,6 +285,10 @@ class VpnProvider with ChangeNotifier {
       // directly (copyWith can't null it out).
       await _xrayService.clearAllPings();
       for (final s in _xrayServers) {
+        s.ping = null;
+      }
+      await _proxyService.clearAllPings();
+      for (final s in _proxyServers) {
         s.ping = null;
       }
       _currentPing = null;
@@ -371,7 +407,8 @@ class VpnProvider with ChangeNotifier {
     _totalDownloadBytes = 0;
     _totalUploadBytes = 0;
     _xrayTrafficTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!isConnected || _selectedProtocol != 'xray') {
+      if (!isConnected ||
+          (_selectedProtocol != 'xray' && _selectedProtocol != 'proxy')) {
         timer.cancel();
         return;
       }
@@ -457,6 +494,38 @@ class VpnProvider with ChangeNotifier {
         _pingFailed = false;
         final config = await _buildDelayConfig(server);
         final testUrl = await getXrayTestUrl();
+        final delay = await XrayConnection.measureDelay(
+          config,
+          url: testUrl,
+        ).timeout(const Duration(seconds: 6), onTimeout: () => -1);
+        if (delay >= 0) {
+          _currentPing = delay;
+          _pingFailed = false;
+        } else {
+          _currentPing = null;
+          _pingFailed = true;
+        }
+      } catch (_) {
+        _currentPing = null;
+        _pingFailed = true;
+      }
+      notifyListeners();
+      return;
+    }
+
+    // Proxy mode: real delay through the active proxy (open-site style test).
+    if (_selectedProtocol == 'proxy') {
+      final server = activeProxyServer;
+      if (server == null) {
+        _currentPing = null;
+        _pingFailed = true;
+        notifyListeners();
+        return;
+      }
+      try {
+        _pingFailed = false;
+        final config = XrayConfigBuilder.buildProxyServerDelayTest(server);
+        final testUrl = await getProxyTestUrl();
         final delay = await XrayConnection.measureDelay(
           config,
           url: testUrl,
@@ -682,7 +751,12 @@ class VpnProvider with ChangeNotifier {
     // what made the setting look ignored).
     final modePrefs = await SharedPreferences.getInstance();
     final proxyMode = (modePrefs.getString('connection_mode') ?? 'vpn') == 'proxy';
-    if (proxyMode && _selectedProtocol != 'xray') {
+    // Both Xray and the dedicated Proxy protocol run the Xray core and can serve
+    // a local proxy without a system tunnel; every other protocol is an
+    // IP-layer VPN and cannot run in connection-mode "proxy".
+    if (proxyMode &&
+        _selectedProtocol != 'xray' &&
+        _selectedProtocol != 'proxy') {
       _status = VpnConnectionStatus.error;
       _errorMessage =
           'Proxy mode only supports Xray. Switch to the Xray protocol, '
@@ -707,6 +781,10 @@ class VpnProvider with ChangeNotifier {
     } else if (_selectedProtocol == 'xray') {
       // ✅ Xray (real Xray core): Use selected Xray server
       await _connectXray();
+      return;
+    } else if (_selectedProtocol == 'proxy') {
+      // ✅ Proxy (real SOCKS4/SOCKS5/HTTP): Use selected proxy server
+      await _connectProxy();
       return;
     }
 
@@ -1697,6 +1775,434 @@ class VpnProvider with ChangeNotifier {
     return working.isNotEmpty ? working.first : null;
   }
 
+  // ==================== Proxy Protocol Methods ====================
+  //
+  // The Proxy protocol connects to a REAL SOCKS4 / SOCKS5 / HTTP upstream. It
+  // mirrors the Xray protocol's server-list UX but is a distinct feature (its
+  // own server store, its own connect path). The connection itself runs through
+  // the same native Xray core: the upstream proxy is turned into an Xray
+  // socks/http OUTBOUND (see XrayConfigBuilder.buildForProxyServer).
+
+  /// Load persisted Proxy servers + currently selected one/group.
+  Future<void> loadProxyServers() async {
+    _proxyServers = await _proxyService.loadServers();
+    final prefs = await SharedPreferences.getInstance();
+    _selectedProxyGroup = prefs.getString('proxy_selected_group');
+    if (_selectedProxyGroup != null &&
+        !_proxyServers.any((s) => s.group == _selectedProxyGroup)) {
+      _selectedProxyGroup = null;
+      await prefs.remove('proxy_selected_group');
+    }
+    if (_selectedProxyGroup != null) {
+      _selectedProxyServer = null;
+    } else {
+      _selectedProxyServer = await _proxyService.getSelectedServer();
+    }
+    notifyListeners();
+  }
+
+  /// Add proxy server(s) from share link(s). Returns count added.
+  Future<int> addProxyServers(String raw) async {
+    final added = await _proxyService.addFromLinks(raw);
+    if (added > 0) await loadProxyServers();
+    return added;
+  }
+
+  Future<void> removeProxyServer(String id) async {
+    await _proxyService.removeServer(id);
+    await loadProxyServers();
+  }
+
+  Future<void> selectProxyServer(ProxyServer server) async {
+    _selectedProxyServer = server;
+    _selectedProxyGroup = null;
+    await _proxyService.setSelectedId(server.id);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('proxy_selected_group');
+    notifyListeners();
+    await _reconnectProxyIfActive();
+  }
+
+  Future<void> _reconnectProxyIfActive() async {
+    if (_selectedProtocol != 'proxy') return;
+    if (_status != VpnConnectionStatus.connected &&
+        _status != VpnConnectionStatus.connecting) {
+      return;
+    }
+    if (_selectedProxyServer == null) return;
+    await disconnect();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await connect();
+  }
+
+  Future<void> selectProxyGroup(String group) async {
+    _selectedProxyGroup = group;
+    _selectedProxyServer = null;
+    await _proxyService.setSelectedId(null);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('proxy_selected_group', group);
+    notifyListeners();
+  }
+
+  // ---- Proxy subscription management ----
+  Future<List<String>> getProxySubUrls() => _proxyService.getSubUrls();
+  Future<Map<String, String>> getProxySubNames() => _proxyService.getSubNames();
+  Future<String> proxySubDisplayName(String url) =>
+      _proxyService.groupNameForUrlAsync(url);
+
+  Future<void> setProxySubName(String url, String name) async {
+    await _proxyService.setSubName(url, name);
+    await loadProxyServers();
+    notifyListeners();
+  }
+
+  Future<bool> addProxySubUrl(String url, {String? name}) async {
+    final trimmed = url.trim();
+    final added = await _proxyService.addSubInput(trimmed);
+    if (added > 0) {
+      if (name != null &&
+          name.trim().isNotEmpty &&
+          trimmed.startsWith('http') &&
+          !trimmed.contains(RegExp(r'[\r\n]'))) {
+        await _proxyService.setSubName(trimmed, name.trim());
+      }
+      await refreshProxySubs(force: true);
+    }
+    return added > 0;
+  }
+
+  Future<void> removeProxySubUrl(String url) async {
+    await _proxyService.removeSubUrl(url);
+    await refreshProxySubs(force: true);
+  }
+
+  Future<bool> changeProxySubUrl(String oldUrl, String newUrl) async {
+    final ok = await _proxyService.changeSubUrl(oldUrl, newUrl);
+    if (ok) await refreshProxySubs(force: true);
+    return ok;
+  }
+
+  /// Refresh ALL proxy subscription groups from their URLs.
+  Future<int> refreshProxySubs({bool force = false}) async {
+    _proxyRefreshing = true;
+    notifyListeners();
+    try {
+      final count = await _proxyService.refreshAll(
+        minInterval: force ? null : const Duration(hours: 6),
+      );
+      await loadProxyServers();
+      return count;
+    } finally {
+      _proxyRefreshing = false;
+      notifyListeners();
+    }
+  }
+
+  /// Refresh a SINGLE proxy subscription group.
+  Future<int> refreshProxyOneGroup(String groupKey) async {
+    if (_proxyRefreshingGroups.contains(groupKey)) return -1;
+    _proxyRefreshingGroups.add(groupKey);
+    notifyListeners();
+    try {
+      final count = await _proxyService.refreshOneGroup(groupKey);
+      await loadProxyServers();
+      return count;
+    } finally {
+      _proxyRefreshingGroups.remove(groupKey);
+      notifyListeners();
+    }
+  }
+
+  void _applyProxyPing(String id, int? ping) {
+    final idx = _proxyServers.indexWhere((s) => s.id == id);
+    if (idx >= 0) _proxyServers[idx] = _proxyServers[idx].copyWith(ping: ping);
+  }
+
+  /// TEST TYPE 1 — plain PING test. Measures the TCP connect latency to the
+  /// proxy's host:port directly (a normal reachability/ping check). Returns ms
+  /// or -1 on failure. Persists the result.
+  Future<int> pingProxyServer(ProxyServer server) async {
+    _proxyTestingIds.add(server.id);
+    notifyListeners();
+    final sw = Stopwatch()..start();
+    int result = -1;
+    try {
+      final socket = await Socket.connect(
+        server.address,
+        server.port,
+        timeout: const Duration(seconds: 5),
+      );
+      sw.stop();
+      result = sw.elapsedMilliseconds;
+      socket.destroy();
+    } catch (e) {
+      result = -1;
+      if (kDebugMode) debugPrint('⚠️ pingProxyServer: $e');
+    } finally {
+      await _proxyService.updatePing(server.id, result);
+      _applyProxyPing(server.id, result);
+      _proxyTestingIds.remove(server.id);
+      notifyListeners();
+    }
+    return result;
+  }
+
+  /// TEST TYPE 2 — "open a site" test. Makes a REAL request through the proxy
+  /// (via the Xray core's measureOutboundDelay) to the configured test site,
+  /// proving the proxy actually works for browsing. Returns ms or -1. Persists
+  /// the result (overwriting the ping value with the real-connectivity delay).
+  Future<int> openSiteTestProxyServer(ProxyServer server) async {
+    _proxyTestingIds.add(server.id);
+    notifyListeners();
+    int delay = -1;
+    try {
+      final config = XrayConfigBuilder.buildProxyServerDelayTest(server);
+      final testUrl = await getProxyTestUrl();
+      delay = await XrayConnection.measureDelay(config, url: testUrl);
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ openSiteTestProxyServer: $e');
+      delay = -1;
+    } finally {
+      await _proxyService.updatePing(server.id, delay >= 0 ? delay : -1);
+      _applyProxyPing(server.id, delay >= 0 ? delay : -1);
+      _proxyTestingIds.remove(server.id);
+      notifyListeners();
+    }
+    return delay;
+  }
+
+  /// Concurrently open-site-test a list of proxy servers (used by the group /
+  /// "test all" buttons and by the connect path to pick the fastest working
+  /// proxy). Keeps the lowest positive delay.
+  Future<void> testProxyServers(List<ProxyServer> servers) async {
+    if (servers.isEmpty || _proxyGroupTesting) return;
+    _proxyGroupTesting = true;
+    final int testGen = _proxyConnectGen;
+    final groups = servers.map((s) => s.group).toSet();
+    _proxyTestingGroups.addAll(groups);
+    notifyListeners();
+    try {
+      final testUrl = await getProxyTestUrl();
+      const batchSize = 30;
+      final results = <String, int?>{};
+      final indexById = <String, int>{};
+      for (var i = 0; i < _proxyServers.length; i++) {
+        indexById[_proxyServers[i].id] = i;
+      }
+      for (var i = 0; i < servers.length; i += batchSize) {
+        if (testGen != _proxyConnectGen) return;
+        final batch =
+            servers.sublist(i, (i + batchSize).clamp(0, servers.length));
+        for (final s in batch) {
+          _proxyTestingIds.add(s.id);
+        }
+        notifyListeners();
+        await Future.wait(batch.map((s) async {
+          try {
+            final config = XrayConfigBuilder.buildProxyServerDelayTest(s);
+            final delay =
+                await XrayConnection.measureDelay(config, url: testUrl);
+            results[s.id] = delay >= 0 ? delay : -1;
+          } catch (_) {
+            results[s.id] = -1;
+          } finally {
+            _proxyTestingIds.remove(s.id);
+          }
+        }));
+        for (final s in batch) {
+          final idx = indexById[s.id];
+          if (idx != null && idx < _proxyServers.length) {
+            _proxyServers[idx] =
+                _proxyServers[idx].copyWith(ping: results[s.id]);
+          }
+        }
+        notifyListeners();
+      }
+      await _proxyService.updatePings(results);
+      await _sortProxyByPing();
+    } finally {
+      _proxyGroupTesting = false;
+      _proxyTestingGroups.removeAll(groups);
+      notifyListeners();
+    }
+  }
+
+  Future<void> testAllProxyGroups() async {
+    if (_proxyGroupTesting) return;
+    final all = List<ProxyServer>.from(_proxyServers);
+    await testProxyServers(all);
+  }
+
+  Future<void> _sortProxyByPing() async {
+    int rank(ProxyServer s) {
+      final p = s.ping;
+      if (p == null) return 1;
+      if (p < 0) return 2;
+      return 0;
+    }
+
+    final order = <String, int>{};
+    var next = 0;
+    for (final s in _proxyServers) {
+      order.putIfAbsent(s.group, () => next++);
+    }
+    _proxyServers.sort((a, b) {
+      if (a.group != b.group) {
+        return order[a.group]!.compareTo(order[b.group]!);
+      }
+      final ra = rank(a), rb = rank(b);
+      if (ra != rb) return ra.compareTo(rb);
+      return (a.ping ?? 999999).compareTo(b.ping ?? 999999);
+    });
+    await _proxyService.saveServers(_proxyServers);
+    notifyListeners();
+  }
+
+  List<ProxyServer> _selectedProxyGroupServers() {
+    final g = _selectedProxyGroup;
+    if (g == null) return const [];
+    return _proxyServers.where((s) => s.group == g).toList();
+  }
+
+  Future<void> selectNextProxyServer() async {
+    final group = _selectedProxyGroupServers();
+    if (group.isEmpty) return;
+    final curId = _activeProxyServer?.id ?? _selectedProxyServer?.id;
+    var idx = group.indexWhere((s) => s.id == curId);
+    idx = (idx + 1) % group.length;
+    final next = group[idx];
+    _selectedProxyServer = next;
+    await _proxyService.setSelectedId(next.id);
+    notifyListeners();
+    await _reconnectProxyIfActive();
+  }
+
+  Future<ProxyServer?> _pickFastestProxyServer() async {
+    final group = _selectedProxyGroupServers();
+    if (group.isEmpty) return null;
+    await testProxyServers(group);
+    final g = _selectedProxyGroup;
+    final working = _proxyServers
+        .where((s) => s.group == g && (s.ping ?? -1) > 0)
+        .toList()
+      ..sort((a, b) => (a.ping ?? 999999).compareTo(b.ping ?? 999999));
+    return working.isNotEmpty ? working.first : null;
+  }
+
+  /// The default open-site test URL for the Proxy protocol.
+  static const String defaultProxyTestUrl = 'http://www.google.com/gen_204';
+
+  Future<String> getProxyTestUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString('proxy_test_url')?.trim();
+    if (v == null || v.isEmpty) return defaultProxyTestUrl;
+    return v;
+  }
+
+  Future<void> setProxyTestUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = url.trim();
+    if (v.isEmpty) {
+      await prefs.remove('proxy_test_url');
+    } else {
+      await prefs.setString('proxy_test_url', v);
+    }
+    notifyListeners();
+  }
+
+  /// Connect through the selected SOCKS4 / SOCKS5 / HTTP proxy. Runs the real
+  /// Xray core with the upstream proxy as its outbound.
+  Future<void> _connectProxy() async {
+    final groupHasServers = _selectedProxyGroup != null &&
+        _proxyServers.any((s) => s.group == _selectedProxyGroup);
+    if (_selectedProxyServer == null && !groupHasServers) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Please add and select a proxy server first';
+      notifyListeners();
+      return;
+    }
+
+    final int myGen = ++_proxyConnectGen;
+    bool cancelled() =>
+        myGen != _proxyConnectGen ||
+        _status == VpnConnectionStatus.disconnecting ||
+        _status == VpnConnectionStatus.disconnected;
+
+    try {
+      _status = VpnConnectionStatus.connecting;
+      notifyListeners();
+
+      ProxyServer? serverToConnect = _selectedProxyServer;
+      if (_selectedProxyServer == null && groupHasServers) {
+        final fastest = await _pickFastestProxyServer();
+        if (cancelled()) return;
+        if (fastest != null) {
+          serverToConnect = fastest;
+        } else {
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'No working proxy found in this group. Try again.';
+          notifyListeners();
+          return;
+        }
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final proxyMode =
+          (prefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+
+      if (cancelled()) return;
+
+      if (!proxyMode) {
+        final granted = await XrayConnection.requestPermission();
+        if (!granted) {
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'VPN permission denied';
+          notifyListeners();
+          return;
+        }
+      }
+
+      if (cancelled()) return;
+
+      final configJson = XrayConfigBuilder.buildForProxyServer(
+        serverToConnect!,
+        proxyMode: proxyMode,
+      );
+
+      if (kDebugMode) {
+        debugPrint('🚀 Connecting Proxy: ${serverToConnect.remark} '
+            '(${serverToConnect.protocol}) mode=${proxyMode ? "proxy" : "vpn"}');
+      }
+
+      final connected =
+          await XrayConnection.connect(configJson, proxyMode: proxyMode);
+      if (cancelled()) {
+        try {
+          await XrayConnection.disconnect();
+        } catch (_) {}
+        return;
+      }
+      if (connected) {
+        _status = VpnConnectionStatus.connected;
+        _connectedServer = null;
+        _activeProxyServer = serverToConnect;
+        _errorMessage = null;
+        _startDurationTimer();
+        _startPingTimer();
+        _startXrayTraffic();
+      } else {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Failed to start proxy connection';
+      }
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ Proxy connect failed: $e');
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Failed to connect: ${e.toString()}';
+      notifyListeners();
+    }
+  }
+
   /// Connect using the real Xray core (libv2ray / v2rayNG) with TLS
   /// ClientHello fragmentation enabled.
   Future<void> _connectXray() async {
@@ -1836,6 +2342,7 @@ class VpnProvider with ChangeNotifier {
     // Invalidate any in-flight Xray connect (e.g. a group delay-test in
     // progress) so it aborts instead of connecting after the user cancelled.
     _xrayConnectGen++;
+    _proxyConnectGen++;
 
     _status = VpnConnectionStatus.disconnecting;
     notifyListeners();
@@ -1880,6 +2387,19 @@ class VpnProvider with ChangeNotifier {
         _activeXrayServer = null;
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting Xray...');
+        }
+      } else if (_selectedProtocol == 'proxy') {
+        // Proxy protocol runs the same Xray core → same native disconnect.
+        await XrayConnection.disconnect();
+        _stopPingTimer();
+        _stopDurationTimer();
+        _stopXrayTraffic();
+        _connectionDuration = Duration.zero;
+        _totalDownloadBytes = 0;
+        _totalUploadBytes = 0;
+        _activeProxyServer = null;
+        if (kDebugMode) {
+          debugPrint('🔌 Disconnecting Proxy...');
         }
       } else {
         await _vpnService.disconnect();

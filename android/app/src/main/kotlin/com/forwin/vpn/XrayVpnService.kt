@@ -138,6 +138,9 @@ class XrayVpnService : VpnService() {
                 builder.addDisallowedApplication(packageName)
             } catch (_: Throwable) { }
 
+            // Split Tunneling: apply the user's per-app include/exclude rules.
+            SplitTunnel.apply(applicationContext, builder, packageName)
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.setMetered(false)
             }

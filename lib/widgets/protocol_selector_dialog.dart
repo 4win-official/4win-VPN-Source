@@ -188,6 +188,90 @@ class ProtocolSelectorDialog extends StatelessWidget {
 
                     const Divider(height: 20),
 
+                    // Proxy Option (dedicated SOCKS4 / SOCKS5 / HTTP proxy) —
+                    // its appearance mirrors the Xray option, but it connects
+                    // to a REAL upstream proxy.
+                    ListTile(
+                      leading: Icon(
+                        Icons.swap_horiz,
+                        color: vpnProvider.selectedProtocol == 'proxy'
+                            ? Colors.tealAccent.shade700
+                            : (isDark ? Colors.white54 : Colors.black54),
+                        size: 28,
+                      ),
+                      title: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'Proxy',
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontWeight:
+                                    vpnProvider.selectedProtocol == 'proxy'
+                                        ? FontWeight.bold
+                                        : FontWeight.w500,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.tealAccent.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.tealAccent.shade700
+                                    .withValues(alpha: 0.6),
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              'SOCKS/HTTP',
+                              style: TextStyle(
+                                color: Colors.tealAccent.shade700,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Text(
+                        'Real SOCKS4 / SOCKS5 / HTTP proxy',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (vpnProvider.selectedProtocol == 'proxy')
+                            Icon(Icons.check_circle,
+                                color: Colors.tealAccent.shade700),
+                          _gearButton(
+                            context,
+                            isDark: isDark,
+                            tooltip: 'Proxy settings',
+                            onTap: () =>
+                                _openProtocolSettings(context, 'proxy'),
+                          ),
+                        ],
+                      ),
+                      onTap: () {
+                        vpnProvider.switchProtocol('proxy');
+                        Navigator.pop(context); // Auto-close
+                      },
+                    ),
+
+                    const Divider(height: 20),
+
                     // SSTP Option
                     ListTile(
                       leading: Icon(

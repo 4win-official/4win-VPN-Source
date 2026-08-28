@@ -6,6 +6,7 @@ import '../models/dns_server.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
 import 'slowdns_configs_screen.dart';
+import 'split_tunnel_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   /// When set, the settings page shows ONLY this protocol's section (used by
@@ -2022,6 +2023,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: TextStyle(
                           fontSize: 11,
                           color: isDark ? Colors.white38 : Colors.black45,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
+                // Split Tunneling — global setting (per-app tunnel selection).
+                if (widget.generalOnly) ...[
+                  _SettingsSection(
+                    title: 'Split Tunneling',
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.call_split,
+                            color: Colors.tealAccent.shade700),
+                        title: Text(
+                          'Choose apps',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'Pick which apps use the VPN or bypass it',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white54 : Colors.black45,
+                          ),
+                        ),
+                        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SplitTunnelScreen(),
+                          ),
                         ),
                       ),
                     ],
