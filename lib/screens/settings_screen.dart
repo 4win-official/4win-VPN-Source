@@ -1933,6 +1933,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(height: 16),
                       // 🔗 Subscription links
                       _buildSubLinksCard(isDark, provider),
+                      const SizedBox(height: 20),
+                      // Connection Mode — moved here from General Settings.
+                      //   • VPN mode   → the whole device is tunnelled (system
+                      //                  VPN, the VPN key icon appears).
+                      //   • Proxy mode → the core runs a LOCAL proxy on
+                      //                  127.0.0.1:4444 instead; no system tunnel
+                      //                  and no VPN icon. (Xray only.)
+                      Text(
+                        'Connection Mode',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _ConnModeTile(
+                        title: 'VPN mode',
+                        subtitle: 'Tunnel the whole device (system VPN)',
+                        icon: Icons.vpn_lock,
+                        selected: _connectionMode == 'vpn',
+                        isDark: isDark,
+                        onTap: () =>
+                            setState(() => _connectionMode = 'vpn'),
+                      ),
+                      const SizedBox(height: 8),
+                      _ConnModeTile(
+                        title: 'Proxy mode',
+                        subtitle:
+                            'Local proxy 127.0.0.1:4444 (no VPN icon) • Xray only',
+                        icon: Icons.dns,
+                        selected: _connectionMode == 'proxy',
+                        isDark: isDark,
+                        onTap: () =>
+                            setState(() => _connectionMode = 'proxy'),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Proxy mode applies to the whole app. Only the Xray '
+                        'protocol can run as a local proxy; SSTP, DNS Changer, '
+                        'OpenVPN and Slow DNS always require VPN mode.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white38 : Colors.black45,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 24),
@@ -1983,52 +2029,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 
                 const SizedBox(height: 24),
-
-                // Connection Mode — global setting.
-                //   • VPN mode   → the whole device is tunnelled (system VPN,
-                //                  the VPN key icon appears).
-                //   • Proxy mode → the core runs a LOCAL proxy on
-                //                  127.0.0.1:4444 instead; no system tunnel and
-                //                  no VPN icon. Apps opt in by using the proxy.
-                //                  (Applies to Xray; other protocols always run
-                //                  as a system VPN.)
-                if (widget.generalOnly) ...[
-                  _SettingsSection(
-                    title: 'Connection Mode',
-                    children: [
-                      _ConnModeTile(
-                        title: 'VPN mode',
-                        subtitle: 'Tunnel the whole device (system VPN)',
-                        icon: Icons.vpn_lock,
-                        selected: _connectionMode == 'vpn',
-                        isDark: isDark,
-                        onTap: () =>
-                            setState(() => _connectionMode = 'vpn'),
-                      ),
-                      const SizedBox(height: 8),
-                      _ConnModeTile(
-                        title: 'Proxy mode',
-                        subtitle: 'Local proxy 127.0.0.1:4444 (no VPN icon) • Xray only',
-                        icon: Icons.dns,
-                        selected: _connectionMode == 'proxy',
-                        isDark: isDark,
-                        onTap: () =>
-                            setState(() => _connectionMode = 'proxy'),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Proxy mode applies to the whole app. Only the Xray '
-                        'protocol can run as a local proxy; SSTP, DNS Changer, '
-                        'OpenVPN and Slow DNS always require VPN mode.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDark ? Colors.white38 : Colors.black45,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                ],
 
                 // Split Tunneling — global setting (per-app tunnel selection).
                 if (widget.generalOnly) ...[

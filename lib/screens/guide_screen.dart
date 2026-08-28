@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// A simple visual guide that teaches new users two key interactions:
-///   1. How to change the app theme  -> the palette icon at the top of the screen.
-///   2. How to open Settings         -> long-press the power (on/off) button.
-///
-/// Each step is illustrated with a mock of the relevant UI element plus a short
-/// caption so users can understand it visually without reading much.
+/// A comprehensive in-app guide shown to new users on first launch (and any
+/// time from the "?" icon on the home screen). It explains every major part of
+/// 4win VPN section by section: connecting, protocols, servers, subscriptions,
+/// the proxy protocol, split tunneling, themes, settings, tools and updates.
 class GuideScreen extends StatelessWidget {
   const GuideScreen({super.key});
 
@@ -48,36 +46,200 @@ class GuideScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Two quick things to know before you start',
+              'A full walkthrough of everything the app can do. '
+              'You can reopen this guide anytime from the "?" icon at the top.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: subColor, fontSize: 14),
+              style: TextStyle(color: subColor, fontSize: 14, height: 1.4),
             ),
             const SizedBox(height: 28),
 
-            // STEP 1 — Change theme (palette icon at the top)
+            // 1 — Connect / disconnect
             _GuideCard(
               isDark: isDark,
               accent: accent,
               stepNumber: '1',
-              title: 'Change the theme',
+              title: 'Connect & disconnect',
               description:
-                  'Tap the palette icon at the top of the home screen to switch '
-                  'between themes (Snow, Pixel, Rain, Pink…) and day / night mode.',
-              illustration: _TopBarIllustration(isDark: isDark, accent: accent),
+                  'Tap the big round power button in the middle of the home '
+                  'screen to connect. Tap it again to disconnect. The colour and '
+                  'the glow at the bottom of the screen show the current state: '
+                  'idle, connecting, or connected. Live download / upload speed '
+                  'and total data usage appear below the button while connected.',
+              illustration:
+                  _PowerButtonIllustration(isDark: isDark, accent: accent),
             ),
             const SizedBox(height: 20),
 
-            // STEP 2 — Open settings (long-press the power button)
+            // 2 — Open settings (long press)
             _GuideCard(
               isDark: isDark,
               accent: accent,
               stepNumber: '2',
               title: 'Open Settings',
               description:
-                  'Press and HOLD the power (on/off) button in the middle of the '
-                  'screen. A spinning gear appears and takes you to Settings — '
-                  'this works in every protocol.',
-              illustration: _PowerButtonIllustration(isDark: isDark, accent: accent),
+                  'Press and HOLD the power button. A spinning gear appears and '
+                  'takes you to the settings for the protocol you are using. The '
+                  'gear icon on the protocol selector opens the same per-protocol '
+                  'settings, and the top gear opens the General Settings.',
+              illustration:
+                  _PowerButtonIllustration(isDark: isDark, accent: accent),
+            ),
+            const SizedBox(height: 20),
+
+            // 3 — Choose a protocol
+            _GuideTextCard(
+              isDark: isDark,
+              accent: accent,
+              icon: Icons.swap_vert,
+              title: 'Choose a protocol',
+              description:
+                  'Tap the protocol name to open the protocol selector. 4win VPN '
+                  'supports several ways to connect:\n\n'
+                  '• SSTP — classic tunnel, good on restrictive networks.\n'
+                  '• DNS Changer — changes only your DNS.\n'
+                  '• OpenVPN — import .ovpn configs.\n'
+                  '• Slow DNS — tunnels over DNS when everything else is blocked.\n'
+                  '• Xray — VLESS / VMess / Trojan / Shadowsocks with fragment.\n'
+                  '• Proxy — connect directly through a SOCKS4 / SOCKS5 / HTTP '
+                  'proxy.\n\n'
+                  'Each protocol has its own gear ⚙ for settings and its own '
+                  'server / config list.',
+            ),
+            const SizedBox(height: 20),
+
+            // 4 — Servers, testing, best server
+            _GuideTextCard(
+              isDark: isDark,
+              accent: accent,
+              icon: Icons.dns,
+              title: 'Servers & speed testing',
+              description:
+                  'Open the server list button under the power button (for Xray '
+                  'and Proxy it is the "Servers" button). You can:\n\n'
+                  '• Add servers one by one, or import many at once.\n'
+                  '• Test ping / delay to find the fastest server — the app can '
+                  'test many servers at the same time.\n'
+                  '• Pick a whole GROUP and let the app connect to the fastest '
+                  'server in it, then jump to the next one with "Next".\n'
+                  '• Copy or delete individual servers.\n\n'
+                  'The 3-second ping shown on the home screen is a real test that '
+                  'opens the delay-test URL through the active server.',
+            ),
+            const SizedBox(height: 20),
+
+            // 5 — Subscription links
+            _GuideTextCard(
+              isDark: isDark,
+              accent: accent,
+              icon: Icons.link,
+              title: 'Subscription links',
+              description:
+                  'Instead of adding servers manually you can paste a '
+                  'subscription link (a URL that returns a list of servers). The '
+                  'app fetches it, decodes it and keeps it updated. You can add '
+                  'several subscriptions, give each one a name, refresh them, or '
+                  'remove them. Works for both Xray and the Proxy protocol.',
+            ),
+            const SizedBox(height: 20),
+
+            // 6 — Proxy protocol (new)
+            _GuideTextCard(
+              isDark: isDark,
+              accent: accent,
+              icon: Icons.settings_ethernet,
+              title: 'Proxy protocol (SOCKS / HTTP)',
+              description:
+                  'The Proxy protocol connects you through a real SOCKS4, SOCKS5 '
+                  'or HTTP proxy. Add proxies as links (socks5://, socks4://, '
+                  'http://…), as host:port, or from a subscription link.\n\n'
+                  'Each proxy in the list has TWO tests:\n'
+                  '• Ping test — a quick TCP latency check to the proxy.\n'
+                  '• Open-site test — actually opens a website through the proxy '
+                  'to prove it really works for browsing.\n\n'
+                  'You can copy or delete any proxy, and select one to connect.',
+            ),
+            const SizedBox(height: 20),
+
+            // 7 — Split tunneling
+            _GuideTextCard(
+              isDark: isDark,
+              accent: accent,
+              icon: Icons.call_split,
+              title: 'Split tunneling',
+              description:
+                  'In General Settings → Split Tunneling you choose which apps '
+                  'use the VPN:\n\n'
+                  '• Only selected — just the apps you pick go through the VPN, '
+                  'everything else uses your normal connection.\n'
+                  '• Bypass selected — the apps you pick skip the VPN, everything '
+                  'else is tunnelled.\n\n'
+                  'Search for apps and tick the ones you want. Reconnect for the '
+                  'change to take effect.',
+            ),
+            const SizedBox(height: 20),
+
+            // 8 — Themes
+            _GuideCard(
+              isDark: isDark,
+              accent: accent,
+              stepNumber: '8',
+              title: 'Themes & appearance',
+              description:
+                  'Tap the palette icon at the top to open VPN Themes. Switch '
+                  'between the day / night toggle and pick a theme: Liquid Glass, '
+                  'Pixel, Pink, and the Seasonal group (Rain, Snow, Summer, '
+                  'Autumn). Some themes use a fixed mode. The System Default '
+                  'theme has its own gear ⚙ where you can set a custom '
+                  'background image for day and for night.',
+              illustration: _TopBarIllustration(isDark: isDark, accent: accent),
+            ),
+            const SizedBox(height: 20),
+
+            // 9 — Connection mode (VPN / Proxy) - now inside Xray settings
+            _GuideTextCard(
+              isDark: isDark,
+              accent: accent,
+              icon: Icons.vpn_lock,
+              title: 'Connection mode (Xray)',
+              description:
+                  'Inside the Xray settings you can choose the connection mode:\n\n'
+                  '• VPN mode — tunnels the whole device (the system VPN key icon '
+                  'appears).\n'
+                  '• Proxy mode — runs a local proxy on 127.0.0.1:4444 with no '
+                  'VPN icon; apps opt in by using that proxy.\n\n'
+                  'Only Xray supports proxy mode; the other protocols always run '
+                  'as a system VPN.',
+            ),
+            const SizedBox(height: 20),
+
+            // 10 — Extra tools
+            _GuideTextCard(
+              isDark: isDark,
+              accent: accent,
+              icon: Icons.build,
+              title: 'Extra tools & security',
+              description:
+                  '• Secret Text (lock icon) — encode/decode text so only 4win '
+                  'VPN can read it.\n'
+                  '• Kill Switch (Settings → Security) — blocks the internet if '
+                  'the VPN drops, so nothing leaks.\n'
+                  '• Refresh (↻) — reloads the server list.\n'
+                  '• Fragment (Xray) — splits the TLS handshake to bypass deep '
+                  'packet inspection.',
+            ),
+            const SizedBox(height: 20),
+
+            // 11 — Updates
+            _GuideTextCard(
+              isDark: isDark,
+              accent: accent,
+              icon: Icons.system_update,
+              title: 'Staying up to date',
+              description:
+                  'General Settings → Updates checks GitHub for a newer version '
+                  'of 4win VPN. If one is available you can download and install '
+                  'it right from the app. If you like 4win VPN, the ❤ icon at the '
+                  'top opens the support / donate page.',
             ),
             const SizedBox(height: 32),
 
@@ -187,6 +349,77 @@ class _GuideCard extends StatelessWidget {
   }
 }
 
+/// A text-only guide card (icon + title + longer description) for the many
+/// sections that don't need a custom illustration.
+class _GuideTextCard extends StatelessWidget {
+  final bool isDark;
+  final Color accent;
+  final IconData icon;
+  final String title;
+  final String description;
+
+  const _GuideTextCard({
+    required this.isDark,
+    required this.accent,
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subColor = isDark ? Colors.white60 : Colors.black54;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF111111) : const Color(0xFFF5F5F5),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: accent.withValues(alpha: 0.4),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: accent, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: TextStyle(color: subColor, fontSize: 14, height: 1.45),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Mock of the home-screen top bar, highlighting the palette (theme) icon.
 class _TopBarIllustration extends StatelessWidget {
   final bool isDark;
@@ -213,7 +446,6 @@ class _TopBarIllustration extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          // Highlighted palette icon (the theme button)
           Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
@@ -223,8 +455,6 @@ class _TopBarIllustration extends StatelessWidget {
             ),
             child: Icon(Icons.palette_outlined, color: accent, size: 22),
           ),
-          const SizedBox(width: 10),
-          Icon(Icons.dark_mode, color: faded, size: 22),
           const SizedBox(width: 10),
           Icon(Icons.favorite_border, color: faded, size: 22),
         ],
@@ -267,7 +497,6 @@ class _PowerButtonIllustration extends StatelessWidget {
                 color: isDark ? Colors.black87 : Colors.white,
               ),
             ),
-            // Small gear badge indicating long-press -> settings
             Positioned(
               right: 4,
               bottom: 4,

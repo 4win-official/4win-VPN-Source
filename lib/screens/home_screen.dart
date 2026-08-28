@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -8,6 +9,8 @@ import '../providers/theme_provider.dart';
 import '../widgets/snow_animation.dart';
 import '../widgets/pixel_effect.dart';
 import '../widgets/rain_animation.dart';
+import '../widgets/autumn_animation.dart';
+import '../widgets/summer_animation.dart';
 import '../widgets/protocol_selector_dialog.dart';
 import '../widgets/rainbow_heart_button.dart';
 import 'donate_screen.dart';
@@ -195,28 +198,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isPixelTheme = themeProvider.selectedTheme == AppTheme.pixel;
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
     final isRainTheme = themeProvider.selectedTheme == AppTheme.rain;
+    final isSummerTheme = themeProvider.selectedTheme == AppTheme.summer;
+    final isAutumnTheme = themeProvider.selectedTheme == AppTheme.autumn;
+    final isLiquidGlassTheme =
+        themeProvider.selectedTheme == AppTheme.liquidGlass;
     
     // Theme-specific colors
     // تم صورتی اکنون نسخه روز و شب دارد:
     //  - روز: پس‌زمینه لاوندر روشن
     //  - شب: پس‌زمینه بنفش-صورتی تیره با لهجه‌های صورتی روشن
-    final bgColor = isPinkTheme
-        ? (isDark
-            ? const Color(0xFF2A1A24) // صورتی-بنفش خیلی تیره (نسخه شب)
-            : const Color(0xFFFFF0F5)) // لاوندر صورتی روشن (نسخه روز)
-        : (isDark ? const Color(0xFF000000) : Colors.white); // سیاه کامل در دارک مود
-    
-    final iconColor = isPinkTheme
-        ? (isDark
-            ? const Color(0xFFFF9EC4) // صورتی روشن برای کنتراست روی پس‌زمینه تیره
-            : const Color(0xFFFF69B4)) // صورتی داغ
-        : (isDark ? Colors.white70 : Colors.black54);
-    
-    final textColor = isPinkTheme
-        ? (isDark
-            ? const Color(0xFFFFB6D9) // صورتی پاستلی روشن (نسخه شب)
-            : const Color(0xFFFF1493)) // صورتی تیره (نسخه روز)
-        : (isDark ? Colors.white : Colors.black87);
+    Color bgColor;
+    Color iconColor;
+    Color textColor;
+    if (isPinkTheme) {
+      bgColor = isDark
+          ? const Color(0xFF2A1A24) // صورتی-بنفش خیلی تیره (نسخه شب)
+          : const Color(0xFFFFF0F5); // لاوندر صورتی روشن (نسخه روز)
+      iconColor = isDark
+          ? const Color(0xFFFF9EC4)
+          : const Color(0xFFFF69B4);
+      textColor = isDark
+          ? const Color(0xFFFFB6D9)
+          : const Color(0xFFFF1493);
+    } else if (isSummerTheme) {
+      // تابستانی همیشه لایت است: آسمان آبی روشن با ته‌رنگ گرم آفتابی
+      bgColor = const Color(0xFFFFFDF5);
+      iconColor = const Color(0xFFEF6C00); // نارنجی گرم
+      textColor = const Color(0xFFE65100);
+    } else if (isAutumnTheme) {
+      bgColor = isDark
+          ? const Color(0xFF20140B) // قهوه‌ای خیلی تیره
+          : const Color(0xFFFFF3E6); // کرم گرم پاییزی
+      iconColor = isDark
+          ? const Color(0xFFE8A055)
+          : const Color(0xFFC0392B);
+      textColor = isDark
+          ? const Color(0xFFF3C892)
+          : const Color(0xFF8E4B10);
+    } else if (isLiquidGlassTheme) {
+      // لیکویید گلس: پس‌زمینه‌ی گرادیانی زیر لایه‌ی شیشه‌ای رندر می‌شود،
+      // پس اینجا رنگ پایه‌ی ملایم می‌گذاریم.
+      bgColor = isDark ? const Color(0xFF0B1020) : const Color(0xFFEAF0FF);
+      iconColor = isDark ? Colors.white : const Color(0xFF1A2540);
+      textColor = isDark ? Colors.white : const Color(0xFF10182B);
+    } else {
+      bgColor = isDark ? const Color(0xFF000000) : Colors.white;
+      iconColor = isDark ? Colors.white70 : Colors.black54;
+      textColor = isDark ? Colors.white : Colors.black87;
+    }
     
     // تم پیکسلی می‌تونه دارک یا لایت باشه (بر خلاف تم برفی که فقط دارک است)
 
@@ -227,7 +256,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         File(themeProvider.customBackgroundPath!).existsSync();
 
     return Scaffold(
-      backgroundColor: hasCustomBackground ? Colors.transparent : bgColor,
+      backgroundColor: (hasCustomBackground || isLiquidGlassTheme)
+          ? Colors.transparent
+          : bgColor,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent, // شفاف - یکپارچه
@@ -340,6 +371,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 File(customBg).existsSync();
             return Stack(
               children: [
+                // Liquid Glass: gradient backdrop rendered behind the frosted
+                // glass overlay so the blur has something to work with.
+                if (isLiquidGlassTheme)
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: isDark
+                              ? const [
+                                  Color(0xFF1B2A4A),
+                                  Color(0xFF0B1020),
+                                  Color(0xFF2A1B4A),
+                                ]
+                              : const [
+                                  Color(0xFFBFD4FF),
+                                  Color(0xFFEAF0FF),
+                                  Color(0xFFDDCBFF),
+                                ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (isLiquidGlassTheme)
+                  const Positioned.fill(child: _LiquidGlassBackdrop()),
+
                 if (hasCustomBg)
                   Positioned.fill(
                     child: Image.file(
@@ -364,6 +422,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (isRainTheme)
                   const Positioned.fill(
                     child: RainAnimation(),
+                  ),
+
+                // انیمیشن خورشید تابستانی (فقط لایت مود)
+                if (isSummerTheme)
+                  const Positioned.fill(
+                    child: SummerAnimation(),
+                  ),
+
+                // انیمیشن برگ‌ریزان پاییزی
+                if (isAutumnTheme)
+                  const Positioned.fill(
+                    child: AutumnAnimation(),
                   ),
                 
                 // نور ملایم از پایین صفحه - با انیمیشن نرم
@@ -1440,6 +1510,104 @@ class _SettingsTransitionOverlayState extends State<_SettingsTransitionOverlay>
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Frosted-glass overlay for the Liquid Glass theme. It blurs whatever is
+/// rendered behind it (the gradient backdrop) and lays a subtle translucent
+/// sheen + soft floating blobs on top, giving the modern "liquid glass" look.
+class _LiquidGlassBackdrop extends StatefulWidget {
+  const _LiquidGlassBackdrop();
+
+  @override
+  State<_LiquidGlassBackdrop> createState() => _LiquidGlassBackdropState();
+}
+
+class _LiquidGlassBackdropState extends State<_LiquidGlassBackdrop>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 14),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          // Soft floating colour blobs behind the blur for depth.
+          AnimatedBuilder(
+            animation: _c,
+            builder: (context, _) {
+              final t = _c.value;
+              return Stack(
+                children: [
+                  Positioned(
+                    top: 80 + 40 * (0.5 - (t - 0.5).abs()),
+                    left: -40,
+                    child: _blob(
+                        const Color(0xFF4FC3F7).withValues(alpha: 0.5), 220),
+                  ),
+                  Positioned(
+                    bottom: 120 - 40 * (0.5 - (t - 0.5).abs()),
+                    right: -50,
+                    child: _blob(
+                        const Color(0xFFB388FF).withValues(alpha: 0.5), 260),
+                  ),
+                ],
+              );
+            },
+          ),
+          // The blur layer (frosted glass).
+          BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: isDark
+                      ? [
+                          Colors.white.withValues(alpha: 0.06),
+                          Colors.white.withValues(alpha: 0.02),
+                        ]
+                      : [
+                          Colors.white.withValues(alpha: 0.35),
+                          Colors.white.withValues(alpha: 0.12),
+                        ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _blob(Color color, double size) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          colors: [color, color.withValues(alpha: 0.0)],
         ),
       ),
     );

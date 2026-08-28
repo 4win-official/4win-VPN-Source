@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum AppTheme {
-  system,  // دیفالت - دارک/لایت عادی
-  snow,    // تم برفی
-  pixel,   // تم پیکسلی
-  pink,    // تم صورتی کیوت (فقط لایت مود)
-  rain,    // تم بارانی
+  system,      // دیفالت - دارک/لایت عادی
+  snow,        // تم برفی (فصلی)
+  pixel,       // تم پیکسلی
+  pink,        // تم صورتی کیوت
+  rain,        // تم بارانی (فصلی)
+  summer,      // تم تابستانی - خورشید نور می‌زند (فقط لایت مود)
+  autumn,      // تم پاییزی - برگ‌ها می‌ریزند (فصلی)
+  liquidGlass, // تم لیکویید گلس (دارک + لایت)
 }
 
 class ThemeProvider with ChangeNotifier {
@@ -71,15 +74,27 @@ class ThemeProvider with ChangeNotifier {
   }
 
   Future<void> toggleTheme() async {
-    // تم برفی و بارانی قفل هستند (همیشه دارک). تم صورتی اکنون نسخه شب دارد
-    // و می‌تواند بین حالت روز و شب جابجا شود.
-    if (_selectedTheme == AppTheme.snow || _selectedTheme == AppTheme.rain) return;
-    
+    // تم‌هایی که حالت ثابت دارند و دکمه‌ی روز/شب برایشان غیرفعال است:
+    //   • برفی و بارانی: همیشه دارک.
+    //   • تابستانی: همیشه لایت (خورشید نور می‌زند، دارک مود ندارد).
+    // بقیه‌ی تم‌ها (صورتی، پیکسلی، پاییزی، لیکویید گلس، دیفالت) روز/شب دارند.
+    if (_selectedTheme == AppTheme.snow ||
+        _selectedTheme == AppTheme.rain ||
+        _selectedTheme == AppTheme.summer) {
+      return;
+    }
+
     _isDarkMode = !_isDarkMode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_darkModeKey, _isDarkMode);
     notifyListeners();
   }
+
+  /// Whether the day/night toggle is locked for the currently-selected theme.
+  bool get isModeLocked =>
+      _selectedTheme == AppTheme.snow ||
+      _selectedTheme == AppTheme.rain ||
+      _selectedTheme == AppTheme.summer;
 
   Future<void> setTheme(AppTheme theme) async {
     _selectedTheme = theme;
@@ -100,13 +115,44 @@ class ThemeProvider with ChangeNotifier {
       _isDarkMode = true;
       await prefs.setBool(_darkModeKey, true);
     }
-    
+
+    // تم تابستانی: همیشه لایت مود (خورشید نور می‌زند، دارک مود ندارد)
+    if (theme == AppTheme.summer) {
+      _isDarkMode = false;
+      await prefs.setBool(_darkModeKey, false);
+    }
+
+    // تم پاییزی و لیکویید گلس: هر دو حالت روز و شب را دارند و حالت فعلی
+    // کاربر حفظ می‌شود.
+
     notifyListeners();
+  }
+
+  /// Accent/seed colour that varies by the selected theme so the whole app
+  /// (buttons, switches, etc.) matches the chosen mood.
+  Color get _seedColor {
+    switch (_selectedTheme) {
+      case AppTheme.pink:
+        return const Color(0xFFFF69B4);
+      case AppTheme.rain:
+        return const Color(0xFF2196F3);
+      case AppTheme.snow:
+        return const Color(0xFF4FC3F7);
+      case AppTheme.summer:
+        return const Color(0xFFFF9800);
+      case AppTheme.autumn:
+        return const Color(0xFFD35400);
+      case AppTheme.liquidGlass:
+        return const Color(0xFF5B8CFF);
+      case AppTheme.pixel:
+      case AppTheme.system:
+        return const Color(0xFF4CAF50);
+    }
   }
 
   ThemeData get lightTheme => ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4CAF50),
+          seedColor: _seedColor,
           brightness: Brightness.light,
         ),
         useMaterial3: true,
@@ -120,7 +166,7 @@ class ThemeProvider with ChangeNotifier {
 
   ThemeData get darkTheme => ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4CAF50),
+          seedColor: _seedColor,
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
