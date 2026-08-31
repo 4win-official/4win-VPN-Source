@@ -7,7 +7,6 @@ import '../screens/settings_screen.dart';
 class ProtocolSelectorDialog extends StatelessWidget {
   const ProtocolSelectorDialog({super.key});
 
-  /// Open the per-protocol settings page for [protocol].
   void _openProtocolSettings(BuildContext context, String protocol) {
     Navigator.push(
       context,
@@ -17,7 +16,6 @@ class ProtocolSelectorDialog extends StatelessWidget {
     );
   }
 
-  /// Open the GLOBAL settings (affect every protocol) + updates.
   void _openGlobalSettings(BuildContext context) {
     Navigator.push(
       context,
@@ -27,7 +25,6 @@ class ProtocolSelectorDialog extends StatelessWidget {
     );
   }
 
-  /// A small round gear button used both at the top (global) and per-protocol.
   Widget _gearButton(
     BuildContext context, {
     required VoidCallback onTap,
@@ -52,10 +49,24 @@ class ProtocolSelectorDialog extends StatelessWidget {
     );
   }
 
+  Widget _titleText(BuildContext context, String text, VpnProvider provider,
+      bool isDark, String protocol, double fontSize) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: isDark ? Colors.white : Colors.black87,
+        fontWeight: provider.selectedProtocol == protocol
+            ? FontWeight.bold
+            : FontWeight.w500,
+        fontSize: fontSize,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Consumer<VpnProvider>(
       builder: (context, vpnProvider, _) {
         return Dialog(
@@ -66,12 +77,12 @@ class ProtocolSelectorDialog extends StatelessWidget {
               filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
               child: Container(
                 decoration: BoxDecoration(
-                  color: isDark 
+                  color: isDark
                       ? const Color(0xFF1A1A1A).withValues(alpha: 0.7)
                       : Colors.white.withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isDark 
+                    color: isDark
                         ? Colors.white.withValues(alpha: 0.2)
                         : Colors.black.withValues(alpha: 0.1),
                     width: 1.5,
@@ -81,10 +92,9 @@ class ProtocolSelectorDialog extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Header: title + GLOBAL settings gear (affects all protocols).
                     Row(
                       children: [
-                        const SizedBox(width: 34), // balance the trailing gear
+                        const SizedBox(width: 34),
                         Expanded(
                           child: Text(
                             'Select Protocol',
@@ -107,7 +117,6 @@ class ProtocolSelectorDialog extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // Xray Option (real Xray core / v2rayNG) — DEFAULT, shown first
                     ListTile(
                       leading: Icon(
                         Icons.rocket_launch,
@@ -116,49 +125,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                             : (isDark ? Colors.white54 : Colors.black54),
                         size: 28,
                       ),
-                      title: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              'Xray',
-                              style: TextStyle(
-                                color: isDark ? Colors.white : Colors.black87,
-                                fontWeight:
-                                    vpnProvider.selectedProtocol == 'xray'
-                                        ? FontWeight.bold
-                                        : FontWeight.w500,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.tealAccent.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: Colors.tealAccent.shade700
-                                    .withValues(alpha: 0.6),
-                                width: 1,
-                              ),
-                            ),
-                            child: Text(
-                              'Recommended',
-                              style: TextStyle(
-                                color: Colors.tealAccent.shade700,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      title: _titleText(context, 'Xray', vpnProvider, isDark,
+                          'xray', 16),
                       subtitle: Text(
                         'Real Xray core + TLS fragment',
                         style: TextStyle(
@@ -182,15 +150,12 @@ class ProtocolSelectorDialog extends StatelessWidget {
                       ),
                       onTap: () {
                         vpnProvider.switchProtocol('xray');
-                        Navigator.pop(context); // Auto-close
+                        Navigator.pop(context);
                       },
                     ),
 
                     const Divider(height: 20),
 
-                    // Proxy Option (dedicated SOCKS4 / SOCKS5 / HTTP proxy) —
-                    // its appearance mirrors the Xray option, but it connects
-                    // to a REAL upstream proxy.
                     ListTile(
                       leading: Icon(
                         Icons.swap_horiz,
@@ -199,49 +164,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                             : (isDark ? Colors.white54 : Colors.black54),
                         size: 28,
                       ),
-                      title: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              'Proxy',
-                              style: TextStyle(
-                                color: isDark ? Colors.white : Colors.black87,
-                                fontWeight:
-                                    vpnProvider.selectedProtocol == 'proxy'
-                                        ? FontWeight.bold
-                                        : FontWeight.w500,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.tealAccent.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: Colors.tealAccent.shade700
-                                    .withValues(alpha: 0.6),
-                                width: 1,
-                              ),
-                            ),
-                            child: Text(
-                              'SOCKS/HTTP',
-                              style: TextStyle(
-                                color: Colors.tealAccent.shade700,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      title: _titleText(context, 'Proxy', vpnProvider, isDark,
+                          'proxy', 16),
                       subtitle: Text(
                         'Real SOCKS4 / SOCKS5 / HTTP proxy',
                         style: TextStyle(
@@ -266,13 +190,12 @@ class ProtocolSelectorDialog extends StatelessWidget {
                       ),
                       onTap: () {
                         vpnProvider.switchProtocol('proxy');
-                        Navigator.pop(context); // Auto-close
+                        Navigator.pop(context);
                       },
                     ),
 
                     const Divider(height: 20),
 
-                    // SSTP Option
                     ListTile(
                       leading: Icon(
                         Icons.vpn_key,
@@ -281,16 +204,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                             : (isDark ? Colors.white54 : Colors.black54),
                         size: 28,
                       ),
-                      title: Text(
-                        'SSTP',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                          fontWeight: vpnProvider.selectedProtocol == 'sstp'
-                              ? FontWeight.bold
-                              : FontWeight.w500,
-                          fontSize: 16,
-                        ),
-                      ),
+                      title: _titleText(context, 'SSTP', vpnProvider, isDark,
+                          'sstp', 16),
                       subtitle: Text(
                         'Automatic server selection',
                         style: TextStyle(
@@ -313,13 +228,12 @@ class ProtocolSelectorDialog extends StatelessWidget {
                       ),
                       onTap: () {
                         vpnProvider.switchProtocol('sstp');
-                        Navigator.pop(context); // Auto-close
+                        Navigator.pop(context);
                       },
                     ),
-                    
+
                     const Divider(height: 20),
-                    
-                    // Direct DNS Option
+
                     ListTile(
                       leading: Icon(
                         Icons.dns,
@@ -328,16 +242,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                             : (isDark ? Colors.white54 : Colors.black54),
                         size: 28,
                       ),
-                      title: Text(
-                        'DNS changer',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                          fontWeight: vpnProvider.selectedProtocol == 'direct_dns'
-                              ? FontWeight.bold
-                              : FontWeight.w500,
-                          fontSize: 16,
-                        ),
-                      ),
+                      title: _titleText(context, 'DNS changer', vpnProvider,
+                          isDark, 'direct_dns', 16),
                       subtitle: Text(
                         'Connect via DNS servers',
                         style: TextStyle(
@@ -361,13 +267,12 @@ class ProtocolSelectorDialog extends StatelessWidget {
                       ),
                       onTap: () {
                         vpnProvider.switchProtocol('direct_dns');
-                        Navigator.pop(context); // Auto-close
+                        Navigator.pop(context);
                       },
                     ),
-                    
+
                     const Divider(height: 20),
-                    
-                    // OpenVPN Option
+
                     ListTile(
                       leading: Icon(
                         Icons.shield,
@@ -376,16 +281,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                             : (isDark ? Colors.white54 : Colors.black54),
                         size: 28,
                       ),
-                      title: Text(
-                        'OpenVPN',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                          fontWeight: vpnProvider.selectedProtocol == 'openvpn'
-                              ? FontWeight.bold
-                              : FontWeight.w500,
-                          fontSize: 16,
-                        ),
-                      ),
+                      title: _titleText(context, 'OpenVPN', vpnProvider,
+                          isDark, 'openvpn', 16),
                       subtitle: Text(
                         'Custom config support',
                         style: TextStyle(
@@ -399,22 +296,23 @@ class ProtocolSelectorDialog extends StatelessWidget {
                           if (vpnProvider.selectedProtocol == 'openvpn')
                             const Icon(Icons.check_circle,
                                 color: Colors.purple),
-                          _gearButton(context,
-                              isDark: isDark,
-                              tooltip: 'OpenVPN settings',
-                              onTap: () =>
-                                  _openProtocolSettings(context, 'openvpn')),
+                          _gearButton(
+                            context,
+                            isDark: isDark,
+                            tooltip: 'OpenVPN settings',
+                            onTap: () =>
+                                _openProtocolSettings(context, 'openvpn'),
+                          ),
                         ],
                       ),
                       onTap: () {
                         vpnProvider.switchProtocol('openvpn');
-                        Navigator.pop(context); // Auto-close
+                        Navigator.pop(context);
                       },
                     ),
-                    
+
                     const Divider(height: 20),
-                    
-                    // Slow DNS Option
+
                     ListTile(
                       leading: Icon(
                         Icons.cloud_queue,
@@ -427,20 +325,10 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Flexible(
-                            child: Text(
-                              'Slow DNS',
-                              style: TextStyle(
-                                color: isDark ? Colors.white : Colors.black87,
-                                fontWeight:
-                                    vpnProvider.selectedProtocol == 'slowdns'
-                                        ? FontWeight.bold
-                                        : FontWeight.w500,
-                                fontSize: 16,
-                              ),
-                            ),
+                            child: _titleText(context, 'Slow DNS', vpnProvider,
+                                isDark, 'slowdns', 16),
                           ),
                           const SizedBox(width: 8),
-                          // Beta badge
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -479,16 +367,18 @@ class ProtocolSelectorDialog extends StatelessWidget {
                           if (vpnProvider.selectedProtocol == 'slowdns')
                             const Icon(Icons.check_circle,
                                 color: Colors.orange),
-                          _gearButton(context,
-                              isDark: isDark,
-                              tooltip: 'Slow DNS settings',
-                              onTap: () =>
-                                  _openProtocolSettings(context, 'slowdns')),
+                          _gearButton(
+                            context,
+                            isDark: isDark,
+                            tooltip: 'Slow DNS settings',
+                            onTap: () =>
+                                _openProtocolSettings(context, 'slowdns'),
+                          ),
                         ],
                       ),
                       onTap: () {
                         vpnProvider.switchProtocol('slowdns');
-                        Navigator.pop(context); // Auto-close
+                        Navigator.pop(context);
                       },
                     ),
                   ],
