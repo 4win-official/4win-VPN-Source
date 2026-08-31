@@ -35,7 +35,6 @@ class XrayVpnService : VpnService() {
         const val ACTION_CONNECT = "com.forwin.vpn.XRAY_CONNECT"
         const val ACTION_DISCONNECT = "com.forwin.vpn.XRAY_DISCONNECT"
         const val EXTRA_CONFIG_JSON = "config_json"
-        // Kept for source/binary compatibility with callers; VPN mode only.
         const val EXTRA_PROXY_MODE = "proxy_mode"
 
         private const val TAG = "XrayVpnService"
@@ -45,29 +44,19 @@ class XrayVpnService : VpnService() {
         private const val PRIVATE_VLAN4_CLIENT = "26.26.26.1"
         private const val PRIVATE_VLAN6_CLIENT = "da26:2626::1"
 
-        // Tracks the running instance so the Flutter side can query connection state.
         @Volatile
         var isServiceRunning = false
             private set
 
-        // Reference to the live core controller so the Flutter side can poll
-        // outbound traffic stats (uplink/downlink) exactly like v2rayNG does.
         @Volatile
         private var activeController: CoreController? = null
 
-        /**
-         * Query cumulative outbound traffic for the proxy since connect.
-         * Returns a LongArray of [uplinkBytes, downlinkBytes]. Zeros if not running.
-         * queryStats is destructive (resets the counter) in the core, so we keep
-         * running totals here and return the accumulated value.
-         */
         @Volatile private var totalUplink = 0L
         @Volatile private var totalDownlink = 0L
 
         fun queryTrafficStats(): LongArray {
             val controller = activeController ?: return longArrayOf(totalUplink, totalDownlink)
             try {
-                // queryStats returns the delta since the last call and resets it.
                 val up = controller.queryStats("proxy", "uplink")
                 val down = controller.queryStats("proxy", "downlink")
                 if (up > 0) totalUplink += up
@@ -86,15 +75,11 @@ class XrayVpnService : VpnService() {
         when (intent?.action) {
             ACTION_CONNECT -> {
                 configJson = intent.getStringExtra(EXTRA_CONFIG_JSON)
-                // Show the foreground notification IMMEDIATELY. The service was
-                // started via startForegroundService(), so Android requires
-                // startForeground() within ~5s or it force-crashes the app.
                 try {
                     showNotification()
                 } catch (t: Throwable) {
                     android.util.Log.e(TAG, "showNotification failed: ${t.message}", t)
                 }
-                // Heavy startup (TUN establish + Go core) on a background thread.
                 Thread { startXray() }.start()
             }
             ACTION_DISCONNECT -> stopXray()
@@ -114,11 +99,7 @@ class XrayVpnService : VpnService() {
             return
         }
 
-        // Catch Throwable (not just Exception) so a native UnsatisfiedLinkError
-        // or Go panic surfaced as an Error doesn't crash the whole app.
         try {
-            // 1) Build the TUN interface (system-wide VPN). Proxy mode is handled
-            //    by the separate XrayProxyService, so this service always tunnels.
             val builder = Builder()
                 .setSession("4win VPN - Xray")
                 .setMtu(VPN_MTU)
@@ -127,18 +108,23 @@ class XrayVpnService : VpnService() {
                 .addDnsServer("8.8.8.8")
                 .addDnsServer("1.1.1.1")
 
-            // IPv6 (best effort).
             try {
                 builder.addAddress(PRIVATE_VLAN6_CLIENT, 126)
                 builder.addRoute("::", 0)
-            } catch (_: Throwable) { /* device without IPv6 */ }
-
-            // Keep our own app traffic out of the tunnel to avoid loops.
-            try {
-                builder.addDisallowedApplication(packageName)
             } catch (_: Throwable) { }
 
-            // Split Tunneling: apply the user's per-app include/exclude rules.
+            // Android VpnService.Builder does not allow mixing allowed- and
+            // disallowed-application lists. In split-tunnel INCLUDE mode the
+            // helper owns the allow-list, so do not pre-add our package to the
+            // disallowed list. In OFF/EXCLUDE mode our app stays outside the
+            // tunnel to prevent loops.
+            val splitMode = SplitTunnel.mode(applicationContext)
+            if (splitMode != "include") {
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (_: Throwable) { }
+            }
+
             SplitTunnel.apply(applicationContext, builder, packageName)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -154,26 +140,11 @@ class XrayVpnService : VpnService() {
             }
             val tunFd = tun.fd
 
-            // 2) Initialize the core environment.
-            //
-            // CRITICAL (this was the reason configs never connected):
-            //  * go.Seq.setContext(applicationContext) MUST be called first. It
-            //    bridges the Android Context into the Go runtime so the core's
-            //    asset reader (mobasset) can open geoip.dat / geosite.dat that are
-            //    bundled inside libv2ray.aar's assets, and so the gVisor TUN /
-            //    socket layer works. Without it the core silently fails to route.
-            //  * initCoreEnv(assetPath, deviceKey) — assetPath is where the core
-            //    looks for asset files on disk; if not found it falls back to the
-            //    Android assets via mobasset (needs the Seq context above).
             Seq.setContext(applicationContext)
             Libv2ray.initCoreEnv(filesDir.absolutePath, "")
             android.util.Log.d(TAG, "initCoreEnv done, "
                 + "version=${runCatching { Libv2ray.checkVersionX() }.getOrNull()}")
 
-            // 3) Create the core controller and start the loop. In VPN mode the
-            //    core binds its tun inbound to tunFd; in proxy mode tunFd is -1
-            //    and the config has no tun inbound, so the core just serves the
-            //    local SOCKS/HTTP proxy.
             val controller = Libv2ray.newCoreController(XrayCallback())
             coreController = controller
 
@@ -225,11 +196,9 @@ class XrayVpnService : VpnService() {
         }
     }
 
-    /** Receives lifecycle/status callbacks from the Go core. */
     private inner class XrayCallback : CoreCallbackHandler {
         override fun startup(): Long = 0L
         override fun shutdown(): Long {
-            // Core requested shutdown (e.g. fatal error). Tear down on a safe thread.
             try {
                 Thread { stopXray() }.start()
             } catch (_: Exception) { }
