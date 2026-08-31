@@ -6,12 +6,6 @@ import '../providers/vpn_provider.dart';
 import '../models/proxy_server.dart';
 import '../services/proxy_service.dart';
 
-/// Server list screen for the dedicated **Proxy** protocol (real SOCKS4 /
-/// SOCKS5 / HTTP upstream proxies). Its appearance mirrors the Xray server
-/// list (collapsible groups, per-row copy/delete, group export/test) but the
-/// servers connect to a REAL proxy. Each server offers TWO tests:
-///   • a normal PING test (TCP connect latency to the proxy), and
-///   • an "open site" test (a real request routed through the proxy).
 class ProxyServersScreen extends StatefulWidget {
   const ProxyServersScreen({super.key});
 
@@ -25,21 +19,21 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final provider = context.read<VpnProvider>();
-      await provider.loadProxyServers();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<VpnProvider>().loadProxyServers();
     });
   }
 
-  void _toggleExpanded(String key) {
-    if (!_expandedGroups.remove(key)) _expandedGroups.add(key);
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
   }
 
   Future<void> _exportServers(List<ProxyServer> servers, String title) async {
-    if (servers.isEmpty) return;
     final plain = servers.map((s) => s.exportLink).join('\n');
-    final b64 = base64.encode(utf8.encode(plain));
-    final hasEncrypted = servers.any((s) => s.encrypted);
+    final encoded = base64.encode(utf8.encode(plain));
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
@@ -49,47 +43,25 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Export "$title" (${servers.length})',
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  if (hasEncrypted)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 6),
-                      child: Text(
-                        '🔒 Encrypted servers are copied in their protected '
-                        '4win form.',
-                        style: TextStyle(fontSize: 12),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                ],
-              ),
+              child: Text('$title (${servers.length})',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
             ListTile(
               leading: const Icon(Icons.link),
               title: const Text('Copy proxy links'),
-              subtitle: const Text('Plain text, one link per line'),
               onTap: () async {
                 await Clipboard.setData(ClipboardData(text: plain));
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx);
-                _toast('${servers.length} link(s) copied');
+                if (ctx.mounted) Navigator.pop(ctx);
+                _toast('Proxy links copied');
               },
             ),
             ListTile(
               leading: const Icon(Icons.data_object),
               title: const Text('Copy as subscription (base64)'),
-              subtitle: const Text('Paste into other apps as a sub blob'),
               onTap: () async {
-                await Clipboard.setData(ClipboardData(text: b64));
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx);
-                _toast('Subscription (base64) copied');
+                await Clipboard.setData(ClipboardData(text: encoded));
+                if (ctx.mounted) Navigator.pop(ctx);
+                _toast('Subscription copied');
               },
             ),
             const SizedBox(height: 8),
@@ -99,281 +71,329 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
     );
   }
 
-  Future<void> _copyOneServer(ProxyServer s) async {
-    await Clipboard.setData(ClipboardData(text: s.exportLink));
-    if (!mounted) return;
-    _toast(s.encrypted ? 'Encrypted link copied' : 'Link copied');
-  }
-
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
-    );
-  }
-
   Future<void> _showAddDialog() async {
-    final controller = TextEditingController();
-    final clip = await Clipboard.getData('text/plain');
-    final clipText = clip?.text ?? '';
-    if (RegExp(r'^(socks5|socks4|socks|http|https|4ws)://',
-            caseSensitive: false)
-        .hasMatch(clipText.trim())) {
-      controller.text = clipText.trim();
+    final scheme = ValueNotifier<String>('socks5');
+    final host = TextEditingController();
+    final port = TextEditingController(text: '1080');
+    final user = TextEditingController();
+    final pass = TextEditingController();
+    final remark = TextEditingController();
+
+    Future<void> addSingle(BuildContext dialogContext) async {
+      final h = host.text.trim();
+      final p = int.tryParse(port.text.trim());
+      if (h.isEmpty || p == null || p < 1 || p > 65535) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          const SnackBar(content: Text('Enter a valid host and port')),
+        );
+        return;
+      }
+      try {
+        final ui = user.text.isEmpty
+            ? ''
+            : '${Uri.encodeComponent(user.text)}:${Uri.encodeComponent(pass.text)}@';
+        final safeHost = h.contains(':') && !h.startsWith('[') ? '[$h]' : h;
+        final fragment = remark.text.trim().isEmpty
+            ? ''
+            : '#${Uri.encodeComponent(remark.text.trim())}';
+        final link = '${scheme.value}://$ui$safeHost:$p$fragment';
+        final provider = dialogContext.read<VpnProvider>();
+        final added = await provider.addProxyServers(link);
+        if (!dialogContext.mounted) return;
+        Navigator.pop(dialogContext);
+        _toast(added > 0 ? 'Proxy added successfully' : 'Proxy already exists');
+      } catch (e) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          SnackBar(content: Text('Invalid proxy: $e')),
+        );
+      }
     }
 
-    if (!mounted) return;
-    final result = await showDialog<String>(
+    await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Proxy Server'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Paste one or more proxy links (socks5://, socks4://, http://) '
-              'or a bare host:port (or host:port:user:pass). One per line. '
-              'You can also add an http(s) subscription link to load proxies '
-              'from it.',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              maxLines: 5,
-              minLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'socks5://user:pass@host:1080\n'
-                    'http://host:8080\n'
-                    'https://example.com/sub.txt',
-                border: OutlineInputBorder(),
+        title: const Text('Add Proxy'),
+        content: ValueListenableBuilder<String>(
+          valueListenable: scheme,
+          builder: (ctx, selectedScheme, _) {
+            if (selectedScheme == 'socks4' && port.text == '1080') {
+              // SOCKS4 normally uses 1080; keep the user's value if changed.
+            }
+            return SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: selectedScheme,
+                    decoration: const InputDecoration(
+                      labelText: 'Protocol',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'socks5', child: Text('SOCKS5')),
+                      DropdownMenuItem(value: 'socks4', child: Text('SOCKS4')),
+                      DropdownMenuItem(value: 'http', child: Text('HTTP')),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) scheme.value = v;
+                      if (v == 'http' && port.text == '1080') port.text = '8080';
+                      if (v != 'http' && port.text == '8080') port.text = '1080';
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: host,
+                    decoration: const InputDecoration(
+                      labelText: 'Host / IP',
+                      hintText: 'proxy.example.com',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: port,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Port',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: user,
+                    decoration: const InputDecoration(
+                      labelText: 'Username (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: pass,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Password (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: remark,
+                    decoration: const InputDecoration(
+                      labelText: 'Name / Remark (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.playlist_add),
+                    label: const Text('Bulk import / Import group'),
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await _showBulkImportDialog();
+                    },
+                  ),
+                ],
               ),
-            ),
-          ],
+            );
+          },
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => addSingle(ctx), child: const Text('Add Proxy')),
+        ],
+      ),
+    );
+    scheme.dispose();
+    host.dispose();
+    port.dispose();
+    user.dispose();
+    pass.dispose();
+    remark.dispose();
+  }
+
+  Future<void> _showBulkImportDialog() async {
+    final group = TextEditingController(text: 'My Proxy Group');
+    final links = TextEditingController();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Bulk Import Proxies'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: group,
+                decoration: const InputDecoration(
+                  labelText: 'Group name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: links,
+                minLines: 6,
+                maxLines: 12,
+                decoration: const InputDecoration(
+                  labelText: 'Proxy links',
+                  hintText: 'socks5://user:pass@host:1080\nsocks4://host:1080\nhttp://host:8080',
+                  helperText: 'One proxy per line. host:port is also accepted.',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Add'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              final raw = links.text.trim();
+              final groupName = group.text.trim().isEmpty ? 'My Proxy Group' : group.text.trim();
+              if (raw.isEmpty) return;
+              final service = ProxyServerService();
+              final all = await service.loadServers();
+              final existing = all.map((s) => s.link).toSet();
+              var added = 0;
+              for (final line in raw.split(RegExp(r'[\r\n]+'))) {
+                final value = line.trim();
+                if (value.isEmpty || existing.contains(value)) continue;
+                try {
+                  final server = ProxyServer.fromLink(value, group: groupName);
+                  if (existing.add(server.link)) {
+                    all.add(server);
+                    added++;
+                  }
+                } catch (_) {}
+              }
+              if (added > 0) await service.saveServers(all);
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              if (mounted) await context.read<VpnProvider>().loadProxyServers();
+              _toast(added > 0 ? '$added proxy(s) imported into "$groupName"' : 'No valid new proxies found');
+            },
+            child: const Text('Import Group'),
           ),
         ],
       ),
     );
-
-    if (result == null || result.trim().isEmpty) return;
-    if (!mounted) return;
-    final provider = context.read<VpnProvider>();
-    // A link that is an http(s) subscription URL (has a path) is added as a
-    // subscription; raw proxy links are added directly.
-    final text = result.trim();
-    int added;
-    if (_looksLikeSubscription(text)) {
-      final ok = await provider.addProxySubUrl(text);
-      added = ok ? 1 : 0;
-    } else {
-      added = await provider.addProxyServers(text);
-      // Also handle a mix: if raw add found nothing, try the sub-input path.
-      if (added == 0) {
-        final ok = await provider.addProxySubUrl(text);
-        added = ok ? 1 : 0;
-      }
-    }
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(added > 0
-            ? 'Added successfully'
-            : 'No valid proxy or subscription found'),
-        backgroundColor: added > 0 ? Colors.green : Colors.red,
-      ),
-    );
-  }
-
-  bool _looksLikeSubscription(String e) {
-    if (!e.startsWith('http://') && !e.startsWith('https://')) return false;
-    if (e.contains(RegExp(r'[\r\n]'))) return false;
-    try {
-      final u = Uri.parse(e);
-      final hasPath = u.path.isNotEmpty && u.path != '/';
-      return hasPath || u.query.isNotEmpty;
-    } catch (_) {
-      return false;
-    }
+    group.dispose();
+    links.dispose();
   }
 
   Future<void> _refreshAll() async {
-    final provider = context.read<VpnProvider>();
-    final count = await provider.refreshProxySubs(force: true);
+    final count = await context.read<VpnProvider>().refreshProxySubs(force: true);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(count > 0
-            ? 'Proxies updated ($count)'
-            : 'No subscription proxies to update'),
-        backgroundColor: count > 0 ? Colors.green : Colors.orange,
-      ),
-    );
+    _toast(count > 0 ? 'Proxies updated ($count)' : 'No subscription proxies to update');
   }
 
-  Future<void> _refreshOneGroup(
-      VpnProvider provider, String groupKey, String title) async {
-    final count = await provider.refreshProxyOneGroup(groupKey);
+  Future<void> _refreshOneGroup(VpnProvider provider, String group, String title) async {
+    final count = await provider.refreshProxyOneGroup(group);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(count >= 0
-            ? '"$title" updated ($count)'
-            : 'Could not update "$title"'),
-        backgroundColor: count >= 0 ? Colors.green : Colors.orange,
-      ),
-    );
+    _toast(count >= 0 ? '"$title" updated ($count)' : 'Could not update "$title"');
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final accent = Colors.tealAccent.shade700;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Proxy Servers'),
         actions: [
           Consumer<VpnProvider>(
-            builder: (context, provider, _) => IconButton(
-              icon: provider.proxyRefreshing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+            builder: (context, p, _) => IconButton(
+              icon: p.proxyRefreshing
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.cloud_download_outlined),
               tooltip: 'Update subscriptions',
-              onPressed: provider.proxyRefreshing ? null : _refreshAll,
+              onPressed: p.proxyRefreshing ? null : _refreshAll,
             ),
           ),
           Consumer<VpnProvider>(
-            builder: (context, provider, _) => IconButton(
-              icon: provider.proxyGroupTesting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+            builder: (context, p, _) => IconButton(
+              icon: p.proxyGroupTesting
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.speed),
               tooltip: 'Test all',
-              onPressed: provider.proxyGroupTesting
-                  ? null
-                  : () {
-                      provider.testAllProxyGroups();
-                      _toast('Testing all proxies…');
-                    },
+              onPressed: p.proxyGroupTesting ? null : () {
+                p.testAllProxyGroups();
+                _toast('Testing all proxies…');
+              },
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'Add proxy',
-            onPressed: _showAddDialog,
-          ),
+          IconButton(icon: const Icon(Icons.add), tooltip: 'Add proxy', onPressed: _showAddDialog),
         ],
       ),
       body: Consumer<VpnProvider>(
         builder: (context, provider, _) {
           final all = provider.proxyServers;
-
           if (all.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: _refreshAll,
-              child: ListView(
-                children: [
-                  SizedBox(
-                    height: MediaQuery.of(context).size.height * 0.7,
-                    child: _buildEmpty(isDark, accent),
-                  ),
-                ],
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.swap_horiz, size: 64, color: accent.withValues(alpha: .6)),
+                    const SizedBox(height: 16),
+                    const Text('No proxy servers yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    const Text('Use Add Proxy to enter a proxy as a form, or import many proxies as a group.', textAlign: TextAlign.center),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(onPressed: _showAddDialog, icon: const Icon(Icons.add), label: const Text('Add Proxy')),
+                  ],
+                ),
               ),
             );
           }
-
           final groups = <String, List<ProxyServer>>{};
-          for (final s in all) {
-            groups.putIfAbsent(s.group, () => []).add(s);
-          }
-          final individual = groups.remove('') ?? [];
-
-          final orderedKeys = <String>[
-            for (final k in groups.keys) k,
-          ];
-
-          final rows = <_Row>[];
-          void addGroupRows(String key, String title, List<ProxyServer> servers,
-              bool locked) {
+          for (final s in all) groups.putIfAbsent(s.group, () => []).add(s);
+          final rows = <Widget>[];
+          for (final entry in groups.entries) {
+            final key = entry.key;
+            final servers = entry.value;
+            final title = key.isEmpty ? 'My Proxies' : key;
             final expanded = _expandedGroups.contains(key);
-            rows.add(_Row.header(key, title, servers, locked, expanded));
-            if (expanded) {
-              final show = servers.length > 500 ? 500 : servers.length;
-              for (var i = 0; i < show; i++) {
-                rows.add(_Row.tile(servers[i], locked));
-              }
-              if (servers.length > show) {
-                rows.add(_Row.more(servers.length - show));
-              }
-            }
+            final locked = key.isNotEmpty;
+            final selectedGroup = locked && provider.proxyGroupSelectedFor(key);
+            final selectedServer = servers.any((s) => provider.selectedProxyServer?.id == s.id);
+            final highlight = selectedGroup || selectedServer;
+            rows.add(Container(
+              margin: EdgeInsets.only(bottom: expanded ? 0 : 12),
+              decoration: BoxDecoration(
+                color: dark ? Colors.white.withValues(alpha: .04) : Colors.black.withValues(alpha: .03),
+                borderRadius: expanded ? const BorderRadius.vertical(top: Radius.circular(14)) : BorderRadius.circular(14),
+                border: Border.all(color: highlight ? accent : Colors.transparent, width: 2),
+              ),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: Icon(locked ? Icons.cloud_outlined : Icons.folder, color: accent),
+                    title: Text('$title (${servers.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: locked ? Text(selectedGroup ? 'Selected — connects to the fastest proxy' : 'Tap to select • auto-picks fastest') : null,
+                    onTap: locked ? () => provider.selectProxyGroup(key) : () => setState(() => expanded ? _expandedGroups.remove(key) : _expandedGroups.add(key)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (selectedGroup) Icon(Icons.check_circle, color: accent),
+                        if (locked && key != ProxyServerService.userLinksGroup)
+                          IconButton(icon: const Icon(Icons.refresh), tooltip: 'Update group', onPressed: () => _refreshOneGroup(provider, key, title)),
+                        IconButton(icon: Icon(Icons.copy_all, color: accent), tooltip: 'Export group', onPressed: () => _exportServers(servers, title)),
+                        IconButton(icon: Icon(Icons.speed, color: accent), tooltip: 'Test group', onPressed: provider.proxyGroupTesting ? null : () => provider.testProxyServers(servers)),
+                        IconButton(icon: Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down), onPressed: () => setState(() => expanded ? _expandedGroups.remove(key) : _expandedGroups.add(key)),),
+                      ],
+                    ),
+                  ),
+                  if (expanded)
+                    for (final s in servers) _buildServerTile(provider, s, provider.selectedProxyServer?.id == s.id, dark, accent),
+                ],
+              ),
+            ));
           }
-
-          for (final key in orderedKeys) {
-            addGroupRows(key, key, groups[key]!, true);
-          }
-          if (individual.isNotEmpty) {
-            addGroupRows('', 'My Proxies', individual, false);
-          }
-
           return RefreshIndicator(
             onRefresh: _refreshAll,
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: rows.length,
-              itemBuilder: (context, index) {
-                final row = rows[index];
-                switch (row.kind) {
-                  case _RowKind.header:
-                    return _buildGroupHeader(
-                      provider: provider,
-                      isDark: isDark,
-                      accent: accent,
-                      title: row.title!,
-                      groupKey: row.groupKey!,
-                      servers: row.servers!,
-                      locked: row.locked,
-                      expanded: row.expanded,
-                    );
-                  case _RowKind.tile:
-                    final s = row.server!;
-                    return _buildServerTile(
-                      provider,
-                      s,
-                      provider.selectedProxyServer?.id == s.id,
-                      isDark,
-                      accent,
-                    );
-                  case _RowKind.more:
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        '…and ${row.moreCount} more proxies',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? Colors.white54 : Colors.black45,
-                        ),
-                      ),
-                    );
-                }
-              },
-            ),
+            child: ListView(padding: const EdgeInsets.all(12), children: rows),
           );
         },
       ),
@@ -386,330 +406,33 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
     );
   }
 
-  Widget _buildGroupHeader({
-    required VpnProvider provider,
-    required bool isDark,
-    required Color accent,
-    required String title,
-    required String groupKey,
-    required List<ProxyServer> servers,
-    required bool locked,
-    required bool expanded,
-  }) {
-    void onToggleExpand() => setState(() => _toggleExpanded(groupKey));
-    final testing = provider.proxyGroupTestingFor(groupKey);
-    final anyTesting = provider.proxyGroupTesting;
-    final groupSelected = locked && provider.proxyGroupSelectedFor(groupKey);
-    final aServerInGroupSelected =
-        servers.any((s) => provider.selectedProxyServer?.id == s.id);
-    final highlight = groupSelected || aServerInGroupSelected;
-    final isRefreshable =
-        locked && groupKey != ProxyServerService.userLinksGroup;
-    final refreshing = provider.proxyGroupRefreshingFor(groupKey);
-
-    return Container(
-      margin: EdgeInsets.only(bottom: expanded ? 0 : 12),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : Colors.black.withValues(alpha: 0.03),
-        borderRadius: expanded
-            ? const BorderRadius.vertical(top: Radius.circular(14))
-            : BorderRadius.circular(14),
-        border: Border.all(
-          color: highlight ? accent : Colors.transparent,
-          width: 2,
-        ),
-      ),
-      child: Column(
+  Widget _buildServerTile(VpnProvider provider, ProxyServer s, bool selected, bool dark, Color accent) {
+    final testing = provider.proxyTestingIds.contains(s.id);
+    final ping = s.ping;
+    final pingColor = ping == null ? Colors.grey : ping < 300 ? Colors.green : ping < 800 ? Colors.orange : Colors.deepOrange;
+    return ListTile(
+      dense: true,
+      leading: CircleAvatar(backgroundColor: accent.withValues(alpha: .15), child: Icon(Icons.swap_horiz, color: accent, size: 18)),
+      title: Text(s.remark.isEmpty ? s.address : s.remark, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+      subtitle: Row(
         children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: locked
-                ? () => provider.selectProxyGroup(groupKey)
-                : onToggleExpand,
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  Icon(
-                      !locked
-                          ? Icons.folder
-                          : (groupKey == ProxyServerService.userLinksGroup
-                              ? Icons.list_alt
-                              : Icons.cloud_outlined),
-                      size: 20,
-                      color: accent),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '$title (${servers.length})',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                        if (locked)
-                          Text(
-                            groupSelected
-                                ? 'Selected — connects to the fastest proxy'
-                                : 'Tap to select • auto-picks fastest',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: groupSelected
-                                  ? accent
-                                  : (isDark
-                                      ? Colors.white54
-                                      : Colors.black45),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (groupSelected)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Icon(Icons.check_circle, color: accent),
-                    ),
-                  if (isRefreshable)
-                    IconButton(
-                      tooltip: 'Update this sub link',
-                      icon: refreshing
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(Icons.refresh, color: accent),
-                      onPressed: refreshing
-                          ? null
-                          : () => _refreshOneGroup(provider, groupKey, title),
-                    ),
-                  IconButton(
-                    tooltip: 'Export group',
-                    icon: Icon(Icons.copy_all, color: accent),
-                    onPressed: () => _exportServers(servers, title),
-                  ),
-                  IconButton(
-                    tooltip: 'Test all (open site)',
-                    icon: testing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(Icons.speed, color: accent),
-                    onPressed: anyTesting
-                        ? null
-                        : () => provider.testProxyServers(servers),
-                  ),
-                  IconButton(
-                    tooltip: expanded ? 'Collapse' : 'Expand',
-                    icon: AnimatedRotation(
-                      turns: expanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 200),
-                      child: Icon(Icons.keyboard_arrow_down,
-                          color: isDark ? Colors.white70 : Colors.black54),
-                    ),
-                    onPressed: onToggleExpand,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (expanded) const Divider(height: 1),
+          Expanded(child: Text('${s.protocol.toUpperCase()} • ${s.fullAddress}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12))),
+          const SizedBox(width: 6),
+          Text(ping == null ? '—' : '$ping ms', style: TextStyle(color: pingColor, fontSize: 11, fontWeight: FontWeight.bold)),
         ],
       ),
-    );
-  }
-
-  Widget _buildEmpty(bool isDark, Color accent) {
-    return Center(
-      child: Column(
+      trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.swap_horiz,
-              size: 64, color: accent.withValues(alpha: 0.6)),
-          const SizedBox(height: 16),
-          Text(
-            'No proxy servers yet',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white70 : Colors.black54,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              'Tap "Add Proxy" to paste a socks5://, socks4:// or http:// '
-              'proxy, a bare host:port, or an http(s) subscription link.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white54 : Colors.black45,
-              ),
-            ),
-          ),
+          IconButton(icon: Icon(Icons.copy, color: accent, size: 18), tooltip: 'Copy link', onPressed: () async { await Clipboard.setData(ClipboardData(text: s.exportLink)); _toast('Link copied'); }),
+          IconButton(icon: testing ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.network_ping, color: accent, size: 20), tooltip: 'Ping test', onPressed: testing ? null : () => provider.pingProxyServer(s)),
+          IconButton(icon: Icon(Icons.public, color: accent, size: 20), tooltip: 'Open-site test', onPressed: testing ? null : () => provider.openSiteTestProxyServer(s)),
+          Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked, color: selected ? accent : Colors.grey),
+          if (s.group.isEmpty || s.group == ProxyServerService.userLinksGroup)
+            IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent), onPressed: () => provider.removeProxyServer(s.id)),
         ],
       ),
+      onTap: () => provider.selectProxyServer(s),
     );
   }
-
-  Color _pingColor(int? ping) {
-    if (ping == null) return Colors.grey;
-    if (ping < 0) return Colors.redAccent;
-    if (ping < 300) return Colors.green;
-    if (ping < 800) return Colors.orange;
-    return Colors.deepOrange;
-  }
-
-  String _pingLabel(int? ping) {
-    if (ping == null) return '—';
-    if (ping < 0) return 'fail';
-    return '$ping ms';
-  }
-
-  Widget _buildServerTile(VpnProvider provider, ProxyServer s, bool selected,
-      bool isDark, Color accent) {
-    final testing = provider.proxyTestingIds.contains(s.id);
-    return Container(
-      color: isDark
-          ? Colors.white.withValues(alpha: 0.04)
-          : Colors.black.withValues(alpha: 0.03),
-      child: ListTile(
-        dense: true,
-        leading: CircleAvatar(
-          radius: 18,
-          backgroundColor: accent.withValues(alpha: 0.15),
-          child: Icon(Icons.swap_horiz, color: accent, size: 18),
-        ),
-        title: Text(
-          s.remark.isEmpty ? s.address : s.remark,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-        ),
-        subtitle: Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${s.protocol.toUpperCase()} • ${s.fullAddress}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: _pingColor(s.ping).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _pingLabel(s.ping),
-                style: TextStyle(
-                  color: _pingColor(s.ping),
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: 'Copy link',
-              icon: Icon(Icons.copy, color: accent, size: 18),
-              onPressed: () => _copyOneServer(s),
-            ),
-            // TEST 1 — normal ping test (TCP connect latency).
-            IconButton(
-              tooltip: 'Ping test',
-              icon: testing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(Icons.network_ping, color: accent, size: 20),
-              onPressed: testing ? null : () => provider.pingProxyServer(s),
-            ),
-            // TEST 2 — open-site test (real request through the proxy).
-            IconButton(
-              tooltip: 'Open-site test',
-              icon: Icon(Icons.public, color: accent, size: 20),
-              onPressed:
-                  testing ? null : () => provider.openSiteTestProxyServer(s),
-            ),
-            if (selected)
-              Icon(Icons.check_circle, color: accent)
-            else
-              const Icon(Icons.radio_button_unchecked, color: Colors.grey),
-            if (s.group.isEmpty || s.group == ProxyServerService.userLinksGroup)
-              IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                onPressed: () => provider.removeProxyServer(s.id),
-              )
-            else
-              const Padding(
-                padding: EdgeInsets.only(left: 8, right: 8),
-                child: Icon(Icons.lock_outline, color: Colors.grey, size: 18),
-              ),
-          ],
-        ),
-        onTap: () => provider.selectProxyServer(s),
-      ),
-    );
-  }
-}
-
-enum _RowKind { header, tile, more }
-
-class _Row {
-  final _RowKind kind;
-  final String? groupKey;
-  final String? title;
-  final List<ProxyServer>? servers;
-  final ProxyServer? server;
-  final bool locked;
-  final bool expanded;
-  final int moreCount;
-
-  _Row._({
-    required this.kind,
-    this.groupKey,
-    this.title,
-    this.servers,
-    this.server,
-    this.locked = false,
-    this.expanded = false,
-    this.moreCount = 0,
-  });
-
-  factory _Row.header(String groupKey, String title,
-          List<ProxyServer> servers, bool locked, bool expanded) =>
-      _Row._(
-        kind: _RowKind.header,
-        groupKey: groupKey,
-        title: title,
-        servers: servers,
-        locked: locked,
-        expanded: expanded,
-      );
-
-  factory _Row.tile(ProxyServer server, bool locked) =>
-      _Row._(kind: _RowKind.tile, server: server, locked: locked);
-
-  factory _Row.more(int count) =>
-      _Row._(kind: _RowKind.more, moreCount: count);
 }
