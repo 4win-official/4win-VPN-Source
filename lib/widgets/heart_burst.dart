@@ -6,21 +6,20 @@ import 'package:flutter/material.dart';
 /// Used by the Pink theme: when the VPN connects, a shower of hearts erupts
 /// from behind the power button and disappears after a few seconds.
 ///
-/// Drive it by flipping [trigger] to a new value (e.g. an incrementing counter
-/// or a bool that becomes true on connect). Each time [trigger] changes, a fresh
-/// burst plays. The widget paints within its own bounds, so place it in a Stack
-/// sized to (and centred on) the power button.
+/// The visual burst may be larger than the power button, but its layout footprint
+/// stays at [layoutSize]. This is important because it is placed beside the
+/// power button in a centered Stack: the animation must overflow visually
+/// without making the whole center column taller and shifting the controls.
 class HeartBurst extends StatefulWidget {
-  /// Change this value to launch a new burst.
   final Object? trigger;
-
-  /// Diameter of the area the hearts spread across.
   final double size;
+  final double layoutSize;
 
   const HeartBurst({
     super.key,
     required this.trigger,
     this.size = 320,
+    this.layoutSize = 200,
   });
 
   @override
@@ -49,7 +48,6 @@ class _HeartBurstState extends State<HeartBurst>
       vsync: this,
       duration: const Duration(milliseconds: 2600),
     );
-    // Play once if a trigger is already set on first build.
     if (widget.trigger != null) _launch();
   }
 
@@ -64,11 +62,11 @@ class _HeartBurstState extends State<HeartBurst>
   void _launch() {
     _hearts = List.generate(18, (_) {
       final angle = _random.nextDouble() * pi * 2;
-      final distance = _random.nextDouble() * 0.5 + 0.5; // 0.5..1.0 of radius
+      final distance = _random.nextDouble() * 0.5 + 0.5;
       return _Heart(
         angle: angle,
         distance: distance,
-        size: _random.nextDouble() * 14 + 14, // 14..28
+        size: _random.nextDouble() * 14 + 14,
         color: _colors[_random.nextInt(_colors.length)],
         delay: _random.nextDouble() * 0.25,
         sway: (_random.nextDouble() - 0.5) * 0.4,
@@ -86,23 +84,38 @@ class _HeartBurstState extends State<HeartBurst>
 
   @override
   Widget build(BuildContext context) {
+    // Keep the Stack's layout footprint equal to the power button while letting
+    // the actual animation paint outside it. Previously the 340px HeartBurst
+    // made the center Stack 340px tall, which shifted the protocol selector and
+    // power button upward only in the Pink theme.
     return IgnorePointer(
       child: SizedBox(
-        width: widget.size,
-        height: widget.size,
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, _) {
-            if (_controller.isDismissed || _hearts.isEmpty) {
-              return const SizedBox.shrink();
-            }
-            return CustomPaint(
-              painter: _HeartBurstPainter(
-                t: _controller.value,
-                hearts: _hearts,
-              ),
-            );
-          },
+        width: widget.layoutSize,
+        height: widget.layoutSize,
+        child: OverflowBox(
+          minWidth: widget.size,
+          maxWidth: widget.size,
+          minHeight: widget.size,
+          maxHeight: widget.size,
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                if (_controller.isDismissed || _hearts.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+                return CustomPaint(
+                  painter: _HeartBurstPainter(
+                    t: _controller.value,
+                    hearts: _hearts,
+                  ),
+                );
+              },
+            ),
+          ),
         ),
       ),
     );
@@ -130,7 +143,7 @@ class _Heart {
 }
 
 class _HeartBurstPainter extends CustomPainter {
-  final double t; // 0..1 overall progress
+  final double t;
   final List<_Heart> hearts;
 
   _HeartBurstPainter({required this.t, required this.hearts});
@@ -141,20 +154,16 @@ class _HeartBurstPainter extends CustomPainter {
     final maxR = size.width / 2;
 
     for (final h in hearts) {
-      // Per-heart eased progress with its own delay.
       final span = 1.0 - h.delay;
       double p = ((t - h.delay) / span).clamp(0.0, 1.0);
       if (p <= 0) continue;
       final eased = Curves.easeOut.transform(p);
-
-      // Fly outward, then keep drifting slightly while fading.
       final r = maxR * h.distance * eased;
       final swayOffset = sin(p * pi * 2) * h.sway * maxR * 0.2;
       final dir = Offset(cos(h.angle), sin(h.angle));
       final perp = Offset(-dir.dy, dir.dx);
       final pos = center + dir * r + perp * swayOffset;
 
-      // Fade: appear fast, linger, then fade out in the last 40%.
       double alpha;
       if (p < 0.15) {
         alpha = p / 0.15;
@@ -164,7 +173,6 @@ class _HeartBurstPainter extends CustomPainter {
         alpha = (1.0 - (p - 0.6) / 0.4).clamp(0.0, 1.0);
       }
 
-      // Grow a touch then settle.
       final scale = 0.6 + eased * 0.7;
 
       canvas.save();
@@ -178,7 +186,6 @@ class _HeartBurstPainter extends CustomPainter {
         ..isAntiAlias = true;
       _drawHeart(canvas, paint, h.size);
 
-      // subtle glossy highlight
       final hl = Paint()
         ..color = Colors.white.withValues(alpha: alpha * 0.35)
         ..style = PaintingStyle.fill;
