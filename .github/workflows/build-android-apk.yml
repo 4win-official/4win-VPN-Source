@@ -1,10 +1,8 @@
 name: Build Android APK
 
 on:
+  # Build only when explicitly requested from the Actions tab.
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
