@@ -46,6 +46,8 @@ repositories {
 dependencies {
     implementation(files("libs/libv2ray.aar"))
     compileOnly("com.github.nizwar:openvpn_library:b3941ef040")
-    // Official Psiphon Android MobileLibrary distribution.
+    // Official Psiphon Android MobileLibrary distribution
     implementation("ca.psiphon:psiphontunnel:2.0.40")
+    // JSON parsing for Psiphon config
+    implementation("org.json:json:20231013")
 }
