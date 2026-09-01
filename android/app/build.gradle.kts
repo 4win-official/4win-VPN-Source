@@ -46,8 +46,6 @@ repositories {
 dependencies {
     implementation(files("libs/libv2ray.aar"))
     compileOnly("com.github.nizwar:openvpn_library:b3941ef040")
-    // Official Psiphon Android MobileLibrary distribution. Psiphon documents
-    // this Maven repository and the ca.psiphon:psiphontunnel artifact for
-    // embedding the tunnel core in Android apps.
-    implementation("ca.psiphon:psiphontunnel:2.0.39")
+    // Official Psiphon Android MobileLibrary distribution.
+    implementation("ca.psiphon:psiphontunnel:2.0.40")
 }
