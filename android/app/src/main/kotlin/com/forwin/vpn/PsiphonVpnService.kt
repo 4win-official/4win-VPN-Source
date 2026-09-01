@@ -58,7 +58,7 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
         selectedRegion = region
         executor.execute {
             try {
-                val vpn = Builder()
+                val builder = Builder()
                     .setSession("4win Psiphon")
                     .setMtu(1500)
                     .addAddress("10.2.0.2", 32)
@@ -67,7 +67,8 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
                     .addDnsServer("1.1.1.1")
                     .addDnsServer("8.8.8.8")
                     .setBlocking(false)
-                    .establish()
+                SplitTunnel.apply(applicationContext, builder, packageName)
+                val vpn = builder.establish()
 
                 if (vpn == null) {
                     updateNotification("VPN permission was not granted")

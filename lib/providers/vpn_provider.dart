@@ -20,6 +20,7 @@ import '../services/xray_connection.dart';
 import '../services/xray_config_builder.dart';
 import '../models/proxy_server.dart';
 import '../services/proxy_service.dart';
+import '../services/psiphon_service.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -32,13 +33,15 @@ class VpnProvider with ChangeNotifier {
   final SlowDnsService _slowDnsService = SlowDnsService();
   final XrayServerService _xrayService = XrayServerService();
   final ProxyServerService _proxyService = ProxyServerService();
+  final PsiphonService _psiphonService = PsiphonService();
+  Timer? _psiphonMonitorTimer;
   
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
   // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', 'xray' or
   // 'proxy' (dedicated SOCKS4/SOCKS5/HTTP proxy protocol).
-  String _selectedProtocol = 'xray';
+  String _selectedProtocol = 'psiphon';
   String get selectedProtocol => _selectedProtocol;
 
   // Xray (real Xray core / v2rayNG) servers
@@ -226,6 +229,18 @@ class VpnProvider with ChangeNotifier {
   Future<void> _startupRestore() async {
     await loadSelectedProtocol();
     try {
+      final prefs = await SharedPreferences.getInstance();
+      // One-time migration: Psiphon is the new default protocol. After this
+      // migration the user's later protocol choices are preserved normally.
+      final migrated = prefs.getBool('psiphon_default_v1') ?? false;
+      if (!migrated) {
+        _selectedProtocol = 'psiphon';
+        await _dnsService.setSelectedProtocol('psiphon');
+        await prefs.setBool('psiphon_default_v1', true);
+        notifyListeners();
+      }
+    } catch (_) {}
+    try {
       await loadOpenVpnConfigs();
     } catch (_) {}
   }
@@ -310,7 +325,8 @@ class VpnProvider with ChangeNotifier {
       if (_selectedProtocol == 'direct_dns' ||
           _selectedProtocol == 'slowdns' ||
           _selectedProtocol == 'xray' ||
-          _selectedProtocol == 'openvpn') {
+          _selectedProtocol == 'openvpn' ||
+          _selectedProtocol == 'psiphon') {
         _connectionDuration += const Duration(seconds: 1);
         notifyListeners();
         return;
@@ -765,8 +781,11 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
-    // 🔀 PROTOCOL DETECTION: Direct DNS, OpenVPN, Slow DNS, or SSTP
-    if (_selectedProtocol == 'direct_dns') {
+    // 🔀 PROTOCOL DETECTION: Psiphon, Direct DNS, OpenVPN, Slow DNS, or SSTP
+    if (_selectedProtocol == 'psiphon') {
+      await _connectPsiphon();
+      return;
+    } else if (_selectedProtocol == 'direct_dns') {
       // ✅ Direct DNS: Use selected DNS server
       await _connectDirectDns();
       return;
@@ -976,6 +995,88 @@ class VpnProvider with ChangeNotifier {
       '185.55.226.26',    // Begzar
       '208.67.222.222',   // OpenDNS
     ];
+  }
+
+  /// Connect through the official Psiphon Android MobileLibrary.
+  /// The native service owns the tunnel; this layer only coordinates UI state
+  /// and performs a lightweight post-connect liveness check.
+  Future<void> _connectPsiphon() async {
+    try {
+      _status = VpnConnectionStatus.connecting;
+      _errorMessage = null;
+      notifyListeners();
+
+      final started = await _psiphonService.start();
+      if (!started) {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Unable to start Psiphon VPN service';
+        notifyListeners();
+        return;
+      }
+
+      // Give Psiphon time to obtain a server and establish the tunnel.
+      for (var i = 0; i < 60; i++) {
+        await Future<void>.delayed(const Duration(seconds: 1));
+        if (_selectedProtocol != 'psiphon' ||
+            _status == VpnConnectionStatus.disconnected ||
+            _status == VpnConnectionStatus.disconnecting) {
+          return;
+        }
+        if (await _psiphonService.isConnected) {
+          _status = VpnConnectionStatus.connected;
+          _connectedServer = null;
+          _errorMessage = null;
+          _startDurationTimer();
+          _startPingTimer();
+          _startPsiphonMonitor();
+          notifyListeners();
+          return;
+        }
+      }
+
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Psiphon connection timed out';
+      notifyListeners();
+    } catch (e) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Psiphon connection failed: $e';
+      notifyListeners();
+    }
+  }
+
+  void _startPsiphonMonitor() {
+    _psiphonMonitorTimer?.cancel();
+    _psiphonMonitorTimer = Timer.periodic(const Duration(seconds: 20), (_) async {
+      if (_selectedProtocol != 'psiphon' ||
+          _status != VpnConnectionStatus.connected) {
+        return;
+      }
+      try {
+        final healthy = await _psiphonService.isConnected;
+        if (healthy) return;
+        if (_status != VpnConnectionStatus.connected) return;
+        _status = VpnConnectionStatus.connecting;
+        notifyListeners();
+        await _psiphonService.reconnect();
+        for (var i = 0; i < 15; i++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          if (await _psiphonService.isConnected) {
+            _status = VpnConnectionStatus.connected;
+            _startDurationTimer();
+            notifyListeners();
+            return;
+          }
+        }
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Psiphon connection lost';
+        notifyListeners();
+      } catch (_) {}
+    });
+  }
+
+  void _stopPsiphonMonitor() {
+    _psiphonMonitorTimer?.cancel();
+    _psiphonMonitorTimer = null;
   }
 
   /// Connect via Direct DNS (separate from SSTP)
@@ -2349,7 +2450,16 @@ class VpnProvider with ChangeNotifier {
 
     try {
       // Disconnect based on protocol
-      if (_selectedProtocol == 'direct_dns') {
+      if (_selectedProtocol == 'psiphon') {
+        _stopPsiphonMonitor();
+        await _psiphonService.stop();
+        _stopPingTimer();
+        _stopDurationTimer();
+        _connectionDuration = Duration.zero;
+        _totalDownloadBytes = 0;
+        _totalUploadBytes = 0;
+        if (kDebugMode) debugPrint('🔌 Disconnecting Psiphon...');
+      } else if (_selectedProtocol == 'direct_dns') {
         await DnsVpnConnection.disconnect();
         // ✅ توقف تایمرهای پینگ و مدت زمان برای حالت DNS
         _stopPingTimer();
@@ -2723,6 +2833,7 @@ class VpnProvider with ChangeNotifier {
     _stopDurationTimer();
     _stopPingTimer();
     _stopXrayTraffic();
+    _stopPsiphonMonitor();
     _vpnService.dispose();
     super.dispose();
   }

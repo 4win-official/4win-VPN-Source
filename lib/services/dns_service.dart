@@ -12,7 +12,7 @@ class DnsService {
   /// گرفتن پروتکل انتخاب شده
   Future<String> getSelectedProtocol() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(selectedProtocolKey) ?? 'xray'; // پیش‌فرض Xray
+    return prefs.getString(selectedProtocolKey) ?? 'psiphon'; // پیش‌فرض Psiphon
   }
 
   /// ذخیره پروتکل انتخاب شده
