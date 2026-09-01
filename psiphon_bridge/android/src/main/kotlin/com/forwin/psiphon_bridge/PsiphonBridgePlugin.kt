@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import androidx.core.content.ContextCompat
+import com.forwin.vpn.PsiphonVpnService
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -53,8 +54,8 @@ class PsiphonBridgePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 context.startService(intent)
                 result.success(true)
             }
-            "isRunning" -> result.success(com.forwin.vpn.PsiphonVpnService.isRunning())
-            "isConnected" -> result.success(com.forwin.vpn.PsiphonVpnService.isConnected())
+            "isRunning" -> result.success(PsiphonVpnService.isRunning())
+            "isConnected" -> result.success(PsiphonVpnService.isConnected())
             else -> result.notImplemented()
         }
     }
