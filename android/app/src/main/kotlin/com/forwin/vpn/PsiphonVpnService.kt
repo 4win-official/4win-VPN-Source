@@ -4,11 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
-import android.net.VpnService
 import android.os.Build
 import android.os.IBinder
-import android.os.ParcelFileDescriptor
 import android.util.Log
 import ca.psiphon.PsiphonTunnel
 import org.json.JSONObject
@@ -16,12 +15,14 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Native Android host for Psiphon MobileLibrary.
+ * Psiphon foreground host.
  *
- * Psiphon owns server discovery/tunnel selection. This service owns the Android
- * VPN interface, foreground notification and a small bridge back to Flutter.
+ * Psiphon runs in local-proxy mode. 4win's existing Xray VPN service remains
+ * the sole owner of the Android TUN and routes the device through Psiphon's
+ * localhost SOCKS endpoint. This prevents two VpnService instances from
+ * competing for the same system tunnel.
  */
-class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
+class PsiphonVpnService : Service() {
     companion object {
         const val ACTION_START = "com.forwin.vpn.PSIPHON_START"
         const val ACTION_STOP = "com.forwin.vpn.PSIPHON_STOP"
@@ -30,6 +31,7 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
         const val EXTRA_STATE = "state"
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_REGION = "region"
+        const val EXTRA_PORT = "port"
         const val EXTRA_SENT = "sent"
         const val EXTRA_RECEIVED = "received"
 
@@ -37,14 +39,15 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
         private const val NOTIFICATION_ID = 4107
         private const val TAG = "4winPsiphon"
 
-        @Volatile
-        private var running = false
+        @Volatile var running = false
+            private set
+        @Volatile var socksPort = 0
+            private set
     }
 
     private val executor = Executors.newSingleThreadExecutor()
     private val stopping = AtomicBoolean(false)
     private var psiphon: PsiphonTunnel? = null
-    private var vpnInterface: ParcelFileDescriptor? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -69,22 +72,11 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
 
         executor.execute {
             try {
-                val permissionIntent = prepare(this)
-                if (permissionIntent != null) {
-                    sendState("permission_required", "VPN permission is required")
-                    stopSelf()
-                    running = false
-                    return@execute
-                }
-
-                establishVpnInterface()
-
                 val host = object : PsiphonTunnel.HostService {
                     override fun getContext() = this@PsiphonVpnService
                     override fun getPsiphonConfig(): String = defaultPsiphonConfig()
                     override fun bindToDevice(fileDescriptor: Long) {
-                        // Psiphon expects the already-established Android TUN fd.
-                        // The VpnService fd is supplied by establishVpnInterface().
+                        // Local-proxy mode does not require an Android TUN fd.
                     }
                     override fun onConnecting() {
                         updateNotification("Connecting…")
@@ -94,6 +86,13 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
                         updateNotification("Connected")
                         sendState("connected", null)
                     }
+                    override fun onListeningSocksProxyPort(port: Int) {
+                        socksPort = port
+                        sendPort(port)
+                    }
+                    override fun onConnectedServerRegion(region: String) = sendRegion(region)
+                    override fun onClientRegion(region: String) = sendRegion(region)
+                    override fun onBytesTransferred(sent: Long, received: Long) = sendBytes(sent, received)
                     override fun onStartedWaitingForNetworkConnectivity() {
                         updateNotification("Waiting for network…")
                         sendState("waiting_network", null)
@@ -102,34 +101,16 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
                         updateNotification("Connecting…")
                         sendState("connecting", null)
                     }
-                    override fun onConnectedServerRegion(region: String) {
-                        sendRegion(region)
-                    }
-                    override fun onClientRegion(region: String) {
-                        sendRegion(region)
-                    }
-                    override fun onBytesTransferred(sent: Long, received: Long) {
-                        sendBytes(sent, received)
-                    }
-                    override fun onUpstreamProxyError(message: String) {
-                        sendState("error", message)
-                    }
-                    override fun onDiagnosticMessage(message: String) {
-                        Log.d(TAG, message)
-                    }
-                    override fun onExiting() {
-                        sendState("disconnected", null)
-                    }
-                    override fun onLightProxyAvailable() {
-                        Log.d(TAG, "Psiphon light proxy available")
-                    }
+                    override fun onUpstreamProxyError(message: String) = sendState("error", message)
+                    override fun onDiagnosticMessage(message: String) = Log.d(TAG, message)
+                    override fun onExiting() = sendState("disconnected", null)
                 }
 
                 psiphon = PsiphonTunnel.newPsiphonTunnel(host).also {
-                    it.setVpnMode(true)
+                    it.setVpnMode(false)
                 }
                 psiphon!!.startTunneling("")
-                Log.i(TAG, "Psiphon tunnel started")
+                Log.i(TAG, "Psiphon local proxy started")
             } catch (t: Throwable) {
                 Log.e(TAG, "Psiphon start failed", t)
                 sendState("error", t.message ?: "Psiphon failed to start")
@@ -140,28 +121,11 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
         }
     }
 
-    private fun establishVpnInterface() {
-        vpnInterface?.close()
-        vpnInterface = Builder()
-            .setSession("4win VPN • Psiphon")
-            .setMtu(1500)
-            .addAddress("10.0.0.2", 24)
-            .addRoute("0.0.0.0", 0)
-            .addDnsServer("10.0.0.1")
-            .setBlocking(false)
-            .establish()
-
-        if (vpnInterface == null) {
-            throw IllegalStateException("Unable to establish Android VPN interface")
-        }
-    }
-
     private fun reconnectAsync() {
         executor.execute {
             try {
                 psiphon?.reconnectPsiphon()
             } catch (t: Throwable) {
-                Log.e(TAG, "Psiphon reconnect failed", t)
                 sendState("error", t.message ?: "Reconnect failed")
             }
         }
@@ -173,11 +137,11 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
             try {
                 sendState("disconnecting", null)
                 psiphon?.stop()
-            } catch (t: Throwable) {
-                Log.w(TAG, "Psiphon stop failed", t)
+            } catch (_: Throwable) {
             } finally {
                 cleanup()
                 running = false
+                socksPort = 0
                 sendState("disconnected", null)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -189,41 +153,34 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
     private fun cleanup() {
         try { psiphon?.stop() } catch (_: Throwable) {}
         psiphon = null
-        try { vpnInterface?.close() } catch (_: Throwable) {}
-        vpnInterface = null
+        socksPort = 0
     }
 
     private fun sendState(state: String, message: String?) {
-        val intent = Intent(ACTION_STATE).setPackage(packageName)
-            .putExtra(EXTRA_STATE, state)
+        val intent = Intent(ACTION_STATE).setPackage(packageName).putExtra(EXTRA_STATE, state)
         if (message != null) intent.putExtra(EXTRA_MESSAGE, message)
         sendBroadcast(intent)
     }
 
     private fun sendRegion(region: String) {
-        Intent(ACTION_STATE).setPackage(packageName)
-            .putExtra(EXTRA_STATE, "region")
-            .putExtra(EXTRA_REGION, region)
-            .also(::sendBroadcast)
+        sendBroadcast(Intent(ACTION_STATE).setPackage(packageName)
+            .putExtra(EXTRA_STATE, "region").putExtra(EXTRA_REGION, region))
+    }
+
+    private fun sendPort(port: Int) {
+        sendBroadcast(Intent(ACTION_STATE).setPackage(packageName)
+            .putExtra(EXTRA_STATE, "proxy_ready").putExtra(EXTRA_PORT, port))
     }
 
     private fun sendBytes(sent: Long, received: Long) {
-        Intent(ACTION_STATE).setPackage(packageName)
-            .putExtra(EXTRA_STATE, "bytes")
-            .putExtra(EXTRA_SENT, sent)
-            .putExtra(EXTRA_RECEIVED, received)
-            .also(::sendBroadcast)
+        sendBroadcast(Intent(ACTION_STATE).setPackage(packageName)
+            .putExtra(EXTRA_STATE, "bytes").putExtra(EXTRA_SENT, sent).putExtra(EXTRA_RECEIVED, received))
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "4win Psiphon VPN",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply { description = "Psiphon VPN connection status" }
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "4win Psiphon", NotificationManager.IMPORTANCE_LOW)
             )
         }
     }
@@ -237,7 +194,7 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(com.forwin.vpn.R.drawable.ic_stat_vpn)
+            .setSmallIcon(R.drawable.ic_stat_vpn)
             .setContentTitle("4win VPN • Psiphon")
             .setContentText(text)
             .setOngoing(true)
@@ -247,20 +204,16 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
     }
 
     private fun updateNotification(text: String) {
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(text))
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(text))
     }
 
     private fun defaultPsiphonConfig(): String = JSONObject().apply {
-        put("LocalSocksProxyPort", 1081)
-        put("LocalHttpProxyPort", 8081)
+        put("LocalSocksProxyPort", 0)
+        put("LocalHttpProxyPort", 0)
         put("EgressRegion", "")
         put("PropagationChannelId", "FFFFFFFFFFFFFFFF")
         put("RemoteServerListDownloadFilename", "remote_server_list")
-        put(
-            "RemoteServerListSignaturePublicKey",
-            "MIICIDANBgkqhkiG9w0BAQEFAAOCAg0AMIICCAKCAgEAt7Ls+/39r+T6zNW7GiVpJfzq/xvL9SBH5rIFnk0RXYEYavax3WS6HOD35eTAqn8AniOwiH+DOkvgSKF2caqk/y1dfq47Pdymtwzp9ikpB1C5OfAysXzBiwVJlCdajBKvBZDerV1cMvRzCKvKwRmvDmHgphQQ7WfXIGbRbmmk6opMBh3roE42KcotLFtqp0RRwLtcBRNtCdsrVsjiI1Lqz/lH+T61sGjSjQ3CHMuZYSQJZo/KrvzgQXpkaCTdbObxHqb6/+i1qaVOfEsvjoiyzTxJADvSytVtcTjijhPEV6XskJVHE1Zgl+7rATr/pDQkw6DPCNBS1+6Yfy7GstZALQXwEDN/qhQI9kWkHijT8ns+i1vGg00Mk/6J75arLhqcodWsdeG/M/moWgqQAnlZAGVtJI1OgeF5fsPpXu4kctOfuZlGjVZXQNW34aOzm8r8S0eVZitPlbhcPiR4gT/aSMz/wd8lZlzZYsje/Jr8u/YtlwjjreZrGRmG8KMOzukV3lLmMppXFMvl4bxv6YFEmIuTsOhbLTwFgh7KYNjodLj/LsqRVfwz31PgWQFTEPICV7GCvgVlPRxnofqKSjgTWI4mxDhBpVcATvaoBl1L/6WLbFvBsoAUBItWwctO2xalKxF5szhGm8lccoc5MZr8kfE0uxMgsxz4er68iCID+rsCAQM="
-        )
+        put("RemoteServerListSignaturePublicKey", "MIICIDANBgkqhkiG9w0BAQEFAAOCAg0AMIICCAKCAgEAt7Ls+/39r+T6zNW7GiVpJfzq/xvL9SBH5rIFnk0RXYEYavax3WS6HOD35eTAqn8AniOwiH+DOkvgSKF2caqk/y1dfq47Pdymtwzp9ikpB1C5OfAysXzBiwVJlCdajBKvBZDerV1cMvRzCKvKwRmvDmHgphQQ7WfXIGbRbmmk6opMBh3roE42KcotLFtqp0RRwLtcBRNtCdsrVsjiI1Lqz/lH+T61sGjSjQ3CHMuZYSQJZo/KrvzgQXpkaCTdbObxHqb6/+i1qaVOfEsvjoiyzTxJADvSytVtcTjijhPEV6XskJVHE1Zgl+7rATr/pDQkw6DPCNBS1+6Yfy7GstZALQXwEDN/qhQI9kWkHijT8ns+i1vGg00Mk/6J75arLhqcodWsdeG/M/moWgqQAnlZAGVtJI1OgeF5fsPpXu4kctOfuZlGjVZXQNW34aOzm8r8S8eZVJitPlbhcPiR4gT/aSMz/wd8lZlzZYsje/Jr8u/YtlwjjreZrGRmG8KMOzukV3lLmMppXFMvl4bxv6YFEmIuTsOhbLTwFgh7KYNjodLj/LsqRVfwz31PgWQFTEPICV7GCvgVlPRxnofqKSjgTWI4mxDhBpVcATvaoBl1L/6WLbFvBsoAUBItWwctO2xalKxF5szhGm8lccoc5MZr8kfE0uxMgsxz4er68iCID+rsCAQM=")
         put("RemoteServerListUrl", "https://s3.amazonaws.com//psiphon/web/mjr4-p23r-puwl/server_list_compressed")
         put("SponsorId", "FFFFFFFFFFFFFFFF")
         put("UseIndistinguishableTLS", true)
@@ -274,9 +227,5 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
-
-    override fun getContext() = this
-    override fun getPsiphonConfig() = defaultPsiphonConfig()
-    override fun bindToDevice(fileDescriptor: Long) {}
+    override fun onBind(intent: Intent?): IBinder? = null
 }
