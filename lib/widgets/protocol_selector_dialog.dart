@@ -69,6 +69,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
       String? badge}) {
     return Column(children: [
       ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
         leading: Icon(icon,
             color: provider.selectedProtocol == protocol
                 ? accent
@@ -112,115 +113,124 @@ class ProtocolSelectorDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final screen = MediaQuery.sizeOf(context);
+    final dialogHeight = (screen.height * 0.72).clamp(360.0, 620.0);
+    final dialogWidth = (screen.width * 0.92).clamp(300.0, 440.0);
+
     return Consumer<VpnProvider>(builder: (context, vpnProvider, _) {
       return Dialog(
         backgroundColor: Colors.transparent,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-            child: Container(
-              decoration: BoxDecoration(
-                color: isDark
-                    ? const Color(0xFF1A1A1A).withValues(alpha: 0.7)
-                    : Colors.white.withValues(alpha: 0.85),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: SizedBox(
+          width: dialogWidth,
+          height: dialogHeight,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+              child: Container(
+                decoration: BoxDecoration(
                   color: isDark
-                      ? Colors.white.withValues(alpha: 0.2)
-                      : Colors.black.withValues(alpha: 0.1),
-                  width: 1.5,
-                ),
-              ),
-              padding: const EdgeInsets.all(20),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Row(children: [
-                  const SizedBox(width: 34),
-                  Expanded(
-                    child: Text('Select Protocol',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87)),
+                      ? const Color(0xFF1A1A1A).withValues(alpha: 0.7)
+                      : Colors.white.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : Colors.black.withValues(alpha: 0.1),
+                    width: 1.5,
                   ),
-                  _gearButton(context,
-                      isDark: isDark,
-                      tooltip: 'General settings (all protocols)',
-                      color: isDark ? Colors.white : Colors.black87,
-                      onTap: () => _openGlobalSettings(context)),
+                ),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                child: Column(children: [
+                  Row(children: [
+                    const SizedBox(width: 34),
+                    Expanded(
+                      child: Text('Select Protocol',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87)),
+                    ),
+                    _gearButton(context,
+                        isDark: isDark,
+                        tooltip: 'General settings (all protocols)',
+                        color: isDark ? Colors.white : Colors.black87,
+                        onTap: () => _openGlobalSettings(context)),
+                  ]),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: Scrollbar(
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: Column(children: [
+                          _protocolTile(context,
+                              provider: vpnProvider,
+                              isDark: isDark,
+                              protocol: 'psiphon',
+                              title: 'Psiphon',
+                              subtitle: 'Automatic server selection',
+                              icon: Icons.public,
+                              accent: Colors.deepPurple,
+                              badge: 'Default'),
+                          _protocolTile(context,
+                              provider: vpnProvider,
+                              isDark: isDark,
+                              protocol: 'xray',
+                              title: 'Xray',
+                              subtitle: 'Real Xray core + TLS fragment',
+                              icon: Icons.rocket_launch,
+                              accent: Colors.tealAccent.shade700),
+                          _protocolTile(context,
+                              provider: vpnProvider,
+                              isDark: isDark,
+                              protocol: 'openvpn',
+                              title: 'OpenVPN',
+                              subtitle: 'Custom config support',
+                              icon: Icons.shield,
+                              accent: Colors.purple),
+                          _protocolTile(context,
+                              provider: vpnProvider,
+                              isDark: isDark,
+                              protocol: 'sstp',
+                              title: 'SSTP',
+                              subtitle: 'Automatic server selection',
+                              icon: Icons.vpn_key,
+                              accent: Colors.green),
+                          _protocolTile(context,
+                              provider: vpnProvider,
+                              isDark: isDark,
+                              protocol: 'direct_dns',
+                              title: 'DNS changer',
+                              subtitle: 'Connect via DNS servers',
+                              icon: Icons.dns,
+                              accent: Colors.blue),
+                          _protocolTile(context,
+                              provider: vpnProvider,
+                              isDark: isDark,
+                              protocol: 'proxy',
+                              title: 'Proxy',
+                              subtitle: 'SOCKS4 / SOCKS5 / HTTP proxy',
+                              icon: Icons.swap_horiz,
+                              accent: Colors.tealAccent.shade700),
+                          _protocolTile(context,
+                              provider: vpnProvider,
+                              isDark: isDark,
+                              protocol: 'slowdns',
+                              title: 'Slow DNS',
+                              subtitle: 'DNS Tunneling for heavy censorship',
+                              icon: Icons.cloud_queue,
+                              accent: Colors.orange,
+                              divider: false,
+                              badge: 'Beta'),
+                        ]),
+                      ),
+                    ),
+                  ),
                 ]),
-                const SizedBox(height: 12),
-
-                // Psiphon is intentionally first and marked as the default
-                // protocol. It receives the same selector treatment as every
-                // other protocol and is a real native VPN service.
-                _protocolTile(context,
-                    provider: vpnProvider,
-                    isDark: isDark,
-                    protocol: 'psiphon',
-                    title: 'Psiphon',
-                    subtitle: 'Automatic server selection',
-                    icon: Icons.public,
-                    accent: Colors.deepPurple,
-                    badge: 'Default'),
-
-                _protocolTile(context,
-                    provider: vpnProvider,
-                    isDark: isDark,
-                    protocol: 'xray',
-                    title: 'Xray',
-                    subtitle: 'Real Xray core + TLS fragment',
-                    icon: Icons.rocket_launch,
-                    accent: Colors.tealAccent.shade700),
-
-                _protocolTile(context,
-                    provider: vpnProvider,
-                    isDark: isDark,
-                    protocol: 'proxy',
-                    title: 'Proxy',
-                    subtitle: 'Real SOCKS4 / SOCKS5 / HTTP proxy',
-                    icon: Icons.swap_horiz,
-                    accent: Colors.tealAccent.shade700),
-
-                _protocolTile(context,
-                    provider: vpnProvider,
-                    isDark: isDark,
-                    protocol: 'sstp',
-                    title: 'SSTP',
-                    subtitle: 'Automatic server selection',
-                    icon: Icons.vpn_key,
-                    accent: Colors.green),
-
-                _protocolTile(context,
-                    provider: vpnProvider,
-                    isDark: isDark,
-                    protocol: 'direct_dns',
-                    title: 'DNS changer',
-                    subtitle: 'Connect via DNS servers',
-                    icon: Icons.dns,
-                    accent: Colors.blue),
-
-                _protocolTile(context,
-                    provider: vpnProvider,
-                    isDark: isDark,
-                    protocol: 'openvpn',
-                    title: 'OpenVPN',
-                    subtitle: 'Custom config support',
-                    icon: Icons.shield,
-                    accent: Colors.purple),
-
-                _protocolTile(context,
-                    provider: vpnProvider,
-                    isDark: isDark,
-                    protocol: 'slowdns',
-                    title: 'Slow DNS',
-                    subtitle: 'DNS Tunneling for heavy censorship',
-                    icon: Icons.cloud_queue,
-                    accent: Colors.orange,
-                    divider: false,
-                    badge: 'Beta'),
-              ]),
+              ),
             ),
           ),
         ),
