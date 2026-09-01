@@ -32,6 +32,9 @@ android {
 
     packaging {
         jniLibs {
+            // Xray keeps its gomobile runtime as libgojni.so. The Psiphon
+            // runtime is renamed by CI to psiphon-gojni.so so both native
+            // libraries can coexist in the APK.
             pickFirsts += listOf("**/libgojni.so")
         }
     }
@@ -45,9 +48,18 @@ repositories {
 
 dependencies {
     implementation(files("libs/libv2ray.aar"))
+
     compileOnly("com.github.nizwar:openvpn_library:b3941ef040")
-    // Official Psiphon Android MobileLibrary distribution
-    implementation("ca.psiphon:psiphontunnel:2.0.40")
-    // JSON parsing for Psiphon config
+
+    // CI generates this AAR from the official Psiphon 2.0.40 artifact. The
+    // generated copy removes Psiphon's duplicate gomobile Java runtime and
+    // renames its native lib; the shared gomobile runtime comes from Xray.
+    val strippedPsiphon = file("libs/psiphontunnel-2.0.40-stripped.aar")
+    if (strippedPsiphon.exists()) {
+        implementation(files(strippedPsiphon))
+    } else {
+        implementation("ca.psiphon:psiphontunnel:2.0.40")
+    }
+
     implementation("org.json:json:20231013")
 }
