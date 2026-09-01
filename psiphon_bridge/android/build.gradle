@@ -22,6 +22,17 @@ android {
     defaultConfig {
         minSdk 24
     }
+
+    // Keep Java and Kotlin on the same JVM target. Gradle's default Java
+    // target for this plugin is 8, while the Kotlin compiler targets 17.
+    // Align both to JDK 17 used by the Android build.
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
 }
 
 repositories {
