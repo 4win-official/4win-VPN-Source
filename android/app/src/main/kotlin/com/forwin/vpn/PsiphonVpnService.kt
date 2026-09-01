@@ -1,218 +1,368 @@
 package com.forwin.vpn
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.Service
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
-import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import android.util.Log
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import androidx.core.app.NotificationCompat
+import ca.psiphon.PsiphonTunnel
 import java.util.concurrent.Semaphore
 
 class PsiphonVpnService : VpnService() {
-    companion object {
-        private const val TAG = "PsiphonVpnService"
-        private const val NOTIFICATION_CHANNEL_ID = "psiphon_vpn"
-        private const val NOTIFICATION_ID = 1
-        
-        @Volatile
-        private var isRunning = false
-        
-        @Volatile
-        private var isConnected = false
-        
-        private val semaphore = Semaphore(1)
-        
-        fun isRunning(): Boolean = isRunning
-        fun isConnected(): Boolean = isConnected
-    }
 
-    private lateinit var notificationManager: NotificationManager
+    private var vpnInterface: ParcelFileDescriptor? = null
+    private var psiphonTunnel: PsiphonTunnel? = null
+    @Volatile private var tunnelRunning = false
+    private var currentRegion: String = ""
+
+    companion object {
+        const val ACTION_CONNECT = "com.forwin.vpn.PSIPHON_CONNECT"
+        const val ACTION_DISCONNECT = "com.forwin.vpn.PSIPHON_DISCONNECT"
+        const val ACTION_RECONNECT = "com.forwin.vpn.PSIPHON_RECONNECT"
+        const val EXTRA_EGRESS_REGION = "egress_region"
+
+        private const val TAG = "PsiphonVpnService"
+        private const val NOTIFICATION_ID = 3
+        private const val CHANNEL_ID = "PsiphonVpnChannel"
+        private const val VPN_MTU = 1500
+        private const val PRIVATE_VLAN4 = "10.8.0.1"
+
+        @Volatile
+        private var isServiceRunning = false
+
+        @Volatile
+        private var isTunnelConnected = false
+
+        @Volatile
+        private var totalUplink = 0L
+
+        @Volatile
+        private var totalDownlink = 0L
+
+        private val semaphore = Semaphore(1)
+
+        fun isRunning(): Boolean = isServiceRunning
+        fun isConnected(): Boolean = isTunnelConnected
+
+        fun queryTrafficStats(): LongArray {
+            return longArrayOf(totalUplink, totalDownlink)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "PsiphonVpnService created")
-        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         Log.d(TAG, "onStartCommand: action=$action")
-        
+
         when (action) {
-            "com.forwin.vpn.psiphon.START" -> {
-                val region = intent.getStringExtra("egressRegion") ?: ""
-                startPsiphonTunnel(region)
+            ACTION_CONNECT -> {
+                val region = intent.getStringExtra(EXTRA_EGRESS_REGION) ?: ""
+                Thread { startPsiphon(region) }.start()
             }
-            "com.forwin.vpn.psiphon.STOP" -> {
-                stopPsiphonTunnel()
+            ACTION_DISCONNECT -> {
+                Thread { stopPsiphon() }.start()
             }
-            "com.forwin.vpn.psiphon.RECONNECT" -> {
-                stopPsiphonTunnel()
-                Thread.sleep(500)
-                val region = intent.getStringExtra("egressRegion") ?: ""
-                startPsiphonTunnel(region)
+            ACTION_RECONNECT -> {
+                Thread {
+                    stopPsiphon()
+                    Thread.sleep(500)
+                    val region = intent.getStringExtra(EXTRA_EGRESS_REGION) ?: ""
+                    startPsiphon(region)
+                }.start()
             }
         }
-        
+
         return START_STICKY
     }
 
-    private fun startPsiphonTunnel(region: String) {
-        Thread {
-            try {
-                semaphore.acquire()
-                Log.d(TAG, "Starting Psiphon tunnel for region: $region")
-                
-                isRunning = true
-                updateNotification("Connecting...")
-                
-                // Initialize Psiphon tunnel
-                initializePsiphonTunnel(region)
-                
-                isConnected = true
-                updateNotification("Connected")
-                Log.d(TAG, "Psiphon tunnel started successfully")
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Error starting tunnel", e)
-                isRunning = false
-                isConnected = false
-                updateNotification("Connection failed: ${e.message}")
-            } finally {
-                semaphore.release()
-            }
-        }.start()
-    }
-
-    private fun stopPsiphonTunnel() {
-        Thread {
-            try {
-                semaphore.acquire()
-                Log.d(TAG, "Stopping Psiphon tunnel")
-                
-                isRunning = false
-                isConnected = false
-                updateNotification("Disconnecting...")
-                
-                // Cleanup Psiphon tunnel
-                cleanupPsiphonTunnel()
-                
-                Log.d(TAG, "Psiphon tunnel stopped")
-                stopForeground(true)
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping tunnel", e)
-            } finally {
-                semaphore.release()
-            }
-        }.start()
-    }
-
-    private fun initializePsiphonTunnel(region: String) {
+    private fun startPsiphon(region: String) {
         try {
-            // TODO: Implement actual Psiphon tunnel initialization
-            // This is where you would integrate with Psiphon Tunnel Core
-            // For now, we'll simulate tunnel establishment
-            
-            // Step 1: Configure Psiphon parameters
-            Log.d(TAG, "Configuring Psiphon for region: $region")
-            
-            // Step 2: Start tunnel (would use Psiphon SDK/JNI here)
-            // Example: You would call native Psiphon methods here
-            // PsiphonTunnel.start(config)
-            
-            // Step 3: Set up VPN interface (optional, if using system VPN)
-            setupVpnInterface()
-            
-            // Simulate tunnel ready
-            Thread.sleep(1000)
-            
+            semaphore.acquire()
+            if (tunnelRunning) {
+                Log.d(TAG, "Tunnel already running")
+                return
+            }
+
+            Log.d(TAG, "Starting Psiphon tunnel for region: $region")
+            currentRegion = region
+            isServiceRunning = true
+
+            try {
+                showNotification("Connecting...")
+            } catch (t: Throwable) {
+                Log.e(TAG, "showNotification failed: ${t.message}", t)
+            }
+
+            // Setup VPN interface
+            val builder = Builder()
+                .setSession("4win VPN - Psiphon")
+                .setMtu(VPN_MTU)
+                .addAddress(PRIVATE_VLAN4, 32)
+                .addRoute("0.0.0.0", 0)
+                .addDnsServer("8.8.8.8")
+                .addDnsServer("1.1.1.1")
+
+            // Add IPv6 if available
+            try {
+                builder.addAddress("fc00::1", 128)
+                builder.addRoute("::", 0)
+            } catch (_: Throwable) {}
+
+            // Split tunnel configuration
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (_: Throwable) {}
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setMetered(false)
+            }
+
+            val tun = builder.establish()
+            vpnInterface = tun
+            if (tun == null) {
+                Log.e(TAG, "Failed to establish VPN interface")
+                stopPsiphon()
+                return
+            }
+
+            val tunFd = tun.fd
+            Log.d(TAG, "VPN interface established, TUN FD: $tunFd")
+
+            // Initialize Psiphon tunnel
+            initializePsiphonTunnel(region, tunFd)
+
+            tunnelRunning = true
+            isTunnelConnected = true
+            totalUplink = 0L
+            totalDownlink = 0L
+
+            showNotification("Connected to $region")
+            Log.d(TAG, "Psiphon tunnel started successfully")
+
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to start Psiphon: ${t.message}", t)
+            tunnelRunning = false
+            isTunnelConnected = false
+            isServiceRunning = false
+            showNotification("Connection failed: ${t.message}")
+            stopPsiphon()
+        } finally {
+            semaphore.release()
+        }
+    }
+
+    private fun stopPsiphon() {
+        try {
+            semaphore.acquire()
+            Log.d(TAG, "Stopping Psiphon tunnel")
+
+            tunnelRunning = false
+            isTunnelConnected = false
+            isServiceRunning = false
+
+            try {
+                psiphonTunnel?.stop()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping Psiphon tunnel: ${e.message}")
+            }
+            psiphonTunnel = null
+
+            vpnInterface?.close()
+            vpnInterface = null
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+
+            Log.d(TAG, "Psiphon tunnel stopped")
+            stopSelf()
+
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize Psiphon tunnel", e)
+            Log.e(TAG, "Error stopping Psiphon: ${e.message}")
+        } finally {
+            semaphore.release()
+        }
+    }
+
+    private fun initializePsiphonTunnel(region: String, tunFd: Int) {
+        try {
+            Log.d(TAG, "Initializing Psiphon tunnel")
+
+            // Create Psiphon tunnel instance
+            val tunnel = PsiphonTunnel(applicationContext)
+            psiphonTunnel = tunnel
+
+            // Configure Psiphon
+            val config = PsiphonConfig()
+            config.setPsiphonServerAddress("")
+            config.setEgressRegion(region)
+            config.setVpnInterfaceFileDescriptor(tunFd)
+            config.setUpstreamProxyUrl("")
+            config.setLocalHttpProxyPort(8080)
+            config.setLocalSocksProxyPort(1080)
+
+            // Set handlers for tunnel events
+            tunnel.setTunnelStateListener(object : PsiphonTunnel.TunnelStateListener {
+                override fun onConnecting() {
+                    Log.d(TAG, "Psiphon tunnel connecting...")
+                    showNotification("Connecting to Psiphon...")
+                }
+
+                override fun onConnected() {
+                    Log.d(TAG, "Psiphon tunnel connected")
+                    isTunnelConnected = true
+                    showNotification("Connected to $region")
+                }
+
+                override fun onDisconnecting() {
+                    Log.d(TAG, "Psiphon tunnel disconnecting...")
+                }
+
+                override fun onDisconnected() {
+                    Log.d(TAG, "Psiphon tunnel disconnected")
+                    isTunnelConnected = false
+                    if (tunnelRunning) {
+                        // Reconnect if still supposed to be running
+                        showNotification("Reconnecting...")
+                    }
+                }
+            })
+
+            tunnel.setTunnelEventListener(object : PsiphonTunnel.TunnelEventListener {
+                override fun onBytesTransferred(upstreamBytes: Long, downstreamBytes: Long) {
+                    totalUplink += upstreamBytes
+                    totalDownlink += downstreamBytes
+                }
+
+                override fun onAvailableEgressRegions(regions: MutableList<String>?) {
+                    Log.d(TAG, "Available regions: $regions")
+                }
+
+                override fun onSplitTunnelRegion(region: String?) {
+                    Log.d(TAG, "Split tunnel region: $region")
+                }
+            })
+
+            // Start tunnel
+            tunnel.start(config.toJsonString())
+            Log.d(TAG, "Psiphon tunnel started")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize Psiphon tunnel: ${e.message}", e)
             throw e
         }
     }
 
-    private fun cleanupPsiphonTunnel() {
+    private fun showNotification(status: String) {
         try {
-            Log.d(TAG, "Cleaning up Psiphon tunnel")
-            // TODO: Implement Psiphon tunnel cleanup
-            // PsiphonTunnel.stop()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error during tunnel cleanup", e)
-        }
-    }
+            val notificationIntent = packageManager.getLaunchIntentForPackage(packageName)
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE
+            )
 
-    private fun setupVpnInterface() {
-        try {
-            Log.d(TAG, "Setting up VPN interface")
-            
-            val builder = Builder()
-            builder.setSession("Psiphon VPN")
-            builder.addAddress("10.8.0.1", 32)
-            builder.addRoute("0.0.0.0", 0)
-            builder.addDnsServer("1.1.1.1")
-            builder.setMtu(1500)
-            
-            // Note: This is a simplified setup. Full implementation would
-            // require proper traffic routing configuration.
-            
+            val disconnectIntent = Intent(this, PsiphonVpnService::class.java).apply {
+                action = ACTION_DISCONNECT
+            }
+            val disconnectPendingIntent = PendingIntent.getService(
+                this, 0, disconnectIntent, PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("🔐 Psiphon VPN")
+                .setContentText(status)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentIntent(pendingIntent)
+                .addAction(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Disconnect",
+                    disconnectPendingIntent
+                )
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(tunnelRunning)
+                .build()
+
+            if (tunnelRunning) {
+                startForeground(NOTIFICATION_ID, notification)
+            } else {
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.notify(NOTIFICATION_ID, notification)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error setting up VPN interface", e)
+            Log.e(TAG, "Error showing notification: ${e.message}")
         }
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                "Psiphon VPN",
+                CHANNEL_ID,
+                "Psiphon VPN Service",
                 NotificationManager.IMPORTANCE_LOW
-            )
-            channel.description = "Psiphon VPN Connection Status"
-            notificationManager.createNotificationChannel(channel)
+            ).apply {
+                description = "Psiphon VPN tunnel status"
+                setShowBadge(false)
+            }
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
     }
 
-    private fun updateNotification(status: String) {
-        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
-                .setContentTitle("Psiphon VPN")
-                .setContentText(status)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setOngoing(isRunning)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-                .setContentTitle("Psiphon VPN")
-                .setContentText(status)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setOngoing(isRunning)
-                .build()
-        }
-        
-        if (isRunning) {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-    }
-
-    override fun onBind(intent: Intent?): IBinder? {
-        return null
+    override fun onRevoke() {
+        Log.d(TAG, "VPN permission revoked")
+        stopPsiphon()
+        super.onRevoke()
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         Log.d(TAG, "PsiphonVpnService destroyed")
-        if (isRunning) {
-            stopPsiphonTunnel()
-        }
+        stopPsiphon()
+        super.onDestroy()
+    }
+}
+
+/**
+ * Helper class for Psiphon configuration
+ */
+private class PsiphonConfig {
+    private val config = mutableMapOf<String, Any?>()
+
+    fun setPsiphonServerAddress(address: String) {
+        config["PsiphonServerAddress"] = address
+    }
+
+    fun setEgressRegion(region: String) {
+        config["EgressRegion"] = region
+    }
+
+    fun setVpnInterfaceFileDescriptor(fd: Int) {
+        config["VpnInterfaceFileDescriptor"] = fd
+    }
+
+    fun setUpstreamProxyUrl(url: String) {
+        config["UpstreamProxyUrl"] = url
+    }
+
+    fun setLocalHttpProxyPort(port: Int) {
+        config["LocalHttpProxyPort"] = port
+    }
+
+    fun setLocalSocksProxyPort(port: Int) {
+        config["LocalSocksProxyPort"] = port
+    }
+
+    fun toJsonString(): String {
+        return org.json.JSONObject(config).toString()
     }
 }
