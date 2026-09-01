@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -30,6 +32,14 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      - name: Verify Android app resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f android/app/src/main/res/values/strings.xml
+          grep -q 'name="app_name"' android/app/src/main/res/values/strings.xml
+          echo "app_name resource is present"
 
       - name: Prepare Psiphon AAR without duplicate gomobile runtime
         shell: bash
@@ -50,10 +60,6 @@ jobs:
           with ZipFile(src, 'r') as aar:
               entries = {info.filename: aar.read(info.filename) for info in aar.infolist()}
 
-          # Both Xray and Psiphon are gomobile AARs. They both ship the
-          # generated go.* Java runtime and a libgojni.so. Keep Xray's shared
-          # Java runtime, but keep Psiphon's own native core under a unique
-          # library name so both native cores can be loaded.
           classes = entries['classes.jar']
           with ZipFile(BytesIO(classes), 'r') as jar:
               jar_entries = {info.filename: jar.read(info.filename) for info in jar.infolist()}
