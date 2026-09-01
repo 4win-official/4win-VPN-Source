@@ -54,6 +54,7 @@ class PsiphonBridgePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(true)
             }
             "isRunning" -> result.success(com.forwin.vpn.PsiphonVpnService.isRunning())
+            "isConnected" -> result.success(com.forwin.vpn.PsiphonVpnService.isConnected())
             else -> result.notImplemented()
         }
     }
