@@ -11,6 +11,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import ca.psiphon.PsiphonTunnel
+import org.json.JSONObject
 import java.util.concurrent.Semaphore
 
 class PsiphonVpnService : VpnService() {
@@ -32,6 +33,8 @@ class PsiphonVpnService : VpnService() {
         private const val VPN_MTU = 1500
         private const val PRIVATE_VLAN4 = "10.8.0.1"
         private const val PSIPHON_NATIVE_LIBRARY = "psiphon-gojni"
+        private const val PSIPHON_SOCKS_PORT = 1080
+        private const val PSIPHON_HTTP_PORT = 8080
 
         @Volatile private var isServiceRunning = false
         @Volatile private var isTunnelConnected = false
@@ -56,9 +59,8 @@ class PsiphonVpnService : VpnService() {
             System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
             Log.d(TAG, "Loaded isolated Psiphon native runtime")
         } catch (e: UnsatisfiedLinkError) {
-            // Local development may still use the unmodified Maven AAR.
-            Log.w(TAG, "Isolated Psiphon runtime unavailable; using bundled gomobile runtime", e)
-            System.loadLibrary("gojni")
+            Log.e(TAG, "Unable to load isolated Psiphon native runtime", e)
+            throw e
         }
     }
 
@@ -75,7 +77,7 @@ class PsiphonVpnService : VpnService() {
                 stopPsiphon()
                 Thread.sleep(500)
                 val region = intent.getStringExtra(EXTRA_EGRESS_REGION) ?: ""
-                startPsiphon(region)
+                Thread { startPsiphon(region) }.start()
             }.start()
         }
         return START_STICKY
@@ -112,26 +114,25 @@ class PsiphonVpnService : VpnService() {
             vpnInterface = tun
             if (tun == null) {
                 Log.e(TAG, "Failed to establish VPN interface")
-                stopPsiphon()
-                return
+                throw IllegalStateException("Failed to establish VPN interface")
             }
 
             val tunFd = tun.fd
             Log.d(TAG, "VPN interface established, TUN FD: $tunFd")
             initializePsiphonTunnel(region, tunFd)
             tunnelRunning = true
-            isTunnelConnected = true
+            isTunnelConnected = false
             totalUplink = 0L
             totalDownlink = 0L
-            showNotification("Connected to $region")
+            showNotification("Connecting to Psiphon...")
             Log.d(TAG, "Psiphon tunnel started successfully")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to start Psiphon: ${t.message}", t)
             tunnelRunning = false
             isTunnelConnected = false
             isServiceRunning = false
-            showNotification("Connection failed: ${t.message}")
-            stopPsiphon()
+            try { showNotification("Connection failed: ${t.message}") } catch (_: Throwable) {}
+            cleanupTunnelAfterFailure()
         } finally {
             semaphore.release()
         }
@@ -162,34 +163,98 @@ class PsiphonVpnService : VpnService() {
         }
     }
 
+    private fun cleanupTunnelAfterFailure() {
+        try { psiphonTunnel?.stop() } catch (_: Throwable) {}
+        psiphonTunnel = null
+        try { vpnInterface?.close() } catch (_: Throwable) {}
+        vpnInterface = null
+    }
+
     private fun initializePsiphonTunnel(region: String, tunFd: Int) {
         try {
-            Log.d(TAG, "Initializing Psiphon tunnel")
-            val tunnel = PsiphonTunnel(applicationContext)
+            Log.d(TAG, "Initializing Psiphon tunnel with HostService API")
+
+            val hostService = object : PsiphonTunnel.HostService {
+                override fun getContext(): Context = applicationContext
+
+                override fun getPsiphonConfig(): String {
+                    return JSONObject()
+                        .put("EgressRegion", region)
+                        .put("LocalSocksProxyPort", PSIPHON_SOCKS_PORT)
+                        .put("LocalHttpProxyPort", PSIPHON_HTTP_PORT)
+                        .put("EmitBytesTransferred", true)
+                        .put("EstablishTunnelTimeoutSeconds", 0)
+                        .toString()
+                }
+
+                override fun loadLibrary(library: String) {
+                    // The CI pipeline renames Psiphon's gomobile runtime from
+                    // libgojni.so to libpsiphon-gojni.so so it can coexist with Xray.
+                    if (library == "gojni") {
+                        System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
+                    } else {
+                        System.loadLibrary(library)
+                    }
+                }
+
+                override fun bindToDevice(fileDescriptor: Long) {
+                    if (!protect(fileDescriptor.toInt())) {
+                        throw IllegalStateException("VpnService.protect failed for fd=$fileDescriptor")
+                    }
+                }
+
+                override fun onConnecting() {
+                    Log.d(TAG, "Psiphon tunnel connecting...")
+                    showNotification("Connecting to Psiphon...")
+                }
+
+                override fun onConnected() {
+                    Log.d(TAG, "Psiphon tunnel connected")
+                    isTunnelConnected = true
+                    showNotification("Connected to ${if (region.isBlank()) "Psiphon" else region}")
+                }
+
+                override fun onBytesTransferred(sent: Long, received: Long) {
+                    totalUplink += sent
+                    totalDownlink += received
+                }
+
+                override fun onAvailableEgressRegions(regions: MutableList<String>?) {
+                    Log.d(TAG, "Available regions: $regions")
+                }
+
+                override fun onSplitTunnelRegions(regions: MutableList<String>?) {
+                    Log.d(TAG, "Split tunnel regions: $regions")
+                }
+
+                override fun onUpstreamProxyError(message: String?) {
+                    Log.e(TAG, "Psiphon upstream proxy error: $message")
+                }
+
+                override fun onStartedWaitingForNetworkConnectivity() {
+                    Log.d(TAG, "Psiphon waiting for network connectivity")
+                }
+
+                override fun onStoppedWaitingForNetworkConnectivity() {
+                    Log.d(TAG, "Psiphon network connectivity restored")
+                }
+
+                override fun onDiagnosticMessage(message: String?) {
+                    Log.d(TAG, "Psiphon: $message")
+                }
+            }
+
+            val tunnel = PsiphonTunnel.newPsiphonTunnel(hostService)
+            tunnel.setVpnMode(true)
             psiphonTunnel = tunnel
-            val config = PsiphonConfig()
-            config.setPsiphonServerAddress("")
-            config.setEgressRegion(region)
-            config.setVpnInterfaceFileDescriptor(tunFd)
-            config.setUpstreamProxyUrl("")
-            config.setLocalHttpProxyPort(8080)
-            config.setLocalSocksProxyPort(1080)
 
-            tunnel.setTunnelStateListener(object : PsiphonTunnel.TunnelStateListener {
-                override fun onConnecting() { Log.d(TAG, "Psiphon tunnel connecting..."); showNotification("Connecting to Psiphon...") }
-                override fun onConnected() { Log.d(TAG, "Psiphon tunnel connected"); isTunnelConnected = true; showNotification("Connected to $region") }
-                override fun onDisconnecting() { Log.d(TAG, "Psiphon tunnel disconnecting...") }
-                override fun onDisconnected() { Log.d(TAG, "Psiphon tunnel disconnected"); isTunnelConnected = false; if (tunnelRunning) showNotification("Reconnecting...") }
-            })
-
-            tunnel.setTunnelEventListener(object : PsiphonTunnel.TunnelEventListener {
-                override fun onBytesTransferred(upstreamBytes: Long, downstreamBytes: Long) { totalUplink += upstreamBytes; totalDownlink += downstreamBytes }
-                override fun onAvailableEgressRegions(regions: MutableList<String>?) { Log.d(TAG, "Available regions: $regions") }
-                override fun onSplitTunnelRegion(region: String?) { Log.d(TAG, "Split tunnel region: $region") }
-            })
-
-            tunnel.start(config.toJsonString())
-            Log.d(TAG, "Psiphon tunnel started")
+            // The Psiphon Android library uses its HostService to obtain the
+            // configuration and to bind tunnel-core sockets. The VPN TUN fd
+            // is intentionally not placed in the Psiphon JSON config.
+            // tunnel-core receives the device binder through HostService.
+            Log.d(TAG, "Starting Psiphon tunnel-core")
+            tunnel.startTunneling("")
+            Log.d(TAG, "Psiphon tunnel-core start requested")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize Psiphon tunnel: ${e.message}", e)
             throw e
@@ -228,15 +293,4 @@ class PsiphonVpnService : VpnService() {
 
     override fun onRevoke() { Log.d(TAG, "VPN permission revoked"); stopPsiphon(); super.onRevoke() }
     override fun onDestroy() { Log.d(TAG, "PsiphonVpnService destroyed"); stopPsiphon(); super.onDestroy() }
-}
-
-private class PsiphonConfig {
-    private val config = mutableMapOf<String, Any?>()
-    fun setPsiphonServerAddress(address: String) { config["PsiphonServerAddress"] = address }
-    fun setEgressRegion(region: String) { config["EgressRegion"] = region }
-    fun setVpnInterfaceFileDescriptor(fd: Int) { config["VpnInterfaceFileDescriptor"] = fd }
-    fun setUpstreamProxyUrl(url: String) { config["UpstreamProxyUrl"] = url }
-    fun setLocalHttpProxyPort(port: Int) { config["LocalHttpProxyPort"] = port }
-    fun setLocalSocksProxyPort(port: Int) { config["LocalSocksProxyPort"] = port }
-    fun toJsonString(): String = org.json.JSONObject(config).toString()
 }
