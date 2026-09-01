@@ -31,6 +31,59 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Prepare Psiphon AAR without duplicate gomobile runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/app/libs
+          curl -fsSL \
+            "https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/v2.0.40/ca/psiphon/psiphontunnel/2.0.40/psiphontunnel-2.0.40.aar" \
+            -o /tmp/psiphontunnel.aar
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          from io import BytesIO
+
+          src = Path('/tmp/psiphontunnel.aar')
+          dst = Path('android/app/libs/psiphontunnel-2.0.40-stripped.aar')
+
+          with ZipFile(src, 'r') as aar:
+              entries = {info.filename: aar.read(info.filename) for info in aar.infolist()}
+
+          # Both Xray and Psiphon are gomobile AARs. They both ship the
+          # generated go.* Java runtime and a libgojni.so. Keep Xray's shared
+          # Java runtime, but keep Psiphon's own native core under a unique
+          # library name so both native cores can be loaded.
+          classes = entries['classes.jar']
+          with ZipFile(BytesIO(classes), 'r') as jar:
+              jar_entries = {info.filename: jar.read(info.filename) for info in jar.infolist()}
+
+          stripped_classes = BytesIO()
+          with ZipFile(stripped_classes, 'w', ZIP_DEFLATED) as jar:
+              for name, data in jar_entries.items():
+                  if name.startswith('go/'):
+                      continue
+                  jar.writestr(name, data)
+          entries['classes.jar'] = stripped_classes.getvalue()
+
+          native_names = []
+          for name in list(entries):
+              if name.startswith('jni/') and name.endswith('/libgojni.so'):
+                  new_name = name[:-len('libgojni.so')] + 'libpsiphon-gojni.so'
+                  entries[new_name] = entries.pop(name)
+                  native_names.append(new_name)
+
+          if len(native_names) != 4:
+              raise SystemExit(f'Expected 4 Psiphon native libraries, found {len(native_names)}: {native_names}')
+
+          with ZipFile(dst, 'w', ZIP_DEFLATED) as aar:
+              for name, data in entries.items():
+                  aar.writestr(name, data)
+
+          print(f'Prepared {dst}')
+          print('Native libraries:', ', '.join(native_names))
+          PY
+
       - name: Flutter version
         run: flutter --version
 
