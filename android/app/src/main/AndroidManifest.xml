@@ -43,6 +43,14 @@
             </intent-filter>
         </service>
 
+        <!-- Initialize the shared gomobile Java runtime in the Psiphon process. -->
+        <provider
+            android:name="com.forwin.vpn.GomobileRuntimeInitializer"
+            android:authorities="com.forwin.vpn.gomobile-runtime"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":psiphon" />
+
         <!--
             Xray tun2socks bridge for Psiphon runs in a separate process so the
             Psiphon and Xray gomobile Go runtimes never share one process.
