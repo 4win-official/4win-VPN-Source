@@ -3,6 +3,7 @@ package com.forwin.vpn
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -37,12 +38,20 @@ class PsiphonTunBridgeService : Service() {
         private const val CHANNEL_ID = "PsiphonBridgeChannel"
         private const val NOTIFICATION_ID = 4
 
-        fun start(context: android.content.Context, intent: Intent) {
+        fun start(context: Context, intent: Intent) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
             }
+        }
+
+        fun stop(context: Context) {
+            context.startService(
+                Intent(context, PsiphonTunBridgeService::class.java).apply {
+                    action = ACTION_STOP
+                }
+            )
         }
     }
 
