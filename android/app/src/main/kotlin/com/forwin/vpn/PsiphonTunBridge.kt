@@ -11,8 +11,7 @@ import org.json.JSONObject
 /**
  * Bridges Android's VpnService TUN fd to Psiphon's localhost SOCKS5 listener.
  * Psiphon Tunnel Core is a proxy core; setVpnMode(true) does not itself consume
- * an Android TUN fd. Xray's tun2socks implementation is already bundled in this
- * app, so we reuse it as the packet-to-SOCKS bridge.
+ * an Android TUN fd. Xray's TUN inbound is used as the packet-to-SOCKS bridge.
  */
 object PsiphonTunBridge {
     private const val TAG = "PsiphonTunBridge"
@@ -74,6 +73,20 @@ object PsiphonTunBridge {
             .put("settings", JSONObject())
             .put("tag", "direct")
 
+        // Xray's Android TUN integration requires an explicit tun inbound.
+        // startLoop() supplies the Android VpnService fd through xray.tun.fd.
+        val tunInbound = JSONObject()
+            .put("tag", "tun")
+            .put("port", 0)
+            .put("protocol", "tun")
+            .put("settings", JSONObject()
+                .put("name", "xray0")
+                .put("MTU", MTU)
+                .put("userLevel", 8))
+            .put("sniffing", JSONObject()
+                .put("enabled", true)
+                .put("destOverride", JSONArray().put("http").put("tls").put("quic")))
+
         val routingRule = JSONObject()
             .put("type", "field")
             .put("network", "tcp,udp")
@@ -81,7 +94,7 @@ object PsiphonTunBridge {
 
         return JSONObject()
             .put("log", JSONObject().put("loglevel", "none"))
-            .put("inbounds", JSONArray())
+            .put("inbounds", JSONArray().put(tunInbound))
             .put("outbounds", JSONArray().put(proxy).put(direct))
             .put("routing", JSONObject()
                 .put("domainStrategy", "AsIs")
