@@ -11,6 +11,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import ca.psiphon.PsiphonTunnel
+import go.Seq
 import org.json.JSONObject
 import java.util.concurrent.Semaphore
 
@@ -49,14 +50,14 @@ class PsiphonVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        // Keep the native-load failure inside the VPN service process. The
-        // bridge is deliberately in a different process because both Psiphon
-        // and Xray contain independent gomobile Go runtimes.
         try {
+            // gomobile's Seq context must be initialized in the same Android
+            // process that owns Psiphon's Go runtime, before newPsiphonTunnel().
+            Seq.setContext(applicationContext)
             System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
-            Log.d(TAG, "Psiphon native runtime loaded")
+            Log.d(TAG, "Psiphon native runtime loaded and gomobile context initialized")
         } catch (t: Throwable) {
-            Log.e(TAG, "Psiphon native runtime load failed", t)
+            Log.e(TAG, "Psiphon native runtime initialization failed", t)
         }
     }
 
@@ -99,15 +100,11 @@ class PsiphonVpnService : VpnService() {
                 .addDnsServer("8.8.8.8")
                 .addDnsServer("1.1.1.1")
 
-            // Keep IPv4 as the guaranteed path. IPv6 is only added when the
-            // platform accepts it; this prevents a half-configured IPv6 route.
             try {
                 builder.addAddress("fc00::1", 128)
                 builder.addRoute("::", 0)
             } catch (_: Throwable) {}
 
-            // Psiphon itself must stay on the physical network so its tunnel
-            // control connections cannot loop back into the TUN.
             try { builder.addDisallowedApplication(packageName) } catch (_: Throwable) {}
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
 
@@ -143,9 +140,6 @@ class PsiphonVpnService : VpnService() {
             tunnelRunning = false
             isTunnelConnected = false
             isServiceRunning = false
-
-            // Stop the isolated Xray bridge first. It owns a duplicated copy of
-            // the TUN fd, so it must be gone before the VPN fd is closed here.
             stopBridgeProcess()
             try { psiphonTunnel?.stop() } catch (t: Throwable) { Log.w(TAG, "Psiphon stop: ${t.message}") }
             psiphonTunnel = null
@@ -169,7 +163,6 @@ class PsiphonVpnService : VpnService() {
     private fun initializePsiphonTunnel(region: String) {
         val hostService = object : PsiphonTunnel.HostService {
             override fun getContext(): Context = applicationContext
-
             override fun getPsiphonConfig(): String = JSONObject()
                 .put("EgressRegion", region)
                 .put("LocalSocksProxyPort", PSIPHON_SOCKS_PORT)
@@ -177,23 +170,17 @@ class PsiphonVpnService : VpnService() {
                 .put("EmitBytesTransferred", true)
                 .put("EstablishTunnelTimeoutSeconds", 0)
                 .toString()
-
             override fun loadLibrary(library: String) {
                 if (library == "gojni") System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
                 else System.loadLibrary(library)
             }
-
             override fun bindToDevice(fileDescriptor: Long) {
-                if (!protect(fileDescriptor.toInt())) {
-                    throw IllegalStateException("VpnService.protect failed for fd=$fileDescriptor")
-                }
+                if (!protect(fileDescriptor.toInt())) throw IllegalStateException("VpnService.protect failed for fd=$fileDescriptor")
             }
-
             override fun onConnecting() {
                 Log.d(TAG, "Psiphon tunnel connecting")
                 showNotification("Connecting to Psiphon...", true)
             }
-
             override fun onConnected() {
                 Log.d(TAG, "Psiphon tunnel connected")
                 isTunnelConnected = true
@@ -202,49 +189,21 @@ class PsiphonVpnService : VpnService() {
                 else Log.w(TAG, "Psiphon connected before SOCKS port notification")
                 showNotification("Connected to ${if (region.isBlank()) "Psiphon" else region}", true)
             }
-
             override fun onListeningSocksProxyPort(port: Int) {
                 psiphonSocksPort = port
                 Log.d(TAG, "Psiphon SOCKS5 listening on 127.0.0.1:$port")
                 startTunBridge(port)
             }
-
-            override fun onListeningHttpProxyPort(port: Int) {
-                Log.d(TAG, "Psiphon HTTP proxy listening on $port")
-            }
-
-            override fun onBytesTransferred(sent: Long, received: Long) {
-                totalUplink += sent
-                totalDownlink += received
-            }
-
-            override fun onAvailableEgressRegions(regions: MutableList<String>?) {
-                Log.d(TAG, "Psiphon regions: $regions")
-            }
-
-            override fun onSplitTunnelRegions(regions: MutableList<String>?) {
-                Log.d(TAG, "Psiphon split regions: $regions")
-            }
-
-            override fun onUpstreamProxyError(message: String?) {
-                Log.e(TAG, "Psiphon upstream proxy error: $message")
-            }
-
-            override fun onStartedWaitingForNetworkConnectivity() {
-                Log.d(TAG, "Psiphon waiting for network")
-            }
-
-            override fun onStoppedWaitingForNetworkConnectivity() {
-                Log.d(TAG, "Psiphon network restored")
-            }
-
-            override fun onDiagnosticMessage(message: String?) {
-                Log.d(TAG, "Psiphon: $message")
-            }
+            override fun onListeningHttpProxyPort(port: Int) { Log.d(TAG, "Psiphon HTTP proxy listening on $port") }
+            override fun onBytesTransferred(sent: Long, received: Long) { totalUplink += sent; totalDownlink += received }
+            override fun onAvailableEgressRegions(regions: MutableList<String>?) { Log.d(TAG, "Psiphon regions: $regions") }
+            override fun onSplitTunnelRegions(regions: MutableList<String>?) { Log.d(TAG, "Psiphon split regions: $regions") }
+            override fun onUpstreamProxyError(message: String?) { Log.e(TAG, "Psiphon upstream proxy error: $message") }
+            override fun onStartedWaitingForNetworkConnectivity() { Log.d(TAG, "Psiphon waiting for network") }
+            override fun onStoppedWaitingForNetworkConnectivity() { Log.d(TAG, "Psiphon network restored") }
+            override fun onDiagnosticMessage(message: String?) { Log.d(TAG, "Psiphon: $message") }
         }
 
-        // PsiphonTunnel is a singleton over the underlying psi.Psi state, so
-        // always create exactly one instance and never create it from callbacks.
         val tunnel = PsiphonTunnel.newPsiphonTunnel(hostService)
         tunnel.setVpnMode(true)
         psiphonTunnel = tunnel
@@ -252,24 +211,12 @@ class PsiphonVpnService : VpnService() {
     }
 
     private fun startTunBridge(port: Int) {
-        val tun = vpnInterface ?: run {
-            Log.e(TAG, "Cannot start Psiphon bridge: TUN is closed")
-            return
-        }
-        if (port !in 1..65535) {
-            Log.e(TAG, "Cannot start Psiphon bridge: invalid SOCKS port $port")
-            return
-        }
+        val tun = vpnInterface ?: run { Log.e(TAG, "Cannot start Psiphon bridge: TUN is closed"); return }
+        if (port !in 1..65535) { Log.e(TAG, "Cannot start Psiphon bridge: invalid SOCKS port $port"); return }
         try {
-            // Transfer a duplicated ParcelFileDescriptor into the isolated
-            // bridge process. Psiphon and Xray native runtimes never coexist in
-            // this process anymore.
             val bridgeIntent = Intent(this, PsiphonTunBridgeService::class.java).apply {
                 action = PsiphonTunBridgeService.ACTION_START
-                putExtra(
-                    PsiphonTunBridgeService.EXTRA_TUN_FD,
-                    ParcelFileDescriptor.dup(tun.fileDescriptor)
-                )
+                putExtra(PsiphonTunBridgeService.EXTRA_TUN_FD, ParcelFileDescriptor.dup(tun.fileDescriptor))
                 putExtra(PsiphonTunBridgeService.EXTRA_SOCKS_PORT, port)
             }
             startService(bridgeIntent)
@@ -281,13 +228,8 @@ class PsiphonVpnService : VpnService() {
     }
 
     private fun stopBridgeProcess() {
-        try {
-            startService(Intent(this, PsiphonTunBridgeService::class.java).apply {
-                action = PsiphonTunBridgeService.ACTION_STOP
-            })
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to stop isolated bridge: ${t.message}")
-        }
+        try { startService(Intent(this, PsiphonTunBridgeService::class.java).apply { action = PsiphonTunBridgeService.ACTION_STOP }) }
+        catch (t: Throwable) { Log.w(TAG, "Failed to stop isolated bridge: ${t.message}") }
     }
 
     private fun showNotification(status: String, foreground: Boolean) {
@@ -305,9 +247,7 @@ class PsiphonVpnService : VpnService() {
             .setOngoing(foreground)
             .build()
         if (foreground) startForeground(NOTIFICATION_ID, notification)
-        else getSystemService(Context.NOTIFICATION_SERVICE)?.let {
-            (it as NotificationManager).notify(NOTIFICATION_ID, notification)
-        }
+        else getSystemService(Context.NOTIFICATION_SERVICE)?.let { (it as NotificationManager).notify(NOTIFICATION_ID, notification) }
     }
 
     private fun createNotificationChannel() {
@@ -317,15 +257,5 @@ class PsiphonVpnService : VpnService() {
             channel.setShowBadge(false)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
-    }
-
-    override fun onRevoke() {
-        Thread { stopPsiphon() }.start()
-        super.onRevoke()
-    }
-
-    override fun onDestroy() {
-        stopPsiphon()
-        super.onDestroy()
     }
 }
