@@ -1,11 +1,14 @@
 package com.forwin.vpn
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -15,6 +18,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * the Flutter process can cause native runtime collisions. Keeping this Xray
  * bridge in :psiphonbridge isolates the two native runtimes while preserving
  * the Android VpnService TUN fd.
+ *
+ * This service is foreground as well: the bridge is part of the actual VPN
+ * data path and must not be treated as a disposable background service by
+ * Android while the Psiphon VpnService is active.
  */
 class PsiphonTunBridgeService : Service() {
     private var tunPfd: ParcelFileDescriptor? = null
@@ -27,11 +34,42 @@ class PsiphonTunBridgeService : Service() {
         const val EXTRA_TUN_FD = "tun_fd"
         const val EXTRA_SOCKS_PORT = "socks_port"
         private const val TAG = "PsiphonTunBridgeSvc"
+        private const val CHANNEL_ID = "PsiphonBridgeChannel"
+        private const val NOTIFICATION_ID = 4
+
+        fun start(context: android.content.Context, intent: Intent) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startBridge(intent)
+            ACTION_START -> {
+                try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        NotificationCompat.Builder(this, CHANNEL_ID)
+                            .setSmallIcon(android.R.drawable.ic_lock_lock)
+                            .setContentTitle("4win VPN")
+                            .setContentText("Psiphon traffic bridge active")
+                            .setPriority(NotificationCompat.PRIORITY_LOW)
+                            .setOngoing(true)
+                            .build()
+                    startBridge(intent)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Failed to start foreground bridge", t)
+                    stopSelf()
+                }
+            }
             ACTION_STOP -> stopBridge()
         }
         return START_NOT_STICKY
@@ -80,6 +118,7 @@ class PsiphonTunBridgeService : Service() {
         controllerStarted = false
         try { tunPfd?.close() } catch (_: Throwable) {}
         tunPfd = null
+        stopForegroundCompat()
         stopSelf()
     }
 
@@ -88,7 +127,29 @@ class PsiphonTunBridgeService : Service() {
         try { tunPfd?.close() } catch (_: Throwable) {}
         tunPfd = null
         controllerStarted = false
+        stopForegroundCompat()
         super.onDestroy()
+    }
+
+    private fun stopForegroundCompat() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Psiphon VPN bridge",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            channel.setShowBadge(false)
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
