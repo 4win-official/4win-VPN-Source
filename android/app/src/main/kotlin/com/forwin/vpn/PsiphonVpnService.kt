@@ -226,7 +226,7 @@ class PsiphonVpnService : VpnService() {
     }
 
     private fun stopBridgeProcess() {
-        try { PsiphonTunBridgeService.start(this, Intent(this, PsiphonTunBridgeService::class.java).apply { action = PsiphonTunBridgeService.ACTION_STOP }) }
+        try { PsiphonTunBridgeService.stop(this) }
         catch (t: Throwable) { Log.w(TAG, "Failed to stop isolated bridge: ${t.message}") }
     }
 
