@@ -51,8 +51,6 @@ class PsiphonVpnService : VpnService() {
         super.onCreate()
         createNotificationChannel()
         try {
-            // gomobile's Seq context must be initialized in the same Android
-            // process that owns Psiphon's Go runtime, before newPsiphonTunnel().
             Seq.setContext(applicationContext)
             System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
             Log.d(TAG, "Psiphon native runtime loaded and gomobile context initialized")
@@ -219,8 +217,8 @@ class PsiphonVpnService : VpnService() {
                 putExtra(PsiphonTunBridgeService.EXTRA_TUN_FD, ParcelFileDescriptor.dup(tun.fileDescriptor))
                 putExtra(PsiphonTunBridgeService.EXTRA_SOCKS_PORT, port)
             }
-            startService(bridgeIntent)
-            Log.d(TAG, "Requested isolated full-device bridge on SOCKS port $port")
+            PsiphonTunBridgeService.start(this, bridgeIntent)
+            Log.d(TAG, "Requested isolated foreground full-device bridge on SOCKS port $port")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to launch isolated Psiphon bridge", t)
             isTunnelConnected = false
@@ -228,7 +226,7 @@ class PsiphonVpnService : VpnService() {
     }
 
     private fun stopBridgeProcess() {
-        try { startService(Intent(this, PsiphonTunBridgeService::class.java).apply { action = PsiphonTunBridgeService.ACTION_STOP }) }
+        try { PsiphonTunBridgeService.start(this, Intent(this, PsiphonTunBridgeService::class.java).apply { action = PsiphonTunBridgeService.ACTION_STOP }) }
         catch (t: Throwable) { Log.w(TAG, "Failed to stop isolated bridge: ${t.message}") }
     }
 
