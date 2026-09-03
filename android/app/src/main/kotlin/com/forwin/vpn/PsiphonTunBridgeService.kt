@@ -73,6 +73,7 @@ class PsiphonTunBridgeService : Service() {
                             .setPriority(NotificationCompat.PRIORITY_LOW)
                             .setOngoing(true)
                             .build()
+                    )
                     startBridge(intent)
                 } catch (t: Throwable) {
                     Log.e(TAG, "Failed to start foreground bridge", t)
