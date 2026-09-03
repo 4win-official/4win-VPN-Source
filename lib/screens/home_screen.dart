@@ -583,7 +583,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                                 ? Icons.rocket_launch
                                                                 : vpnProvider.selectedProtocol == 'proxy'
                                                                     ? Icons.swap_horiz
-                                                                    : Icons.dns,
+                                                                    : vpnProvider.selectedProtocol == 'psiphon'
+                                                                        ? Icons.public
+                                                                        : Icons.dns,
                                                 color: vpnProvider.selectedProtocol == 'sstp'
                                                     ? Colors.green
                                                     : vpnProvider.selectedProtocol == 'openvpn'

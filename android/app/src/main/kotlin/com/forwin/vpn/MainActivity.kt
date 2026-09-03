@@ -24,6 +24,8 @@ import java.net.Socket
 
 class MainActivity: FlutterActivity() {
     private val DNS_CHANNEL = "com.forwin.vpn/dns"
+    private val PSIPHON_CHANNEL = "com.forwin.vpn/psiphon"
+    private val PSIPHON_REQUEST_CODE = 102
     private val XRAY_CHANNEL = "com.forwin.vpn/xray"
     private val IMPORT_CHANNEL = "com.forwin.vpn/import"
     private val OPENVPN_CHANNEL = "com.forwin.vpn/openvpn"
@@ -156,6 +158,33 @@ class MainActivity: FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Psiphon VPN channel. Keep permission approval and service startup in
+        // native code so the Dart provider cannot report a false connection.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PSIPHON_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "prepare" -> {
+                    val intent = VpnService.prepare(applicationContext)
+                    if (intent != null) {
+                        startActivityForResult(intent, PSIPHON_REQUEST_CODE)
+                        result.success(false)
+                    } else result.success(true)
+                }
+                "start" -> {
+                    val intent = Intent(this, PsiphonVpnService::class.java).apply {
+                        action = PsiphonVpnService.ACTION_CONNECT
+                        putExtra(PsiphonVpnService.EXTRA_EGRESS_REGION, call.argument<String>("egressRegion") ?: "")
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                    result.success(true)
+                }
+                "stop" -> { startService(Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_DISCONNECT)); result.success(true) }
+                "reconnect" -> { startService(Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_RECONNECT)); result.success(true) }
+                "isRunning" -> result.success(PsiphonVpnService.isRunning())
+                "isConnected" -> result.success(PsiphonVpnService.isConnected())
+                else -> result.notImplemented()
+            }
+        }
 
         // DNS Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DNS_CHANNEL).setMethodCallHandler { call, result ->
