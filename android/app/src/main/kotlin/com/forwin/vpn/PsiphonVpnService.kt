@@ -42,8 +42,13 @@ class PsiphonVpnService : VpnService() {
         @Volatile private var totalUplink = 0L
         @Volatile private var totalDownlink = 0L
 
+        @JvmStatic
         fun isRunning() = isServiceRunning
+
+        @JvmStatic
         fun isConnected() = isTunnelConnected
+
+        @JvmStatic
         fun queryTrafficStats() = longArrayOf(totalUplink, totalDownlink)
     }
 
