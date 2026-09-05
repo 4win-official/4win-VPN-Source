@@ -21,7 +21,7 @@ jobs:
           ref: main
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
@@ -40,12 +40,6 @@ jobs:
           test -f android/app/src/main/res/values/strings.xml
           grep -q 'name="app_name"' android/app/src/main/res/values/strings.xml
           echo "app_name resource is present"
-
-      - name: Flutter version
-        run: flutter --version
-
-      - name: Get dependencies
-        run: flutter pub get
 
       - name: Prepare Psiphon AAR without duplicate gomobile runtime
         shell: bash
@@ -96,13 +90,14 @@ jobs:
           print('Native libraries:', ', '.join(native_names))
           PY
 
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Get dependencies
+        run: flutter pub get
+
       - name: Build release APK
         run: flutter build apk --release
-
-      - name: Verify APK
-        run: |
-          test -f build/app/outputs/flutter-apk/app-release.apk
-          ls -lh build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
