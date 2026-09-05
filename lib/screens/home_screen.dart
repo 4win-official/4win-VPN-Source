@@ -596,9 +596,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                                 ? Colors.tealAccent.shade700
                                                                 : vpnProvider.selectedProtocol == 'proxy'
                                                                     ? Colors.tealAccent.shade700
-                                                                    : vpnProvider.selectedProtocol == 'psiphon'
-                                                                        ? Colors.deepPurple
-                                                                        : Colors.blue,
+                                                                    : Colors.blue,
                                                 size: 20,
                                               ),
                                               const SizedBox(width: 12),
