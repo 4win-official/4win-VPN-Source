@@ -47,54 +47,19 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      - name: Prepare Psiphon AAR without duplicate gomobile runtime
+      - name: Prepare stripped Psiphon AAR
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p android/app/libs
-          curl -fsSL \
-            "https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/v2.0.40/ca/psiphon/psiphontunnel/2.0.40/psiphontunnel-2.0.40.aar" \
-            -o /tmp/psiphontunnel.aar
-          python3 - <<'PY'
-          from pathlib import Path
-          from zipfile import ZipFile, ZIP_DEFLATED
-          from io import BytesIO
-
-          src = Path('/tmp/psiphontunnel.aar')
-          dst = Path('android/app/libs/psiphontunnel-2.0.40-stripped.aar')
-
-          with ZipFile(src, 'r') as aar:
-              entries = {info.filename: aar.read(info.filename) for info in aar.infolist()}
-
-          classes = entries['classes.jar']
-          with ZipFile(BytesIO(classes), 'r') as jar:
-              jar_entries = {info.filename: jar.read(info.filename) for info in jar.infolist()}
-
-          stripped_classes = BytesIO()
-          with ZipFile(stripped_classes, 'w', ZIP_DEFLATED) as jar:
-              for name, data in jar_entries.items():
-                  if name.startswith('go/'):
-                      continue
-                  jar.writestr(name, data)
-          entries['classes.jar'] = stripped_classes.getvalue()
-
-          native_names = []
-          for name in list(entries):
-              if name.startswith('jni/') and name.endswith('/libgojni.so'):
-                  new_name = name[:-len('libgojni.so')] + 'libpsiphon-gojni.so'
-                  entries[new_name] = entries.pop(name)
-                  native_names.append(new_name)
-
-          if len(native_names) != 4:
-              raise SystemExit(f'Expected 4 Psiphon native libraries, found {len(native_names)}: {native_names}')
-
-          with ZipFile(dst, 'w', ZIP_DEFLATED) as aar:
-              for name, data in entries.items():
-                  aar.writestr(name, data)
-
-          print(f'Prepared {dst}')
-          print('Native libraries:', ', '.join(native_names))
-          PY
+          aar=$(find "$HOME/.gradle/caches" -type f -iname "*psiphon*.aar" | head -n 1 || true)
+          if [ -z "$aar" ]; then echo "Psiphon AAR not found"; exit 0; fi
+          work=$(mktemp -d); unzip -q "$aar" -d "$work"
+          rm -rf "$work/jni"/\*/libgomobile.so "$work/jni"/\*/libgojni.so 2>/dev/null || true
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            if [ -f "$work/jni/$abi/libgojni.so" ]; then mv "$work/jni/$abi/libgojni.so" "$work/jni/$abi/libpsiphon-gojni.so"; fi
+          done
+          out="android/app/libs/psiphon-stripped.aar"; mkdir -p "$(dirname "$out")"
+          (cd "$work" && zip -qr "$OLDPWD/$out" .)
 
       - name: Build release APK
         run: flutter build apk --release
