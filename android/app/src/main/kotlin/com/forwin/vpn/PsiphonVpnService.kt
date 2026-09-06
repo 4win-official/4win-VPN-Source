@@ -3,8 +3,10 @@ package com.forwin.vpn
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -22,6 +24,13 @@ class PsiphonVpnService : VpnService() {
     private var currentRegion = ""
     private var psiphonSocksPort = 0
     private val lifecycleLock = Semaphore(1)
+    private var bridgeStatusReceiver: BroadcastReceiver? = null
+    // True once Psiphon's own tunnel-core reports onConnected(). The public
+    // isConnected() below additionally requires bridgeConfirmed, so "connected"
+    // means the device traffic is ACTUALLY being routed, not just that
+    // Psiphon's internal proxy is up.
+    @Volatile private var psiphonCoreConnected = false
+    @Volatile private var bridgeConfirmed = false
 
     companion object {
         const val ACTION_CONNECT = "com.forwin.vpn.PSIPHON_CONNECT"
@@ -38,6 +47,10 @@ class PsiphonVpnService : VpnService() {
         private const val PSIPHON_HTTP_PORT = 8080
 
         @Volatile private var isServiceRunning = false
+        // "Connected" as observed from OUTSIDE this service (polled by Flutter
+        // via reflection) means the device TUN bridge is confirmed active, NOT
+        // merely that Psiphon's own tunnel-core callback fired. See
+        // psiphonCoreConnected / bridgeConfirmed above.
         @Volatile private var isTunnelConnected = false
         @Volatile private var totalUplink = 0L
         @Volatile private var totalDownlink = 0L
@@ -50,6 +63,11 @@ class PsiphonVpnService : VpnService() {
         fun queryTrafficStats() = longArrayOf(totalUplink, totalDownlink)
     }
 
+    /** Recomputes the externally-visible isTunnelConnected flag. */
+    private fun updateConnectedState() {
+        isTunnelConnected = psiphonCoreConnected && bridgeConfirmed
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -60,6 +78,46 @@ class PsiphonVpnService : VpnService() {
         } catch (t: Throwable) {
             Log.e(TAG, "Psiphon native runtime initialization failed", t)
         }
+
+        // Listen for the :psiphonbridge process reporting whether the actual
+        // TUN -> SOCKS packet bridge succeeded or failed. Without this,
+        // "connected" would be decided purely by Psiphon's own onConnected()
+        // callback, independent of whether device traffic is really flowing.
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val success = intent?.getBooleanExtra(
+                    PsiphonTunBridgeService.EXTRA_BRIDGE_SUCCESS, false
+                ) ?: false
+                Log.d(TAG, "Bridge status report: success=$success")
+                bridgeConfirmed = success
+                updateConnectedState()
+                if (!success) {
+                    // Bridge failed to start: surface a clear failure state
+                    // instead of silently reporting "connected".
+                    showNotification("Psiphon bridge failed to start", true)
+                }
+            }
+        }
+        bridgeStatusReceiver = receiver
+        val filter = IntentFilter(PsiphonTunBridgeService.ACTION_BRIDGE_STATUS)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(receiver, filter)
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to register bridge status receiver", t)
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            bridgeStatusReceiver?.let { unregisterReceiver(it) }
+        } catch (_: Throwable) {}
+        bridgeStatusReceiver = null
+        super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -88,7 +146,9 @@ class PsiphonVpnService : VpnService() {
             if (tunnelRunning) return
 
             isServiceRunning = true
-            isTunnelConnected = false
+            psiphonCoreConnected = false
+            bridgeConfirmed = false
+            updateConnectedState()
             psiphonSocksPort = 0
             totalUplink = 0
             totalDownlink = 0
@@ -120,7 +180,9 @@ class PsiphonVpnService : VpnService() {
         } catch (t: Throwable) {
             Log.e(TAG, "Psiphon startup failed", t)
             tunnelRunning = false
-            isTunnelConnected = false
+            psiphonCoreConnected = false
+            bridgeConfirmed = false
+            updateConnectedState()
             isServiceRunning = false
             stopBridgeProcess()
             try { psiphonTunnel?.stop() } catch (_: Throwable) {}
@@ -139,7 +201,9 @@ class PsiphonVpnService : VpnService() {
             lifecycleLock.acquire()
             locked = true
             tunnelRunning = false
-            isTunnelConnected = false
+            psiphonCoreConnected = false
+            bridgeConfirmed = false
+            updateConnectedState()
             isServiceRunning = false
             stopBridgeProcess()
             try { psiphonTunnel?.stop() } catch (t: Throwable) { Log.w(TAG, "Psiphon stop: ${t.message}") }
@@ -184,7 +248,12 @@ class PsiphonVpnService : VpnService() {
             }
             override fun onConnected() {
                 Log.d(TAG, "Psiphon tunnel connected")
-                isTunnelConnected = true
+                // NOTE: this only means Psiphon's own local proxy is up. The
+                // externally-visible isConnected() stays false until the
+                // separate :psiphonbridge process confirms the device-wide
+                // TUN bridge (see updateConnectedState()/bridgeConfirmed).
+                psiphonCoreConnected = true
+                updateConnectedState()
                 val port = psiphonSocksPort
                 if (port > 0) startTunBridge(port)
                 else Log.w(TAG, "Psiphon connected before SOCKS port notification")
@@ -224,7 +293,8 @@ class PsiphonVpnService : VpnService() {
             Log.d(TAG, "Requested isolated foreground full-device bridge on SOCKS port $port")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to launch isolated Psiphon bridge", t)
-            isTunnelConnected = false
+            bridgeConfirmed = false
+            updateConnectedState()
         }
     }
 

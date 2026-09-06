@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Internet Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -16,6 +17,9 @@
     <!-- Notification Permissions (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Needed to install the downloaded update APK -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
@@ -25,26 +29,150 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.forwin.vpn"
+            android:allowTaskReparenting="true"
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- Psiphon VPN Service. Psiphon owns the Android TUN. -->
+        <!-- ===== Import trampoline ===================================== -->
+        <!-- All .ovpn/.open file VIEW & SEND intents from OTHER apps land here
+             (NOT on MainActivity) so we can relaunch the app in its OWN task and
+             never appear embedded inside the caller. This activity carries no
+             Flutter engine; it forwards the intent to MainActivity and finishes. -->
+        <activity
+            android:name=".ImportActivity"
+            android:exported="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:label="Import to 4win VPN">
+
+            <intent-filter android:label="Import to 4win VPN">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\..*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.ovpn" />
+                <data android:pathPattern=".*\\.open" />
+                <data android:pathPattern=".*\\..*\\.open" />
+                <data android:pathPattern=".*\\..*\\..*\\.open" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.open" />
+            </intent-filter>
+
+            <intent-filter android:label="Import to 4win VPN">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/x-openvpn-profile" />
+            </intent-filter>
+
+            <intent-filter android:label="Import to 4win VPN">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-openvpn-profile" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <!-- DNS VPN Service (Direct DNS protocol) -->
+        <service
+            android:name=".DnsVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="DNS VPN Service for secure browsing" />
+        </service>
+
+        <!-- Xray VPN Service (system tunnel mode) -->
+        <service
+            android:name=".XrayVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Xray VPN Service for secure proxy" />
+        </service>
+
+        <!-- Xray Proxy Service (plain foreground service — NOT a VpnService, so
+             proxy mode shows no VPN key icon). Runs a local 127.0.0.1:4444 proxy. -->
+        <service
+            android:name=".XrayProxyService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Xray local proxy service" />
+        </service>
+
+        <!-- Psiphon VPN Service. Psiphon owns the Android TUN.
+             foregroundServiceType is REQUIRED here: onStartCommand() calls
+             startForeground() immediately on ACTION_CONNECT, and Android 14+
+             (API 34) throws MissingForegroundServiceTypeException if a service
+             calls startForeground() without a matching manifest-declared type. -->
         <service
             android:name="com.forwin.vpn.PsiphonVpnService"
             android:enabled="true"
             android:exported="true"
-            android:permission="android.permission.BIND_VPN_SERVICE">
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="specialUse">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Psiphon VPN tunnel service" />
+        </service>
+
+        <!-- ===== OpenVPN core service override =====
+             The openvpn_flutter plugin declares de.blinkt.openvpn.core.OpenVPNService
+             with foregroundServiceType="systemExempted". On Android 14+ a
+             systemExempted FGS crashes the app (ForegroundServiceStartNotAllowed /
+             SecurityException) unless the app is on the exemption allow-list, which
+             we are NOT. We override it to "specialUse" — the same type our own VPN
+             services use — so the OpenVPN foreground service starts cleanly instead
+             of crashing on connect. -->
+        <service
+            android:name="de.blinkt.openvpn.core.OpenVPNService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            tools:replace="android:foregroundServiceType,android:permission,android:exported">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="OpenVPN tunnel for secure browsing" />
         </service>
 
         <!-- Initialize the shared gomobile Java runtime in the Psiphon process. -->
@@ -77,4 +205,16 @@
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
+
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
 </manifest>

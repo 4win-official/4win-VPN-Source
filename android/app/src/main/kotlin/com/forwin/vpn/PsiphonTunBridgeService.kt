@@ -34,6 +34,16 @@ class PsiphonTunBridgeService : Service() {
         const val ACTION_STOP = "com.forwin.vpn.PSIPHON_BRIDGE_STOP"
         const val EXTRA_TUN_FD = "tun_fd"
         const val EXTRA_SOCKS_PORT = "socks_port"
+
+        // Cross-process status broadcast: this service runs in :psiphonbridge,
+        // while PsiphonVpnService (the thing Flutter polls "isConnected" on)
+        // runs in the main process. Without this signal, PsiphonVpnService has
+        // no way to know whether the actual device-wide TUN bridge succeeded —
+        // it would report "connected" purely from Psiphon's own internal
+        // tunnel-core callback even if packet routing never started.
+        const val ACTION_BRIDGE_STATUS = "com.forwin.vpn.PSIPHON_BRIDGE_STATUS"
+        const val EXTRA_BRIDGE_SUCCESS = "bridge_success"
+
         private const val TAG = "PsiphonTunBridgeSvc"
         private const val CHANNEL_ID = "PsiphonBridgeChannel"
         private const val NOTIFICATION_ID = 4
@@ -52,6 +62,18 @@ class PsiphonTunBridgeService : Service() {
                     action = ACTION_STOP
                 }
             )
+        }
+    }
+
+    private fun reportBridgeStatus(success: Boolean) {
+        try {
+            val statusIntent = Intent(ACTION_BRIDGE_STATUS).apply {
+                setPackage(packageName)
+                putExtra(EXTRA_BRIDGE_SUCCESS, success)
+            }
+            sendBroadcast(statusIntent)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to report bridge status: ${t.message}")
         }
     }
 
@@ -94,6 +116,7 @@ class PsiphonTunBridgeService : Service() {
             intent.getParcelableExtra(EXTRA_TUN_FD)
         } ?: run {
             Log.e(TAG, "Missing TUN fd")
+            reportBridgeStatus(false)
             stopSelf()
             return
         }
@@ -101,6 +124,7 @@ class PsiphonTunBridgeService : Service() {
         if (port !in 1..65535) {
             Log.e(TAG, "Invalid SOCKS port: $port")
             try { pfd.close() } catch (_: Throwable) {}
+            reportBridgeStatus(false)
             stopSelf()
             return
         }
@@ -111,11 +135,13 @@ class PsiphonTunBridgeService : Service() {
             PsiphonTunBridge.start(applicationContext, pfd.fd, port)
             controllerStarted = true
             Log.d(TAG, "Bridge active: tunFd=${pfd.fd} -> 127.0.0.1:$port")
+            reportBridgeStatus(true)
         } catch (t: Throwable) {
             Log.e(TAG, "Bridge startup failed", t)
             controllerStarted = false
             try { pfd.close() } catch (_: Throwable) {}
             tunPfd = null
+            reportBridgeStatus(false)
             stopSelf()
         }
     }
