@@ -596,7 +596,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                                 ? Colors.tealAccent.shade700
                                                                 : vpnProvider.selectedProtocol == 'proxy'
                                                                     ? Colors.tealAccent.shade700
-                                                                    : Colors.blue,
+                                                                    : vpnProvider.selectedProtocol == 'psiphon'
+                                                                        ? Colors.deepPurple
+                                                                        : Colors.blue,
                                                 size: 20,
                                               ),
                                               const SizedBox(width: 12),
@@ -807,7 +809,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         provider.selectedProtocol == 'direct_dns' ||
                                         provider.selectedProtocol == 'xray' ||
                                         provider.selectedProtocol == 'proxy' ||
-                                        provider.selectedProtocol == 'openvpn'))
+                                        provider.selectedProtocol == 'openvpn' ||
+                                        provider.selectedProtocol == 'psiphon'))
                                   Padding(
                                     padding: const EdgeInsets.symmetric(horizontal: 32),
                                     child: Text(
@@ -1127,6 +1130,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ],
                       ],
                     );
+                  }
+
+                  // Psiphon: automatic server selection, no server list/next
+                  // button to show — Psiphon's tunnel core picks the server.
+                  if (provider.selectedProtocol == 'psiphon') {
+                    return const SizedBox.shrink();
                   }
 
                   // SSTP: Show "Next Server" only when connected

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/vpn_provider.dart';
-import 'providers/psiphon_vpn_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/loading_screen.dart';
 import 'screens/openvpn_configs_screen.dart';
@@ -73,7 +72,7 @@ class _MyAppState extends State<MyApp> {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider<VpnProvider>(
-          create: (_) => PsiphonVpnProvider(),
+          create: (_) => VpnProvider(),
         ),
       ],
       child: Consumer<ThemeProvider>(
