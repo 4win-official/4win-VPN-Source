@@ -45,6 +45,7 @@ void main() {
   group('ConnectionLogger', () {
     test('logs entries with level helpers', () {
       final logger = ConnectionLogger.detached();
+      addTearDown(logger.dispose);
       logger.info('psiphon', 'a');
       logger.success('psiphon', 'b');
       logger.warning('xray', 'c');
@@ -60,6 +61,7 @@ void main() {
 
     test('ring buffer caps at maxEntries, newest survive', () {
       final logger = ConnectionLogger.detached();
+      addTearDown(logger.dispose);
       for (var i = 0; i < ConnectionLogger.maxEntries + 50; i++) {
         logger.info('psiphon', 'line $i');
       }
@@ -71,6 +73,7 @@ void main() {
 
     test('long messages are truncated', () {
       final logger = ConnectionLogger.detached();
+      addTearDown(logger.dispose);
       logger.info('psiphon', 'x' * (ConnectionLogger.maxMessageLength + 100));
       expect(logger.entries.single.message.length,
           ConnectionLogger.maxMessageLength);
@@ -78,23 +81,26 @@ void main() {
 
     test('clear empties memory and persisted tail', () async {
       final logger = ConnectionLogger.detached();
+      addTearDown(logger.dispose);
       logger.info('psiphon', 'a');
       await logger.clear();
       expect(logger.entries, isEmpty);
 
       final fresh = ConnectionLogger.detached();
+      addTearDown(fresh.dispose);
       await fresh.loadPersisted();
       expect(fresh.entries, isEmpty);
     });
 
     test('persisted tail survives across instances', () async {
       final logger = ConnectionLogger.detached();
+      addTearDown(logger.dispose);
       logger.info('psiphon', 'before-restart-1');
       logger.error('xray', 'before-restart-2');
-      // Let the fire-and-forget persist complete.
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await logger.flush();
 
       final fresh = ConnectionLogger.detached();
+      addTearDown(fresh.dispose);
       await fresh.loadPersisted();
       expect(fresh.entries.length, 2);
       expect(fresh.entries[0].message, 'before-restart-1');
@@ -103,8 +109,9 @@ void main() {
 
     test('loadPersisted runs only once', () async {
       final logger = ConnectionLogger.detached();
+      addTearDown(logger.dispose);
       logger.info('psiphon', 'x');
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await logger.flush();
       await logger.loadPersisted();
       final count = logger.entries.length;
       await logger.loadPersisted();

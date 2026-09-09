@@ -173,4 +173,19 @@ class ConnectionLogger extends ChangeNotifier {
   /// Visible for tests: bypass the singleton for isolation.
   @visibleForTesting
   static ConnectionLogger detached() => ConnectionLogger._internal();
-}
+
+  /// Visible for tests: persist synchronously right now (the normal path is
+  /// fire-and-forget + throttled, which is hostile to FakeAsync test zones).
+  @visibleForTesting
+  Future<void> flush() async {
+    _pendingPersist?.cancel();
+    _pendingPersist = null;
+    await _persist();
+  }
+
+  @override
+  void dispose() {
+    _pendingPersist?.cancel();
+    _pendingPersist = null;
+    super.dispose();
+  }
