@@ -42,4 +42,12 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
 
       - name: Run tests
-        run: flutter test --reporter expanded
+        run: flutter test --reporter expanded 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
+
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-test-output
+          path: test-output.txt
+          retention-days: 7
