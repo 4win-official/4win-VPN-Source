@@ -1,11 +1,13 @@
 name: Android Build
 
 on:
-  # Auto-build on EVERY push (any branch) + PRs, plus manual dispatch.
+  # Auto-build on EVERY push (any branch), plus manual dispatch.
+  # NOTE: no `pull_request` trigger on purpose — for same-repo branches the
+  # push run already appears on the PR, so a PR trigger would only duplicate
+  # every run. One push = one run; cancel-in-progress kills the older one.
   push:
     branches:
       - '**'
-  pull_request:
   workflow_dispatch:
 
 permissions:

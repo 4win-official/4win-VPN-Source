@@ -1,13 +1,15 @@
 name: Flutter Tests
 
-# Fast unit/widget test gate: runs on every push (any branch) and PR, so
+# Fast unit/widget test gate: runs on every push (any branch), so
 # broken Dart code is caught in ~2 minutes without waiting for the full APK
 # build. No JDK/Android SDK needed (pure `flutter test`).
 on:
+  # NOTE: no `pull_request` trigger on purpose — for same-repo branches the
+  # push run already appears on the PR, so a PR trigger would only duplicate
+  # every run. One push = one run; cancel-in-progress kills the older one.
   push:
     branches:
       - '**'
-  pull_request:
   workflow_dispatch:
 
 permissions:
