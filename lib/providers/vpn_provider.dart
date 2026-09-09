@@ -3066,22 +3066,9 @@ class VpnProvider with ChangeNotifier {
     _stopPingTimer();
     _stopXrayTraffic();
     _stopPsiphonMonitor();
+    _stopPsiphonTraffic();
+    _stopPsiphonLogPump();
     _vpnService.dispose();
-    super.dispose();
-  }
-}
- _stopPingTimer();
-    _stopXrayTraffic();
-    _stopPsiphonMonitor();
-    _vpnService.dispose();
-    super.dispose();
-  }
-}
-e();
-    super.dispose();
-  }
-}
-e.dispose();
     super.dispose();
   }
 }

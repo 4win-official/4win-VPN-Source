@@ -67,8 +67,9 @@ jobs:
               text = open('test-output.txt', encoding='utf-8', errors='replace').read()
           except OSError:
               text = '(no test-output.txt captured)'
+          import re
           lines = text.splitlines()
-          markers = ('[E]', 'FAILED', 'Test failed', 'EXCEPTION CAUGHT', 'Compilation failed', ': Error:')
+          markers = ('[E]', ': Error:', 'FAILED', 'Test failed', 'EXCEPTION CAUGHT', 'Compilation failed')
           err_idx = [i for i, l in enumerate(lines) if any(m in l for m in markers)]
           out = ['## ❌ Flutter test failures', '']
           if not err_idx:
@@ -76,10 +77,21 @@ jobs:
               out += lines[-60:]
               out += ['```']
           else:
+              # Group by file so every failing file is visible (max 2 sites
+              # per file, 8 sites total).
+              seen, sites = {}, []
+              for i in err_idx:
+                  m = re.search(r'((?:test|lib)/\S+?\.dart)', lines[i])
+                  key = m.group(1) if m else 'other'
+                  n = seen.get(key, 0)
+                  if n < 2 and len(sites) < 8:
+                      seen[key] = n + 1
+                      sites.append((key, i))
               out += ['```']
               shown = set()
-              for i in err_idx[:3]:
-                  for j in range(max(0, i - 2), min(len(lines), i + 25)):
+              for key, i in sites:
+                  out.append(f'--- {key} ---')
+                  for j in range(max(0, i - 2), min(len(lines), i + 20)):
                       if j not in shown:
                           shown.add(j)
                           out.append(lines[j])
