@@ -189,3 +189,4 @@ class ConnectionLogger extends ChangeNotifier {
     _pendingPersist = null;
     super.dispose();
   }
+}

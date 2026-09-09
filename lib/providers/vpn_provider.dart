@@ -37,7 +37,14 @@ class VpnProvider with ChangeNotifier {
   final ProxyServerService _proxyService = ProxyServerService();
   final PsiphonService _psiphonService = PsiphonService();
   Timer? _psiphonMonitorTimer;
-  
+  Timer? _psiphonTrafficTimer;
+  Timer? _psiphonLogTimer;
+  bool _psiphonLogPumpActive = false;
+  bool _psiphonMonitorBusy = false;
+  int _psiphonFailCount = 0;
+  int _psiphonConnectGen = 0;
+  final Set<String> _psiphonLogSeen = <String>{};
+
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
@@ -274,6 +281,14 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
     });
     
+    // Forward SSTP engine logs into the unified connection log so the log
+    // viewer shows every protocol (not just Psiphon) in one place.
+    try {
+      _vpnService.logStream.listen((line) {
+        ConnectionLogger.instance.info('sstp', line);
+      });
+    } catch (_) {}
+
     // Apply the desired Xray default settings + wipe any stale ping results
     // from a previous session, THEN load/test servers (awaited so the ping
     // wipe finishes before anything reloads the stored servers).
@@ -2683,7 +2698,11 @@ class VpnProvider with ChangeNotifier {
     try {
       // Disconnect based on protocol
       if (_selectedProtocol == 'psiphon') {
+        _psiphonConnectGen++; // abort any in-flight connect/retry loop
         _stopPsiphonMonitor();
+        _stopPsiphonTraffic();
+        _stopPsiphonLogPump();
+        ConnectionLogger.instance.info('psiphon', 'Disconnect requested');
         await _psiphonService.stop();
         _stopPingTimer();
         _stopDurationTimer();
