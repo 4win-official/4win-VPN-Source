@@ -77,6 +77,29 @@ class PsiphonTunBridgeService : Service() {
         }
     }
 
+    /** Forwards a timestamped line to the main process for the in-app log viewer. */
+    private fun blog(msg: String) {
+        try {
+            Log.d(TAG, msg)
+        } catch (_: Throwable) {}
+        try {
+            val line = try {
+                "[${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())}] [bridge] $msg"
+            } catch (_: Throwable) {
+                "[bridge] $msg"
+            }
+            sendBroadcast(Intent(PsiphonVpnService.ACTION_LOG).apply {
+                setPackage(packageName)
+                putStringArrayListExtra(
+                    PsiphonVpnService.EXTRA_LOG_LINES,
+                    arrayListOf(line)
+                )
+            })
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to report bridge log: ${t.message}")
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -116,6 +139,7 @@ class PsiphonTunBridgeService : Service() {
             intent.getParcelableExtra(EXTRA_TUN_FD)
         } ?: run {
             Log.e(TAG, "Missing TUN fd")
+            blog("bridge failed: missing TUN fd")
             reportBridgeStatus(false)
             stopSelf()
             return
@@ -123,6 +147,7 @@ class PsiphonTunBridgeService : Service() {
         val port = intent.getIntExtra(EXTRA_SOCKS_PORT, 0)
         if (port !in 1..65535) {
             Log.e(TAG, "Invalid SOCKS port: $port")
+            blog("bridge failed: invalid SOCKS port $port")
             try { pfd.close() } catch (_: Throwable) {}
             reportBridgeStatus(false)
             stopSelf()
@@ -134,10 +159,11 @@ class PsiphonTunBridgeService : Service() {
         try {
             PsiphonTunBridge.start(applicationContext, pfd.fd, port)
             controllerStarted = true
-            Log.d(TAG, "Bridge active: tunFd=${pfd.fd} -> 127.0.0.1:$port")
+            blog("bridge active: tunFd=${pfd.fd} -> 127.0.0.1:$port")
             reportBridgeStatus(true)
         } catch (t: Throwable) {
             Log.e(TAG, "Bridge startup failed", t)
+            blog("bridge startup failed: ${t.message}")
             controllerStarted = false
             try { pfd.close() } catch (_: Throwable) {}
             tunPfd = null
@@ -148,6 +174,7 @@ class PsiphonTunBridgeService : Service() {
 
     private fun stopBridge() {
         if (!stopping.compareAndSet(false, true)) return
+        blog("bridge stopping")
         try { PsiphonTunBridge.stop() } catch (t: Throwable) {
             Log.w(TAG, "Bridge stop failed: ${t.message}")
         }

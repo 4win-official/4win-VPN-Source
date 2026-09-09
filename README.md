@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.4.7%2B26-blue)
+![Version](https://img.shields.io/badge/version-1.4.8%2B28-blue)
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.44.1-02569B?logo=flutter)
 ![Dart](https://img.shields.io/badge/Dart-3.12.1-0175C2?logo=dart)

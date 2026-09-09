@@ -2004,8 +2004,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               const SizedBox(height: 4),
                               Text(
                                 _killSwitch
-                                    ? 'Block internet if VPN disconnects'
-                                    : 'Allow internet without VPN',
+                                    ? 'ON: Psiphon failures blackhole traffic (no leaks) and auto-retry'
+                                    : 'OFF: Psiphon failures restore normal internet',
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: isDark ? Colors.white38 : Colors.black38,

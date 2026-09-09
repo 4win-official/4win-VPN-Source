@@ -36,7 +36,9 @@ class PsiphonBridgePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             "isRunning" -> handleIsRunning(result)
             "isConnected" -> handleIsConnected(result)
+            "isKillSwitchActive" -> handleIsKillSwitchActive(result)
             "queryStats" -> handleQueryStats(result)
+            "getPsiphonLogs" -> handleGetLogs(result)
             else -> result.notImplemented()
         }
     }
@@ -99,13 +101,13 @@ class PsiphonBridgePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
+    // NOTE: PsiphonVpnService runs in the :psiphon process, so its statics are
+    // invisible from the main process. All state reads go through the
+    // cross-process PsiphonStatusStore (the old service statics are kept only
+    // as a reflection fallback).
     private fun handleIsRunning(result: MethodChannel.Result) {
         try {
-            val clazz = Class.forName("com.forwin.vpn.PsiphonVpnService")
-            val method = clazz.getMethod("isRunning")
-            val response = method.invoke(null) as Boolean
-            result.success(response)
-            Log.d(TAG, "isRunning: $response")
+            result.success(readStoreBoolean("isRunning"))
         } catch (e: Exception) {
             Log.e(TAG, "isRunning failed: ${e.message}")
             result.success(false)
@@ -114,31 +116,63 @@ class PsiphonBridgePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun handleIsConnected(result: MethodChannel.Result) {
         try {
-            val clazz = Class.forName("com.forwin.vpn.PsiphonVpnService")
-            val method = clazz.getMethod("isConnected")
-            val response = method.invoke(null) as Boolean
-            result.success(response)
-            Log.d(TAG, "isConnected: $response")
+            result.success(readStoreBoolean("isConnected"))
         } catch (e: Exception) {
             Log.e(TAG, "isConnected failed: ${e.message}")
             result.success(false)
         }
     }
 
+    private fun handleIsKillSwitchActive(result: MethodChannel.Result) {
+        try {
+            result.success(readStoreBoolean("isKillSwitchActive"))
+        } catch (e: Exception) {
+            Log.e(TAG, "isKillSwitchActive failed: ${e.message}")
+            result.success(false)
+        }
+    }
+
     private fun handleQueryStats(result: MethodChannel.Result) {
         try {
-            val clazz = Class.forName("com.forwin.vpn.PsiphonVpnService")
-            val method = clazz.getMethod("queryTrafficStats")
-            val stats = method.invoke(null) as LongArray
-            val map = mapOf(
-                "uplink" to stats[0],
-                "downlink" to stats[1]
-            )
-            result.success(map)
+            val stats = readStoreStats()
+            result.success(mapOf("uplink" to stats[0], "downlink" to stats[1]))
             Log.d(TAG, "queryStats: up=${stats[0]} down=${stats[1]}")
         } catch (e: Exception) {
             Log.e(TAG, "queryStats failed: ${e.message}")
             result.success(mapOf("uplink" to 0L, "downlink" to 0L))
+        }
+    }
+
+    private fun handleGetLogs(result: MethodChannel.Result) {
+        try {
+            val clazz = Class.forName("com.forwin.vpn.PsiphonStatusStore")
+            @Suppress("UNCHECKED_CAST")
+            val logs = clazz.getMethod("getLogs").invoke(null) as List<String>
+            result.success(logs)
+        } catch (e: Exception) {
+            Log.e(TAG, "getPsiphonLogs failed: ${e.message}")
+            result.success(emptyList<String>())
+        }
+    }
+
+    private fun readStoreBoolean(method: String): Boolean {
+        return try {
+            val clazz = Class.forName("com.forwin.vpn.PsiphonStatusStore")
+            clazz.getMethod(method).invoke(null) as Boolean
+        } catch (_: Exception) {
+            // Fallback: pre-isolation service statics (same-process only).
+            val clazz = Class.forName("com.forwin.vpn.PsiphonVpnService")
+            clazz.getMethod(method).invoke(null) as Boolean
+        }
+    }
+
+    private fun readStoreStats(): LongArray {
+        return try {
+            val clazz = Class.forName("com.forwin.vpn.PsiphonStatusStore")
+            clazz.getMethod("queryTrafficStats").invoke(null) as LongArray
+        } catch (_: Exception) {
+            val clazz = Class.forName("com.forwin.vpn.PsiphonVpnService")
+            clazz.getMethod("queryTrafficStats").invoke(null) as LongArray
         }
     }
 
