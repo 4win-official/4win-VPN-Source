@@ -13,7 +13,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # write: needed to post failure excerpts as commit comments for debugging.
+  contents: write
 
 concurrency:
   group: flutter-test-${{ github.ref }}
