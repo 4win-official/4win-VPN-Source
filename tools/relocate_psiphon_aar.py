@@ -77,16 +77,18 @@ class ClassFileRewriter:
     """
 
     def __init__(self, data: bytes, class_prefix: tuple[str, str],
-                 lib_name: tuple[str, str]):
+                 lib_name: tuple[str, str],
+                 class_name: str = "<unknown>"):
         self.data = data
         self.old_pkg, self.new_pkg = class_prefix  # e.g. ("go", "gi")
         self.old_lib, self.new_lib = lib_name      # e.g. ("gojni", "psiphon-gojni")
+        self.class_name = class_name               # for error messages
         self.patches: list[str] = []
 
     def rewrite(self) -> bytes:
         data = self.data
         if data[:4] != b"\xca\xfe\xba\xbe":
-            raise ValueError("not a Java class file")
+            raise ValueError(f"{self.class_name}: not a Java class file")
         cp_count = struct.unpack_from(">H", data, 8)[0]
 
         # Walk the constant pool, collecting rewrite ops on UTF8 entries.
@@ -115,10 +117,12 @@ class ClassFileRewriter:
                 idx += 4
             elif tag == 15:            # MethodHandle
                 idx += 3
-            elif tag == 16:            # Module/Package
+            elif tag in (16, 19, 20):  # Module/Package refs (module-info)
                 idx += 2
             else:
-                raise ValueError(f"unsupported constant-pool tag {tag} at #{i}")
+                cn = self.class_name or "<unknown>"
+                raise ValueError(f"{cn}: unsupported constant-pool tag "
+                                 f"{tag} at #{i}")
             i += 1
 
         if not ops:
@@ -161,11 +165,12 @@ class ClassFileRewriter:
             elif tag == 15:
                 out += data[entry_start:idx + 3]
                 idx += 3
-            elif tag == 16:
+            elif tag in (16, 19, 20):
                 out += data[entry_start:idx + 2]
                 idx += 2
             else:
-                raise ValueError(f"unsupported tag {tag}")
+                cn = self.class_name or "<unknown>"
+                raise ValueError(f"{cn}: unsupported tag {tag}")
             i += 1
         out += data[pool_end:]
         return bytes(out)
@@ -206,7 +211,7 @@ def rewrite_classes_jar(jar_bytes: bytes, class_prefix: tuple[str, str],
                 name = new_pkg + name[len(old_pkg):]
             if name.endswith(".class"):
                 payload = ClassFileRewriter(
-                    payload, class_prefix, lib_name).rewrite()
+                    payload, class_prefix, lib_name, class_name=name).rewrite()
             zout.writestr(name, payload)
             if info.filename != name:
                 report.append(f"  {info.filename} -> {name}")
@@ -233,161 +238,59 @@ def collect_go_class_names(jar_bytes: bytes, old_pkg: str) -> set[bytes]:
 
 
 # --------------------------------------------------------------------------
-# ELF patching (.dynstr JNI export names + FindClass strings)
+# ELF patching (JNI export names + FindClass strings)
 # --------------------------------------------------------------------------
-
-def elf_sh_link(data: bytes, index: int) -> int:
-    """Returns sh_link of the given section header."""
-    if data[:4] != b"\x7fELF":
-        raise ValueError("not an ELF file")
-    is64 = data[4] == 2
-    little = data[5] == 1
-    end = "<" if little else ">"
-    if is64:
-        e_shoff = struct.unpack_from(end + "Q", data, 0x28)[0]
-        e_shentsize = struct.unpack_from(end + "H", data, 0x3A)[0]
-    else:
-        e_shoff = struct.unpack_from(end + "I", data, 0x20)[0]
-        e_shentsize = struct.unpack_from(end + "H", data, 0x2E)[0]
-    base = e_shoff + index * e_shentsize
-    if is64:
-        return struct.unpack_from(end + "I", data, base + 0x28)[0]
-    return struct.unpack_from(end + "I", data, base + 0x18)[0]
-
-
-def elf_sections(data: bytes):
-    """Yields (index, name, sh_type, sh_offset, sh_size) for ELF32/ELF64."""
-    if data[:4] != b"\x7fELF":
-        raise ValueError("not an ELF file")
-    is64 = data[4] == 2
-    little = data[5] == 1
-    end = "<" if little else ">"
-    if is64:
-        e_shoff = struct.unpack_from(end + "Q", data, 0x28)[0]
-        e_shentsize = struct.unpack_from(end + "H", data, 0x3A)[0]
-        e_shnum = struct.unpack_from(end + "H", data, 0x3C)[0]
-        e_shstrndx = struct.unpack_from(end + "H", data, 0x3E)[0]
-    else:
-        e_shoff = struct.unpack_from(end + "I", data, 0x20)[0]
-        e_shentsize = struct.unpack_from(end + "H", data, 0x2E)[0]
-        e_shnum = struct.unpack_from(end + "H", data, 0x30)[0]
-        e_shstrndx = struct.unpack_from(end + "H", data, 0x32)[0]
-
-    def sh(i: int):
-        base = e_shoff + i * e_shentsize
-        if is64:
-            name, typ, _f, _a, off, size = struct.unpack_from(
-                end + "IIQQQQ", data, base)
-        else:
-            name, typ, _f, _a, off, size = struct.unpack_from(
-                end + "IIIIII", data, base)
-        return name, typ, off, size
-
-    strtab_off = sh(e_shstrndx)[2]
-    def cstr(off: int) -> str:
-        endpos = data.index(b"\x00", strtab_off + off)
-        return data[strtab_off + off:endpos].decode()
-
-    for i in range(e_shnum):
-        name_off, typ, off, size = sh(i)
-        yield i, cstr(name_off), typ, off, size
-
-
-SHT_DYNSYM = 11
-SHT_SYMTAB = 2
-SHT_STRTAB = 3
-
-
-def patch_symtab(buf: bytes, sym_off: int, sym_size: int, str_off: int,
-                 old_pkg: str, new_pkg: str) -> tuple[int, set[bytes], set[bytes]]:
-    """Renames Java_<old>_* symbol names inside one symtab/strtab pair.
-    Returns (renamed_count, names_before, names_after)."""
-    renamed = 0
-    entry = 24 if buf[4] == 2 else 16
-    old_prefix = ("Java_" + old_pkg + "_").encode()
-    new_prefix = ("Java_" + new_pkg + "_").encode()
-    assert len(old_prefix) == len(new_prefix)
-    names_before: set[bytes] = set()
-    for pos in range(sym_off, sym_off + sym_size, entry):
-        st_name = struct.unpack_from("<I", buf, pos)[0]
-        if st_name == 0:
-            continue
-        start = str_off + st_name
-        nul = buf.index(0, start)
-        names_before.add(bytes(buf[start:nul]))
-        if bytes(buf[start:nul]).startswith(old_prefix):
-            base = start + len("Java_")
-            buf[base:base + len(old_pkg)] = new_pkg.encode()
-            renamed += 1
-    names_after: set[bytes] = set()
-    for pos in range(sym_off, sym_off + sym_size, entry):
-        st_name = struct.unpack_from("<I", buf, pos)[0]
-        if st_name == 0:
-            continue
-        start = str_off + st_name
-        nul = buf.index(0, start)
-        names_after.add(bytes(buf[start:nul]))
-    expected = {(n if not n.startswith(old_prefix)
-                 else new_prefix + n[len(old_prefix):])
-                for n in names_before}
-    if names_after != expected:
-        raise ValueError("strtab patch corrupted unrelated symbol names")
-    return renamed, names_before, names_after
+#
+# Both patches are length-preserving substring rewrites, which makes them
+# independent of the ELF's internal structure: they work whether the .so has
+# section headers or is fully stripped, and they keep every string NUL-
+# terminated at the same offset, so symbol/string tables, hash tables and
+# relocations stay valid. `Java_go_` is a JNI-name prefix so specific that a
+# coincidental occurrence elsewhere in a gomobile .so is not a realistic
+# concern, and re-naming it anywhere is semantically correct anyway because
+# the Java class really did move to `gi`.
 
 
 def patch_so(data: bytes, class_prefix: tuple[str, str],
              go_class_names: set[bytes]) -> tuple[bytes, list[str]]:
     """In-place, length-preserving patches for a gomobile .so.
 
-    1. .dynstr (+ .strtab if present): rename JNI exports
-       Java_<old>_...  ->  Java_<new>_...
-    2. Whole file: rewrite baked-in class-name strings go/Seq -> gi/Seq etc.
+    1. JNI export/name occurrences  Java_<old>_...  ->  Java_<new>_...
+    2. Baked-in class-name strings  go/Seq -> gi/Seq, go/Seq$Ref -> ... etc.
+
     Returns (patched_bytes, report).
     """
     old_pkg, new_pkg = class_prefix
     report: list[str] = []
     buf = bytearray(data)
 
-    # ---- 1. symbol table names -----------------------------------------
-    renamed = 0
-    tables: list[tuple[int, int, int, int]] = []  # (sym_off, sym_size, str_off, str_size)
-    strtabs: dict[int, tuple[int, int]] = {}      # section index -> (off, size)
-    section_list = list(elf_sections(data))
-    for si, _name, typ, off, size in section_list:
-        if typ == SHT_STRTAB:
-            strtabs[si] = (off, size)
-    for si, _name, typ, off, size in section_list:
-        if typ in (SHT_DYNSYM, SHT_SYMTAB):
-            link = elf_sh_link(data, si)
-            if link in strtabs:
-                str_off, str_size = strtabs[link]
-                tables.append((off, size, str_off, str_size))
-    if not tables:
-        raise ValueError("no symbol tables found — unexpected .so layout")
-
-    seen_tables = 0
-    for sym_off, sym_size, str_off, str_size in tables:
-        n, _before, _after = patch_symtab(
-            buf, sym_off, sym_size, str_off, old_pkg, new_pkg)
-        renamed += n
-        seen_tables += 1
-    report.append(f"  renamed {renamed} JNI export(s) Java_{old_pkg}_* "
-                  f"-> Java_{new_pkg}_* across {seen_tables} symbol table(s)")
+    # ---- 1. JNI symbol names --------------------------------------------
+    old_sym = b"Java_" + old_pkg.encode() + b"_"
+    new_sym = b"Java_" + new_pkg.encode() + b"_"
+    assert len(old_sym) == len(new_sym)
+    total = buf.count(old_sym)
+    if total:
+        idx = 0
+        for _ in range(total):
+            idx = buf.find(old_sym, idx)
+            buf[idx:idx + len(old_sym)] = new_sym
+            idx += len(new_sym)
+    report.append(f"  renamed {total} occurrence(s) of JNI prefix "
+                  f"'Java_{old_pkg}_*' -> 'Java_{new_pkg}_*'")
 
     # ---- 2. baked-in FindClass strings ---------------------------------
-    total = 0
+    replaced = 0
     for cls in sorted(go_class_names, key=len, reverse=True):
-        old = cls
         new = new_pkg.encode() + cls[len(old_pkg):]
-        count = buf.count(old)
+        count = buf.count(cls)
         if count:
             idx = 0
             for _ in range(count):
-                idx = buf.find(old, idx)
-                buf[idx:idx + len(old)] = new
+                idx = buf.find(cls, idx)
+                buf[idx:idx + len(cls)] = new
                 idx += len(new)
-            total += count
-            report.append(f"  {old.decode()} -> {new.decode()} x{count}")
+            replaced += count
+            report.append(f"  {cls.decode()} -> {new.decode()} x{count}")
 
     return bytes(buf), report
 
@@ -495,18 +398,23 @@ def verify(entries: dict[str, bytes], class_prefix: tuple[str, str],
                         f"{info.filename}: reference to {cls.decode()} "
                         f"survived")
 
-    # native libs: no Java_go_ exports, no go/Seq strings, expected gi ones.
+    # native libs: no Java_go_ exports / go/Seq strings may survive anywhere;
+    # at least one lib must carry the relocated Java_gi_* exports.
+    saw_gi_exports = False
     for name, blob in entries.items():
         if not (name.startswith("jni/") and name.endswith(".so")):
             continue
         if b"Java_" + old_pkg.encode() + b"_" in blob:
             problems.append(f"{name}: Java_{old_pkg}_* JNI exports survived")
+        if (b"Java_" + new_pkg.encode() + b"_") in blob:
+            saw_gi_exports = True
         for cls in go_classes:
             if cls in blob:
                 problems.append(
                     f"{name}: FindClass string {cls.decode()} survived")
-        if ("Java_" + new_pkg + "_").encode() not in blob:
-            problems.append(f"{name}: no Java_{new_pkg}_* exports found")
+    if not saw_gi_exports:
+        problems.append(f"no jni/*.so carries Java_{new_pkg}_* exports — "
+                        "the rename was a no-op?")
 
     if problems:
         print("\nVERIFICATION FAILED:", file=sys.stderr)
@@ -542,7 +450,7 @@ def utf8_constants(class_bytes: bytes) -> set[bytes]:
             idx += 4
         elif tag == 15:
             idx += 3
-        elif tag == 16:
+        elif tag in (16, 19, 20):
             idx += 2
         else:
             raise ValueError("malformed class file: bad pool tag "

@@ -85,9 +85,12 @@ val relocatePsiphonAar = tasks.register("relocatePsiphonAar") {
     description = "Relocates the Psiphon gomobile bridge (go → gi) so its Go " +
         "runtime can never share a process with Xray's."
     val script = rootProject.file("../tools/relocate_psiphon_aar.py")
+    // Optional local override: if this file exists it is used instead of the
+    // maven artifact (handy for offline builds and CI mirrors).
+    val localAar = file("libs/psiphontunnel-2.0.40.aar")
     val outFile = layout.buildDirectory.file("psiphon/psiphontunnel-2.0.40-relocated.aar")
     inputs.file(script)
-    inputs.files(psiphonOriginal)
+    inputs.files(if (localAar.exists()) files(localAar) else psiphonOriginal)
     outputs.file(outFile)
     doLast {
         if (!script.exists()) {
@@ -101,7 +104,7 @@ val relocatePsiphonAar = tasks.register("relocatePsiphonAar") {
             "python3 is required to build the Psiphon runtime relocation step. " +
             "Install Python 3 and re-run the build."
         )
-        val src = psiphonOriginal.singleFile
+        val src = if (localAar.exists()) localAar else psiphonOriginal.singleFile
         val dst = outFile.get().asFile
         dst.parentFile.mkdirs()
         logger.lifecycle("Relocating Psiphon AAR (${src.name}) → ${dst.name}")
@@ -122,3 +125,8 @@ dependencies {
 
     implementation("org.json:json:20231013")
 }
+
+// Belt & suspenders: virtually every AGP task depends on preBuild, so this
+// guarantees the relocated AAR exists before anything compiles/packages it,
+// regardless of file-collection dependency inference.
+tasks.named("preBuild") { dependsOn(relocatePsiphonAar) }
