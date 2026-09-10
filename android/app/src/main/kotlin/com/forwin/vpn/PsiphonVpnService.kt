@@ -209,6 +209,8 @@ class PsiphonVpnService : VpnService() {
             System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
             Log.d(TAG, "Psiphon native runtime loaded and gomobile context initialized")
         } catch (t: Throwable) {
+            Log.e(TAG, "Psiphon native runtime initialization failed", t)
+        }
 
         // Listen for the :psiphonbridge process reporting whether the actual
         // TUN -> SOCKS packet bridge succeeded or failed. Without this,
