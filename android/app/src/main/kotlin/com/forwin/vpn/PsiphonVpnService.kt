@@ -13,7 +13,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import ca.psiphon.PsiphonTunnel
-import go.Seq
+import gi.Seq
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,9 +22,12 @@ import java.util.concurrent.Semaphore
 
 /**
  * Psiphon VPN service. Runs in the dedicated `:psiphon` process (see
- * AndroidManifest) so its gomobile/Go runtime never shares a process with
- * Xray's Go runtime in the main process — loading both Go runtimes in one
- * process natively crashes the app.
+ * AndroidManifest). Its gomobile/Go runtime is the RELOCATED Psiphon one
+ * (`gi.Seq` + `libpsiphon-gojni.so`, produced by the Gradle
+ * `relocatePsiphonAar` task) — it never shares a process with Xray's Go
+ * runtime (`go.Seq` + `libgojni.so`, main + `:psiphonbridge` processes),
+ * because loading both Go runtimes in one process natively crashes the app
+ * (their native symbols collide process-wide).
  *
  * Because of the process split, state is published to the main process via
  * package-scoped [ACTION_STATUS] broadcasts (state changes + 2s heartbeat),
@@ -198,12 +201,14 @@ class PsiphonVpnService : VpnService() {
         super.onCreate()
         createNotificationChannel()
         try {
+            // gi.Seq = the build-time-relocated Psiphon bridge (go → gi).
+            // Its static initializer loads libpsiphon-gojni.so only, so this
+            // process never sees Xray's libgojni.so. The explicit load below
+            // is a no-op safeguard (System.loadLibrary is idempotent).
             Seq.setContext(applicationContext)
             System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
             Log.d(TAG, "Psiphon native runtime loaded and gomobile context initialized")
         } catch (t: Throwable) {
-            Log.e(TAG, "Psiphon native runtime initialization failed", t)
-        }
 
         // Listen for the :psiphonbridge process reporting whether the actual
         // TUN -> SOCKS packet bridge succeeded or failed. Without this,
@@ -540,6 +545,9 @@ class PsiphonVpnService : VpnService() {
                 .put("EstablishTunnelTimeoutSeconds", 0)
                 .toString()
             override fun loadLibrary(library: String) {
+                // Psiphon's Java layer asks the host to load its native
+                // runtime by the original name "gojni"; map it to the
+                // renamed, symbol-patched libpsiphon-gojni.so.
                 if (library == "gojni") System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
                 else System.loadLibrary(library)
             }

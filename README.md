@@ -107,6 +107,8 @@ Open the **palette icon** at the top of the home screen.
 - **Dart** 3.12.1
 - **Android SDK** (compile/target API per `android/app/build.gradle.kts`)
 - **JDK** 17
+- **python3** (required by the `relocatePsiphonAar` Gradle task — see
+  [`PSIPHON_INTEGRATION.md`](PSIPHON_INTEGRATION.md))
 
 ### Steps
 
