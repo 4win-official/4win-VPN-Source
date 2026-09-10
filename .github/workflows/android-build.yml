@@ -37,6 +37,9 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned to the stable version that built this repo green on
+          # 2026-09-09 (unpinned `channel: stable` silently moves under CI).
+          flutter-version: '3.47.3'
           channel: stable
           cache: true
 
