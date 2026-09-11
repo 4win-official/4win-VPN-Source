@@ -42,6 +42,10 @@ class PsiphonVpnService : VpnService() {
     private var currentRegion = ""
     private var psiphonSocksPort = 0
     private var lastStatusText = ""
+    // Exit regions the Psiphon core last reported as available (from
+    // onAvailableEgressRegions). Published in every status broadcast so the
+    // main process can show the live server count in the Psiphon settings.
+    @Volatile private var egressRegions: List<String> = emptyList()
     private val lifecycleLock = Semaphore(1)
     private var bridgeStatusReceiver: BroadcastReceiver? = null
     // True once Psiphon's own tunnel-core reports onConnected(). The public
@@ -75,6 +79,8 @@ class PsiphonVpnService : VpnService() {
         const val EXTRA_STATUS_TEXT = "status_text"
         const val EXTRA_REGION = "region"
         const val EXTRA_LOG_LINES = "log_lines"
+        /** Exit regions currently reported available by the Psiphon core. */
+        const val EXTRA_EGRESS_REGIONS = "egress_regions"
 
         /** Fire-and-forget native log broadcast (also from the bridge service). */
         const val ACTION_LOG = "com.forwin.vpn.PSIPHON_LOG"
@@ -151,6 +157,7 @@ class PsiphonVpnService : VpnService() {
                 putExtra(EXTRA_DOWNLINK, totalDownlink)
                 putExtra(EXTRA_STATUS_TEXT, lastStatusText)
                 putExtra(EXTRA_REGION, currentRegion)
+                putStringArrayListExtra(EXTRA_EGRESS_REGIONS, ArrayList(egressRegions))
                 putStringArrayListExtra(EXTRA_LOG_LINES, lines)
             }
             sendBroadcast(intent)
@@ -322,6 +329,7 @@ class PsiphonVpnService : VpnService() {
             bridgeConfirmed = false
             updateConnectedState()
             psiphonSocksPort = 0
+            egressRegions = emptyList()
             totalUplink = 0
             totalDownlink = 0
             lastStatusText = "Connecting to Psiphon..."
@@ -437,6 +445,7 @@ class PsiphonVpnService : VpnService() {
             }
             psiphonTunnel = null
             psiphonSocksPort = 0
+            egressRegions = emptyList()
             try {
                 vpnInterface?.close()
             } catch (_: Throwable) {}
@@ -604,7 +613,11 @@ class PsiphonVpnService : VpnService() {
             }
             override fun onAvailableEgressRegions(regions: MutableList<String>?) {
                 runGuarded("onAvailableEgressRegions") {
-                    plog("available regions: $regions")
+                    egressRegions = regions?.toList() ?: emptyList()
+                    plog("available regions (${egressRegions.size}): $regions")
+                    // Push the fresh server list to the main process so the
+                    // Psiphon settings screen can show the live count.
+                    sendStatus()
                 }
             }
             override fun onSplitTunnelRegions(regions: MutableList<String>?) {

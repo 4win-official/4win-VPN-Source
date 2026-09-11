@@ -193,6 +193,14 @@ class MainActivity: FlutterActivity() {
                 "getPsiphonLogs" -> {
                     result.success(runCatching { PsiphonStatusStore.getLogs() }.getOrDefault(emptyList<String>()))
                 }
+                // Available Psiphon exit servers (egress regions) as last
+                // reported by the tunnel core: {count: Int, regions: [String]}.
+                "getPsiphonServers" -> result.success(
+                    mapOf(
+                        "count" to runCatching { PsiphonStatusStore.egressRegionCount() }.getOrDefault(0),
+                        "regions" to runCatching { PsiphonStatusStore.egressRegions() }.getOrDefault(emptyList<String>())
+                    )
+                )
                 else -> result.notImplemented()
             }
         }
