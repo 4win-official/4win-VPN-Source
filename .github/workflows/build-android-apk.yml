@@ -47,22 +47,17 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      - name: Prepare stripped Psiphon AAR
-        shell: bash
-        run: |
-          set -euo pipefail
-          aar=$(find "$HOME/.gradle/caches" -type f -iname "*psiphon*.aar" | head -n 1 || true)
-          if [ -z "$aar" ]; then echo "Psiphon AAR not found"; exit 0; fi
-          work=$(mktemp -d); unzip -q "$aar" -d "$work"
-          rm -rf "$work/jni"/\*/libgomobile.so "$work/jni"/\*/libgojni.so 2>/dev/null || true
-          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
-            if [ -f "$work/jni/$abi/libgojni.so" ]; then mv "$work/jni/$abi/libgojni.so" "$work/jni/$abi/libpsiphon-gojni.so"; fi
-          done
-          out="android/app/libs/psiphon-stripped.aar"; mkdir -p "$(dirname "$out")"
-          (cd "$work" && zip -qr "$OLDPWD/$out" .)
+      # NOTE: the Psiphon AAR relocation (go -> gi bridge, libgojni ->
+      # libpsiphon-gojni with symbol/FindClass patching) now happens inside
+      # the Gradle build itself (android/app/build.gradle.kts
+      # `relocatePsiphonAar` task + tools/relocate_psiphon_aar.py), so local
+      # builds and CI produce byte-identical runtimes.
 
       - name: Build release APK
         run: flutter build apk --release
+
+      - name: Verify Psiphon runtime isolation in APK
+        run: python3 tools/verify_apk_psiphon.py build/app/outputs/flutter-apk/app-release.apk
 
       - name: Verify APK
         run: |

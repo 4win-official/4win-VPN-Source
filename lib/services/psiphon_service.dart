@@ -104,4 +104,28 @@ class PsiphonService {
       return const [];
     }
   }
+
+  /// Exit servers (egress regions) the Psiphon tunnel core last reported as
+  /// available: `{'count': int, 'regions': List<String>}` (e.g. US, DE, NL…).
+  ///
+  /// The core only reports while the tunnel is running, so before the first
+  /// connect this returns count 0 with an empty list. Total: degrades to
+  /// zero/empty on any platform error.
+  Future<Map<String, dynamic>> getServers() async {
+    try {
+      final raw = await _channel.invokeMethod<Map>('getPsiphonServers');
+      if (raw == null) return const {'count': 0, 'regions': <String>[]};
+      int asInt(Object? v) =>
+          v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+      final regions = (raw['regions'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          <String>[];
+      var count = asInt(raw['count']);
+      if (count == 0 && regions.isNotEmpty) count = regions.length;
+      return {'count': count, 'regions': regions};
+    } catch (_) {
+      return const {'count': 0, 'regions': <String>[]};
+    }
+  }
 }

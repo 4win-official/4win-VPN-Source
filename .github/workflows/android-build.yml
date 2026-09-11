@@ -37,6 +37,9 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned to the stable version that built this repo green on
+          # 2026-09-09 (unpinned `channel: stable` silently moves under CI).
+          flutter-version: '3.47.3'
           channel: stable
           cache: true
 
@@ -48,54 +51,11 @@ jobs:
           grep -q 'name="app_name"' android/app/src/main/res/values/strings.xml
           echo "app_name resource is present"
 
-      - name: Prepare Psiphon AAR without duplicate gomobile runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p android/app/libs
-          curl -fsSL \
-            "https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/v2.0.40/ca/psiphon/psiphontunnel/2.0.40/psiphontunnel-2.0.40.aar" \
-            -o /tmp/psiphontunnel.aar
-          python3 - <<'PY'
-          from pathlib import Path
-          from zipfile import ZipFile, ZIP_DEFLATED
-          from io import BytesIO
-
-          src = Path('/tmp/psiphontunnel.aar')
-          dst = Path('android/app/libs/psiphontunnel-2.0.40-stripped.aar')
-
-          with ZipFile(src, 'r') as aar:
-              entries = {info.filename: aar.read(info.filename) for info in aar.infolist()}
-
-          classes = entries['classes.jar']
-          with ZipFile(BytesIO(classes), 'r') as jar:
-              jar_entries = {info.filename: jar.read(info.filename) for info in jar.infolist()}
-
-          stripped_classes = BytesIO()
-          with ZipFile(stripped_classes, 'w', ZIP_DEFLATED) as jar:
-              for name, data in jar_entries.items():
-                  if name.startswith('go/'):
-                      continue
-                  jar.writestr(name, data)
-          entries['classes.jar'] = stripped_classes.getvalue()
-
-          native_names = []
-          for name in list(entries):
-              if name.startswith('jni/') and name.endswith('/libgojni.so'):
-                  new_name = name[:-len('libgojni.so')] + 'libpsiphon-gojni.so'
-                  entries[new_name] = entries.pop(name)
-                  native_names.append(new_name)
-
-          if len(native_names) != 4:
-              raise SystemExit(f'Expected 4 Psiphon native libraries, found {len(native_names)}: {native_names}')
-
-          with ZipFile(dst, 'w', ZIP_DEFLATED) as aar:
-              for name, data in entries.items():
-                  aar.writestr(name, data)
-
-          print(f'Prepared {dst}')
-          print('Native libraries:', ', '.join(native_names))
-          PY
+      # NOTE: the Psiphon AAR relocation (go -> gi bridge, libgojni ->
+      # libpsiphon-gojni with symbol/FindClass patching) now happens inside
+      # the Gradle build itself (android/app/build.gradle.kts
+      # `relocatePsiphonAar` task + tools/relocate_psiphon_aar.py), so local
+      # builds and CI produce byte-identical runtimes. Nothing to prepare here.
 
       - name: Flutter version
         run: flutter --version
@@ -104,7 +64,66 @@ jobs:
         run: flutter pub get
 
       - name: Build release APK
-        run: flutter build apk --release
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee /tmp/build-log.txt
+
+      # The Gradle error text is posted as a commit comment so the real
+      # failure reason is readable from the API even when job logs are not.
+      - name: Report build failure on commit
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          python3 - <<'PY' > /tmp/fail_body.md
+          try:
+              text = open('/tmp/build-log.txt', encoding='utf-8', errors='replace').read()
+          except OSError:
+              text = '(no build log captured)'
+          lines = text.splitlines()
+          markers = ('error:', 'Error:', 'FAILURE', 'What went wrong',
+                     'Could not', 'Exception', 'Execution failed',
+                     'Unresolved reference', 'e: ')
+          err_idx = [i for i, l in enumerate(lines) if any(m in l for m in markers)]
+          out = ['## ❌ Android build failure', '']
+          seen = set()
+          shown = 0
+          for i in err_idx:
+              if i in seen or shown > 60:
+                  continue
+              for j in range(max(0, i - 2), min(len(lines), i + 12)):
+                  if j not in seen:
+                      seen.add(j)
+                      out.append(lines[j])
+                      shown += 1
+              out.append('…')
+          if shown == 0:
+              out += ['(no error markers found — tail of output:)', '', '```']
+              out += lines[-60:]
+              out += ['```']
+          else:
+              out += ['--- tail ---', '```'] + lines[-20:] + ['```']
+          print('\n'.join(out)[:30000])
+          PY
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+            -f body="$(cat /tmp/fail_body.md)" > /dev/null && echo reported
+
+      - name: Verify Psiphon runtime isolation in APK
+        run: python3 tools/verify_apk_psiphon.py build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: /tmp/build-log.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Verify Psiphon runtime isolation in APK
+        run: python3 tools/verify_apk_psiphon.py build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

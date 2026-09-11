@@ -177,7 +177,10 @@
                 android:value="OpenVPN tunnel for secure browsing" />
         </service>
 
-        <!-- Initialize the shared gomobile Java runtime in the Psiphon process. -->
+        <!-- Initialize the RELOCATED Psiphon gomobile runtime (gi.Seq +
+             libpsiphon-gojni.so) in the :psiphon process only. It never
+             touches Xray's go.Seq/libgojni.so, so each process hosts exactly
+             one Go runtime. -->
         <provider
             android:name="com.forwin.vpn.GomobileRuntimeInitializer"
             android:authorities="com.forwin.vpn.gomobile-runtime"

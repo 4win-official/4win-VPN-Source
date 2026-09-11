@@ -23,6 +23,9 @@ object PsiphonStatusStore {
     @Volatile private var downlink = 0L
     @Volatile private var statusText = ""
     @Volatile private var region = ""
+    // Exit regions last reported available by the Psiphon core (server list
+    // for the settings screen). An empty list = unknown / not yet reported.
+    @Volatile private var egressRegions: List<String> = emptyList()
     @Volatile private var lastHeartbeatMs = 0L
 
     private const val STALE_AFTER_MS = 8000L
@@ -41,6 +44,12 @@ object PsiphonStatusStore {
 
     @JvmStatic fun region(): String = region
 
+    /** Number of exit servers the Psiphon core last reported as available. */
+    @JvmStatic fun egressRegionCount(): Int = egressRegions.size
+
+    /** Exit server region codes (e.g. US, DE, NL…) last reported as available. */
+    @JvmStatic fun egressRegions(): List<String> = egressRegions
+
     @JvmStatic
     fun getLogs(): List<String> = synchronized(logs) { ArrayList(logs) }
 
@@ -53,6 +62,7 @@ object PsiphonStatusStore {
         downlink = 0L
         statusText = ""
         region = ""
+        egressRegions = emptyList()
         lastHeartbeatMs = 0L
         synchronized(logs) { logs.clear() }
     }
@@ -72,6 +82,9 @@ object PsiphonStatusStore {
             downlink = intent.getLongExtra(PsiphonVpnService.EXTRA_DOWNLINK, downlink)
             intent.getStringExtra(PsiphonVpnService.EXTRA_STATUS_TEXT)?.let { statusText = it }
             intent.getStringExtra(PsiphonVpnService.EXTRA_REGION)?.let { region = it }
+            intent.getStringArrayListExtra(PsiphonVpnService.EXTRA_EGRESS_REGIONS)?.let {
+                egressRegions = ArrayList(it)
+            }
             lastHeartbeatMs = System.currentTimeMillis()
             val lines = intent.getStringArrayListExtra(PsiphonVpnService.EXTRA_LOG_LINES)
             if (lines != null) appendLogs(lines)

@@ -24,8 +24,6 @@ dependencies:
   path_provider: ^2.1.4
   image_picker: ^1.1.2
   open_filex: ^4.5.0
-  psiphon_bridge:
-    path: ./psiphon_bridge
 
 dev_dependencies:
   flutter_test:

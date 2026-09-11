@@ -13,7 +13,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import ca.psiphon.PsiphonTunnel
-import go.Seq
+import gi.Seq
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,9 +22,12 @@ import java.util.concurrent.Semaphore
 
 /**
  * Psiphon VPN service. Runs in the dedicated `:psiphon` process (see
- * AndroidManifest) so its gomobile/Go runtime never shares a process with
- * Xray's Go runtime in the main process — loading both Go runtimes in one
- * process natively crashes the app.
+ * AndroidManifest). Its gomobile/Go runtime is the RELOCATED Psiphon one
+ * (`gi.Seq` + `libpsiphon-gojni.so`, produced by the Gradle
+ * `relocatePsiphonAar` task) — it never shares a process with Xray's Go
+ * runtime (`go.Seq` + `libgojni.so`, main + `:psiphonbridge` processes),
+ * because loading both Go runtimes in one process natively crashes the app
+ * (their native symbols collide process-wide).
  *
  * Because of the process split, state is published to the main process via
  * package-scoped [ACTION_STATUS] broadcasts (state changes + 2s heartbeat),
@@ -39,6 +42,10 @@ class PsiphonVpnService : VpnService() {
     private var currentRegion = ""
     private var psiphonSocksPort = 0
     private var lastStatusText = ""
+    // Exit regions the Psiphon core last reported as available (from
+    // onAvailableEgressRegions). Published in every status broadcast so the
+    // main process can show the live server count in the Psiphon settings.
+    @Volatile private var egressRegions: List<String> = emptyList()
     private val lifecycleLock = Semaphore(1)
     private var bridgeStatusReceiver: BroadcastReceiver? = null
     // True once Psiphon's own tunnel-core reports onConnected(). The public
@@ -72,6 +79,8 @@ class PsiphonVpnService : VpnService() {
         const val EXTRA_STATUS_TEXT = "status_text"
         const val EXTRA_REGION = "region"
         const val EXTRA_LOG_LINES = "log_lines"
+        /** Exit regions currently reported available by the Psiphon core. */
+        const val EXTRA_EGRESS_REGIONS = "egress_regions"
 
         /** Fire-and-forget native log broadcast (also from the bridge service). */
         const val ACTION_LOG = "com.forwin.vpn.PSIPHON_LOG"
@@ -148,6 +157,7 @@ class PsiphonVpnService : VpnService() {
                 putExtra(EXTRA_DOWNLINK, totalDownlink)
                 putExtra(EXTRA_STATUS_TEXT, lastStatusText)
                 putExtra(EXTRA_REGION, currentRegion)
+                putStringArrayListExtra(EXTRA_EGRESS_REGIONS, ArrayList(egressRegions))
                 putStringArrayListExtra(EXTRA_LOG_LINES, lines)
             }
             sendBroadcast(intent)
@@ -198,6 +208,10 @@ class PsiphonVpnService : VpnService() {
         super.onCreate()
         createNotificationChannel()
         try {
+            // gi.Seq = the build-time-relocated Psiphon bridge (go → gi).
+            // Its static initializer loads libpsiphon-gojni.so only, so this
+            // process never sees Xray's libgojni.so. The explicit load below
+            // is a no-op safeguard (System.loadLibrary is idempotent).
             Seq.setContext(applicationContext)
             System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
             Log.d(TAG, "Psiphon native runtime loaded and gomobile context initialized")
@@ -315,6 +329,7 @@ class PsiphonVpnService : VpnService() {
             bridgeConfirmed = false
             updateConnectedState()
             psiphonSocksPort = 0
+            egressRegions = emptyList()
             totalUplink = 0
             totalDownlink = 0
             lastStatusText = "Connecting to Psiphon..."
@@ -430,6 +445,7 @@ class PsiphonVpnService : VpnService() {
             }
             psiphonTunnel = null
             psiphonSocksPort = 0
+            egressRegions = emptyList()
             try {
                 vpnInterface?.close()
             } catch (_: Throwable) {}
@@ -540,6 +556,9 @@ class PsiphonVpnService : VpnService() {
                 .put("EstablishTunnelTimeoutSeconds", 0)
                 .toString()
             override fun loadLibrary(library: String) {
+                // Psiphon's Java layer asks the host to load its native
+                // runtime by the original name "gojni"; map it to the
+                // renamed, symbol-patched libpsiphon-gojni.so.
                 if (library == "gojni") System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
                 else System.loadLibrary(library)
             }
@@ -594,7 +613,11 @@ class PsiphonVpnService : VpnService() {
             }
             override fun onAvailableEgressRegions(regions: MutableList<String>?) {
                 runGuarded("onAvailableEgressRegions") {
-                    plog("available regions: $regions")
+                    egressRegions = regions?.toList() ?: emptyList()
+                    plog("available regions (${egressRegions.size}): $regions")
+                    // Push the fresh server list to the main process so the
+                    // Psiphon settings screen can show the live count.
+                    sendStatus()
                 }
             }
             override fun onSplitTunnelRegions(regions: MutableList<String>?) {

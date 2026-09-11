@@ -2,320 +2,198 @@
 
 ## Overview
 
-This document describes the complete integration of Psiphon Tunnel Core into the 4win VPN Flutter application. The implementation provides a native Android VPN service backed by the official Psiphon tunnel core library.
+Psiphon Tunnel Core (`ca.psiphon:psiphontunnel:2.0.40`, a gomobile-built Go
+library) powers the app's Psiphon protocol. This document describes the
+**actual** data flow and the build-time runtime isolation that keeps Psiphon's
+Go runtime from crashing against Xray's Go runtime.
+
+## Runtime isolation — the problem and the solution
+
+### The problem
+
+This app embeds TWO gomobile-built Go runtimes:
+
+| runtime | Java bridge | native library |
+|---|---|---|
+| Xray (`libv2ray.aar` + `jniLibs`) | `go.Seq` … | `libgojni.so` |
+| Psiphon (`psiphontunnel` AAR) | `go.Seq` … (same names!) | `libgojni.so` |
+
+gomobile's `go.Seq` has a static initializer that runs
+`System.loadLibrary("gojni")`, and its JNI exports (`Java_go_Seq_*`) plus the
+`go/Seq` FindClass strings are baked into each `.so`. Two Go runtimes can
+never live in one Android process: both `.so` files export ~90 identical
+default-visibility C symbols (`main.main`, `crosscall1/2`, `_cgo_*`,
+`go_seq_*`) and Android resolves symbols process-wide, so the second runtime
+executes the first one's scheduler → native crash.
+
+Running Psiphon in its own `:psiphon` process is necessary but **not
+sufficient**: as long as Psiphon's Java bridge classes are named `go.*`, the
+`:psiphon` process resolves them to the Xray copies packaged in the APK,
+loads the 31 MB Xray runtime into the Psiphon process via
+`System.loadLibrary("gojni")`, and then `libpsiphon-gojni.so` loads a second
+Go runtime on top → crash on the first connection. (Stripping `go/*` out of
+the Psiphon AAR — the previous approach — made this worse, not better.)
+
+### The solution: relocate the Psiphon bridge at build time
+
+`android/app/build.gradle.kts` defines the **`relocatePsiphonAar`** task,
+which resolves `ca.psiphon:psiphontunnel:2.0.40` from the Psiphon maven
+repository and runs `tools/relocate_psiphon_aar.py` on it. The script:
+
+1. relocates the gomobile Java bridge package `go` → `gi` in every class of
+   the AAR's `classes.jar` (constant-pool rewrite of class references and
+   `Lgo/…;` descriptors, plus the `loadLibrary("gojni")` constant →
+   `"psiphon-gojni"`). The public `ca.psiphon.*` API is untouched;
+2. renames `jni/<abi>/libgojni.so` → `libpsiphon-gojni.so` and patches each
+   `.so` in place (length-preserving, ELF layout unchanged):
+   - dynamic-symbol names `Java_go_*` → `Java_gi_*`,
+   - baked-in FindClass strings `go/Seq` → `gi/Seq`, `go/Seq$Ref` →
+     `gi/Seq$Ref`, `go/Universe…` → `gi/Universe…`;
+3. verifies nothing `go`-bridge-related survives (hard build failure
+   otherwise).
+
+Because the task runs inside the Gradle build, **local builds and CI produce
+identical results** — there is no CI-only AAR surgery anymore.
+
+### Process × runtime matrix (after the fix)
+
+| process | classes | Go runtime loaded |
+|---|---|---|
+| main | `go.Seq` + `libv2ray.*` (Xray) | `libgojni.so` (Xray) only |
+| `:psiphon` | `gi.Seq` + `ca.psiphon.*` (Psiphon) | `libpsiphon-gojni.so` only |
+| `:psiphonbridge` | `go.Seq` + `libv2ray.*` (Xray tun2socks bridge) | `libgojni.so` (Xray) only |
+
+`GomobileRuntimeInitializer` (a `ContentProvider` declared with
+`android:process=":psiphon"`) calls `gi.Seq.setContext(…)` at process start,
+so the relocated Psiphon runtime is initialized before anything else in that
+process.
 
 ## Architecture
 
 ### Components
 
-1. **Android Native Layer**
-   - `PsiphonVpnService.kt` - Main VPN service extending Android's VpnService
-   - `PsiphonBridgePlugin.kt` - Flutter method channel bridge
-   - Integrated with official `ca.psiphon:psiphontunnel` library
+1. **Android native layer**
+   - `PsiphonVpnService.kt` — VpnService running in the `:psiphon` process;
+     owns the TUN, starts Psiphon core, then launches the bridge service
+   - `PsiphonTunBridgeService.kt` / `PsiphonTunBridge.kt` — `:psiphonbridge`
+     process; Xray TUN inbound bridges device packets to Psiphon's local
+     SOCKS5 listener
+   - `PsiphonStatusStore.kt` — main-process cache of cross-process status
+     broadcasts (state + 2 s heartbeat + log lines)
+   - `MainActivity.kt` — owns the `com.forwin.vpn/psiphon` MethodChannel
+     (permission dialog via `startActivityForResult`, start/stop/reconnect,
+     status/stats/log queries)
 
-2. **Flutter Layer**
-   - `PsiphonVpnManager` - Service manager for native communication
-   - `PsiphonProvider` - Provider pattern for state management
-   - `PsiphonScreen` - UI for Psiphon connections
+2. **Flutter layer**
+   - `VpnProvider` — protocol-agnostic state machine; Psiphon is one of its
+     transports
+   - `PsiphonService` (`lib/services/psiphon_service.dart`) — MethodChannel
+     client for `com.forwin.vpn/psiphon`
 
-### Data Flow
+> The old `psiphon_bridge` plugin and the orphaned
+> `psiphon_screen.dart` / `psiphon_provider.dart` / `psiphon_manager.dart`
+> files were removed — they registered a second handler for the same channel
+> and duplicated the real path.
+
+### Data flow
 
 ```
-Flutter UI (PsiphonScreen)
+Flutter UI
     ↓
-PsiphonProvider (State Management)
+VpnProvider (state management)
     ↓
-PsiphonVpnManager (MethodChannel)
+PsiphonService (MethodChannel com.forwin.vpn/psiphon)
     ↓
-PsiphonBridgePlugin (Kotlin)
+MainActivity (Kotlin, main process — VPN permission + start intent)
     ↓
-PsiphonVpnService (VpnService)
+PsiphonVpnService (:psiphon process)
+    ├─ gi.Seq → libpsiphon-gojni.so (relocated Psiphon Go runtime)
+    ├─ PsiphonTunnel core → SOCKS5 on 127.0.0.1:<port>
+    └─ startTunBridge(fd, port)
+            ↓
+       PsiphonTunBridgeService (:psiphonbridge process)
+            ├─ go.Seq → libgojni.so (Xray Go runtime)
+            └─ Xray TUN inbound → bridges TUN ⇄ SOCKS5
+            ↓
+       broadcasts bridge success/failure back to :psiphon
+            ↓
+PsiphonVpnService marks "connected" only when the bridge confirms
     ↓
-PsiphonTunnel Core (Native)
+ACTION_STATUS broadcasts → PsiphonStatusStore (main process)
+    ↓
+Flutter (isConnected / queryStats / getPsiphonLogs)
 ```
 
-## Features
+"Connected" is deliberately conservative: it requires **both** Psiphon core
+`onConnected()` **and** the `:psiphonbridge` process confirming that device
+traffic is actually flowing through the TUN.
 
-✅ **Connection Management**
-- Start/Stop/Reconnect VPN tunnel
-- Region selection (US, CA, DE, FR, JP, AU, BR, IN, Auto)
-- Automatic reconnection on failure
-
-✅ **Traffic Monitoring**
-- Real-time upload/download statistics
-- Speed calculation (bytes/second)
-- Connection duration tracking
-
-✅ **User Interface**
-- Connection status display with gradient
-- Traffic stats cards
-- Region selector with FilterChip
-- Error messages and logging
-
-✅ **Android Integration**
-- Foreground service with notification
-- VPN permission handling
-- TUN interface setup
-- IPv4 and IPv6 support
-
-## Installation & Setup
-
-### Prerequisites
-
-1. Android SDK 24+ (API level 24)
-2. Flutter 3.9.2+
-3. Java 11+
-
-### Step 1: Add Dependencies
-
-The `android/app/build.gradle.kts` already includes:
-
-```gradle
-implementation("ca.psiphon:psiphontunnel:2.0.40")
-implementation("org.json:json:20231013")
-```
-
-### Step 2: Flutter Dependencies
-
-Ensure `pubspec.yaml` includes:
-
-```yaml
-dependencies:
-  provider: ^6.0.0
-  psiphon_bridge:
-    path: ./psiphon_bridge
-```
-
-### Step 3: Build & Run
+## Build
 
 ```bash
-# Clean build
-flutter clean
 flutter pub get
-
-# Run on Android
-flutter run -d <device-id>
-
-# Build APK
-flutter build apk --release
+flutter build apk --release   # relocatePsiphonAar runs automatically
 ```
 
-## Usage
+Requirements:
 
-### Basic Example
+- Android SDK 24+ / Flutter 3.9+ / JDK 17
+- **python3** (used by `tools/relocate_psiphon_aar.py`; preinstalled on
+  macOS, Linux and most Windows setups)
+- network access to `raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library`
+  on first build (then cached by Gradle)
 
-```dart
-import 'package:provider/provider.dart';
-import 'lib/providers/psiphon_provider.dart';
-import 'lib/screens/psiphon_screen.dart';
-
-void main() {
-  runApp(
-    ChangeNotifierProvider(
-      create: (_) => PsiphonProvider(),
-      child: const MyApp(),
-    ),
-  );
-}
-
-// In your widget:
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: const PsiphonScreen(),
-    );
-  }
-}
-```
-
-### Connect to VPN
-
-```dart
-final provider = context.read<PsiphonProvider>();
-await provider.startConnection('US'); // or 'Auto' for auto-select
-```
-
-### Disconnect from VPN
-
-```dart
-final provider = context.read<PsiphonProvider>();
-await provider.stopConnection();
-```
-
-### Query Connection Status
-
-```dart
-final provider = context.read<PsiphonProvider>();
-print('Connected: ${provider.isConnected}');
-print('Running: ${provider.isRunning}');
-print('Status: ${provider.connectionStatus}');
-```
-
-### Query Traffic Stats
-
-```dart
-final stats = await PsiphonVpnManager.queryTrafficStats();
-print('Upload: ${stats['uplink']} bytes');
-print('Download: ${stats['downlink']} bytes');
-```
-
-## Android Manifest Permissions
-
-The following permissions are required (already in `AndroidManifest.xml`):
-
-```xml
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-<uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-<uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-```
-
-## Service Definition
-
-The `PsiphonVpnService` is already defined in `AndroidManifest.xml`:
-
-```xml
-<service
-    android:name=".PsiphonVpnService"
-    android:permission="android.permission.BIND_VPN_SERVICE"
-    android:exported="false"
-    android:foregroundServiceType="specialUse">
-    <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
-    <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" 
-        android:value="Psiphon VPN tunnel service" />
-</service>
-```
+CI builds (`android-build.yml`, `build-android-apk.yml`) run
+`tools/verify_apk_psiphon.py` on the produced APK to prove both runtimes
+shipped correctly (`libpsiphon-gojni.so` + `libgojni.so`, `gi.Seq` + `go.Seq`
+classes in the dex).
 
 ## Troubleshooting
 
-### Build Errors
+**Build fails with "Psiphon AAR relocation" / verification errors**
+- The relocation script hard-fails if any `go` bridge reference survives —
+  that is intentional. Re-run with the full log; if the upstream AAR changed
+  structure, adjust `tools/relocate_psiphon_aar.py`.
 
-**Error: `Unresolved reference 'PsiphonVpnService'`**
-- Solution: Ensure `android/app/src/main/kotlin/com/forwin/vpn/PsiphonVpnService.kt` exists
-- Rebuild: `flutter clean && flutter pub get`
+**`python3 is required to build the Psiphon runtime relocation step`**
+- Install Python 3 and rebuild.
 
-**Error: `Cannot resolve dependency 'ca.psiphon:psiphontunnel'`**
-- Solution: Maven repository is correctly configured in `build.gradle.kts`
-- Check internet connection and try again
-
-### Runtime Issues
+**Unresolved reference `gi.Seq` in the IDE**
+- Expected before the first Gradle sync: `gi.*` classes exist only inside the
+  AAR generated by `relocatePsiphonAar`. Run a Gradle sync / build once.
 
 **VPN won't connect**
-- Check logcat: `adb logcat | grep Psiphon`
-- Verify VPN permission is granted
-- Ensure Psiphon servers are reachable
+- `adb logcat | grep -E "PsiphonVpnService|PsiphonTunBridge"` — service and
+  bridge each log their stage; check VPN permission and reachability.
 
-**Traffic stats not updating**
-- Stats polling runs every 1 second while connected
-- Check if service is actually running: `provider.isRunning`
+**First connect crash on older builds**
+- Fixed by this relocation: exactly one Go runtime per process. If you see
+  both `libgojni.so` and a *second* runtime loading in one process in the
+  logs, you are running a stale APK.
 
-**Permission denied**
-- First time connecting, user must approve VPN permission
-- Call `preparePsiphon()` before `startConnection()`
-
-## Testing
-
-### Manual Testing
-
-1. **Connect Test**
-   - Launch app → PsiphonScreen
-   - Select region → Click "Connect"
-   - Verify notification appears and stats update
-
-2. **Disconnect Test**
-   - While connected → Click "Disconnect"
-   - Verify notification disappears
-   - Verify stats stop updating
-
-3. **Reconnect Test**
-   - While connected → Click "Reconnect"
-   - Verify brief disconnection then reconnection
-   - Verify connection time resets
-
-4. **Region Change Test**
-   - Select different region → Reconnect
-   - Verify notification shows new region
-
-### Debug Logging
-
-Enable detailed logging:
-
-```bash
-adb logcat | grep "Psiphon"
-```
-
-Key log tags:
-- `PsiphonVpnService` - Service lifecycle
-- `PsiphonBridgePlugin` - Flutter communication
-- `TAG: PsiphonVpnService` - Core tunnel events
-
-## File Structure
+## File map
 
 ```
-android/
-├── app/
-│   ├── build.gradle.kts (modified)
-│   ├── src/main/
-│   │   ├── kotlin/com/forwin/vpn/
-│   │   │   ├── PsiphonVpnService.kt (NEW)
-│   │   │   ├── MainActivity.kt
-│   │   │   └── ...
-│   │   └── AndroidManifest.xml (modified)
-│   └── ...
-└── ...
+tools/
+├── relocate_psiphon_aar.py     # go → gi AAR relocation + ELF patching
+└── verify_apk_psiphon.py       # post-build APK sanity checks
 
-lib/
-├── services/
-│   └── psiphon_manager.dart (NEW)
-├── providers/
-│   └── psiphon_provider.dart (NEW)
-├── screens/
-│   └── psiphon_screen.dart (NEW)
-└── ...
+android/app/
+├── build.gradle.kts            # relocatePsiphonAar task + dependency wiring
+├── libs/libv2ray.aar           # Xray bindings (own go.Seq; untouched)
+├── src/main/jniLibs/*/libgojni.so   # Xray Go runtime (untouched)
+└── src/main/kotlin/com/forwin/vpn/
+    ├── PsiphonVpnService.kt        # :psiphon — uses gi.Seq
+    ├── GomobileRuntimeInitializer.kt # :psiphon provider — gi.Seq.setContext
+    ├── PsiphonTunBridgeService.kt  # :psiphonbridge — Xray-based bridge
+    └── PsiphonStatusStore.kt       # cross-process status cache
 
-psiphon_bridge/
-├── android/
-│   ├── src/main/kotlin/com/forwin/psiphon_bridge/
-│   │   └── PsiphonBridgePlugin.kt (modified)
-│   └── build.gradle (modified)
-└── pubspec.yaml
+lib/services/psiphon_service.dart # MethodChannel client
+lib/providers/vpn_provider.dart   # VpnProvider wires it into the UI
 ```
-
-## Performance Considerations
-
-1. **Traffic Polling**
-   - Stats polled every 1 second for smooth UI updates
-   - Stops automatically when disconnected
-
-2. **Thread Safety**
-   - Uses `Volatile` for thread-safe state
-   - Semaphore ensures only one operation at a time
-
-3. **Memory**
-   - Traffic stats reset on new connection
-   - Foreground service keeps process alive
-
-## Future Enhancements
-
-- [ ] Split tunneling by app package name
-- [ ] Protocol selection (auto/fastest/slowest DNS)
-- [ ] Server list caching and refresh
-- [ ] Connection history and favorites
-- [ ] Advanced statistics (latency, packet loss)
-- [ ] Custom DNS configuration
-- [ ] VPN kill switch option
-
-## License
-
-Psiphon Tunnel Core is licensed under GPL. Ensure your app license is compatible.
 
 ## References
 
 - [Psiphon Tunnel Core](https://github.com/Psiphon-Inc/psiphon-tunnel-core)
+- [Psiphon Android library maven repo](https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library)
 - [Android VpnService](https://developer.android.com/reference/android/net/VpnService)
-- [Flutter Method Channels](https://docs.flutter.dev/platform-integration/platform-channels)
-- [Provider State Management](https://pub.dev/packages/provider)
