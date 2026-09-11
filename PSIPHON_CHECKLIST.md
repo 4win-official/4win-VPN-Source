@@ -49,37 +49,61 @@
 - [x] Add testing guidelines
 - [x] Include performance notes
 
-## ⏳ Pending Tasks
+## ✅ Completed in v1.4.8 (crash-fix + hardening release)
+
+### Crash fix (Psiphon connect crash)
+- [x] Isolate `PsiphonVpnService` in the `:psiphon` process — root cause of the
+  connect crash was TWO gomobile/Go runtimes (Psiphon + Xray) loaded in the
+  main process. Each process now loads exactly one Go runtime.
+- [x] Cross-process status bridge: `:psiphon` publishes state/stats/logs via
+  package-scoped broadcasts → `VpnApplication`-registered receiver →
+  `PsiphonStatusStore` (with heartbeat staleness guard, so a dead service
+  reads back as disconnected instead of sticking on "connected").
+- [x] Guard every Psiphon core callback (they run on Go threads) so failures
+  become log lines, never process kills; added missing `onRevoke()` teardown.
+- [x] Added the missing `queryStats` handler to MainActivity's Psiphon channel
+  (+ `getPsiphonLogs`, `isKillSwitchActive`); `PsiphonBridgePlugin` now reads
+  the same store via reflection so behavior is identical regardless of
+  channel-registration order.
 
 ### Advanced Features
-- [ ] Implement split tunneling by app package
+- [x] Split tunneling for Psiphon (same include/exclude semantics as Xray)
+- [x] VPN kill switch for Psiphon (native TUN blackhole + infinite auto-retry
+  while engaged; the Settings toggle is now actually wired up)
 - [ ] Add protocol selection (DNS Tunneling options)
 - [ ] Implement server list refresh mechanism
 - [ ] Add connection favorites/history
 - [ ] Implement advanced statistics (latency, packet loss)
 - [ ] Add custom DNS configuration UI
-- [ ] Implement VPN kill switch
 
-### Optimization
-- [ ] Add connection retry with exponential backoff
-- [ ] Implement connection timeout detection
-- [ ] Add network change detection and auto-reconnect
+### Reliability
+- [x] Connection retry with exponential backoff (`RetryPolicy`: 4 connect
+  attempts; monitor heals with 5s→60s backoff, unlimited with kill switch)
+- [x] Connection timeout detection (25s per-attempt timeout + give-up paths)
+- [x] Health monitor with auto-reconnect (20s liveness checks + recovery)
+- [x] Live traffic stats for Psiphon (upload/download counters in the UI)
 - [ ] Optimize traffic polling frequency
 - [ ] Cache server list locally
 
 ### Testing
-- [ ] Unit tests for PsiphonVpnManager
-- [ ] Integration tests for PsiphonProvider
-- [ ] Widget tests for PsiphonScreen
+- [x] Unit tests (`retry_policy`, `connection_logger`, `secret_text_cipher`,
+  `xray_config_builder`, `proxy_server`, `xray_server`)
+- [x] Widget smoke test (existing `widget_test.dart`)
+- [x] E2E boot smoke test (`integration_test/app_smoke_test.dart`, on-device)
+- [x] CI test gate (`.github/workflows/flutter-test.yml` on every push/PR)
 - [ ] Android instrumented tests for PsiphonVpnService
-- [ ] E2E tests for connection flow
 
 ### UI/UX
+- [x] Unified connection logs view (all protocols + native lines, protocol
+  filter, copy/clear, survives restarts for post-crash diagnosis)
 - [ ] Add connection animation
 - [ ] Implement speed test feature
 - [ ] Add server latency display
-- [ ] Create detailed connection logs view
 - [ ] Implement connection preferences/settings
+
+## ⏳ Still Pending
+- Advanced statistics, favorites/history, custom DNS UI, protocol selection,
+  instrumented tests, connection animation, speed test, latency display.
 
 ## 🔧 Build & Test Status
 

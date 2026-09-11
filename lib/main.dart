@@ -5,12 +5,16 @@ import 'providers/theme_provider.dart';
 import 'screens/loading_screen.dart';
 import 'screens/openvpn_configs_screen.dart';
 import 'services/ovpn_import_service.dart';
+import 'services/connection_logger.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 bool _homeReady = false;
 void markHomeReady() => _homeReady = true;
 
 void main() {
+  // Restore the persisted log tail (events from before a restart/crash) so
+  // the log viewer can show them; failures are swallowed inside.
+  ConnectionLogger.instance.loadPersisted();
   runApp(const MyApp());
 }
 

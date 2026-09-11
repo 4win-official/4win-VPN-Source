@@ -1,13 +1,22 @@
 name: Android Build
 
 on:
+  # Auto-build on EVERY push (any branch), plus manual dispatch.
+  # NOTE: no `pull_request` trigger on purpose — for same-repo branches the
+  # push run already appears on the PR, so a PR trigger would only duplicate
+  # every run. One push = one run; cancel-in-progress kills the older one.
   push:
     branches:
-      - main
+      - '**'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# Cancel superseded runs on the same branch to save CI minutes.
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-android:
@@ -15,10 +24,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout main
+      - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up Java 17
         uses: actions/setup-java@v4

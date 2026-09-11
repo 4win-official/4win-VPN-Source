@@ -1,7 +1,7 @@
 name: vpn_swift
 description: "4win VPN - Fast, secure, multi-protocol VPN client (SSTP, OpenVPN, Xray, DNS Changer, Slow DNS, Proxy, Psiphon) with automatic server selection."
 publish_to: 'none'
-version: 1.4.7+27
+version: 1.4.8+28
 
 environment:
   sdk: ^3.9.2
@@ -29,6 +29,8 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^5.0.0
 

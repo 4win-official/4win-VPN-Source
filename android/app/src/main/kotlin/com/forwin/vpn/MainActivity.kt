@@ -180,8 +180,19 @@ class MainActivity: FlutterActivity() {
                 }
                 "stop" -> { startService(Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_DISCONNECT)); result.success(true) }
                 "reconnect" -> { startService(Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_RECONNECT)); result.success(true) }
-                "isRunning" -> result.success(PsiphonVpnService.isRunning())
-                "isConnected" -> result.success(PsiphonVpnService.isConnected())
+                // NOTE: PsiphonVpnService runs in the :psiphon process, so its
+                // statics are NOT visible here. All state reads go through
+                // PsiphonStatusStore (fed by cross-process broadcasts).
+                "isRunning" -> result.success(runCatching { PsiphonStatusStore.isRunning() }.getOrDefault(false))
+                "isConnected" -> result.success(runCatching { PsiphonStatusStore.isConnected() }.getOrDefault(false))
+                "isKillSwitchActive" -> result.success(runCatching { PsiphonStatusStore.isKillSwitchActive() }.getOrDefault(false))
+                "queryStats" -> {
+                    val stats = runCatching { PsiphonStatusStore.queryTrafficStats() }.getOrDefault(longArrayOf(0L, 0L))
+                    result.success(mapOf("uplink" to stats[0], "downlink" to stats[1]))
+                }
+                "getPsiphonLogs" -> {
+                    result.success(runCatching { PsiphonStatusStore.getLogs() }.getOrDefault(emptyList<String>()))
+                }
                 else -> result.notImplemented()
             }
         }

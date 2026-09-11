@@ -21,6 +21,8 @@ import '../services/xray_config_builder.dart';
 import '../models/proxy_server.dart';
 import '../services/proxy_service.dart';
 import '../services/psiphon_service.dart';
+import '../services/retry_policy.dart';
+import '../services/connection_logger.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
@@ -35,7 +37,14 @@ class VpnProvider with ChangeNotifier {
   final ProxyServerService _proxyService = ProxyServerService();
   final PsiphonService _psiphonService = PsiphonService();
   Timer? _psiphonMonitorTimer;
-  
+  Timer? _psiphonTrafficTimer;
+  Timer? _psiphonLogTimer;
+  bool _psiphonLogPumpActive = false;
+  bool _psiphonMonitorBusy = false;
+  int _psiphonFailCount = 0;
+  int _psiphonConnectGen = 0;
+  final Set<String> _psiphonLogSeen = <String>{};
+
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
@@ -272,6 +281,14 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
     });
     
+    // Forward SSTP engine logs into the unified connection log so the log
+    // viewer shows every protocol (not just Psiphon) in one place.
+    try {
+      _vpnService.logStream.listen((line) {
+        ConnectionLogger.instance.info('sstp', line);
+      });
+    } catch (_) {}
+
     // Apply the desired Xray default settings + wipe any stale ping results
     // from a previous session, THEN load/test servers (awaited so the ping
     // wipe finishes before anything reloads the stored servers).
@@ -1000,83 +1017,313 @@ class VpnProvider with ChangeNotifier {
   /// Connect through the official Psiphon Android MobileLibrary.
   /// The native service owns the tunnel; this layer only coordinates UI state
   /// and performs a lightweight post-connect liveness check.
+  /// Connect through the official Psiphon tunnel core.
+  ///
+  /// The native service (isolated `:psiphon` process) owns the tunnel; this
+  /// layer coordinates UI state with exponential-backoff retries across
+  /// attempts, merges native log lines into [ConnectionLogger], and respects
+  /// the kill switch: with it ON, a final failure leaves the native blackhole
+  /// engaged (traffic blocked, service alive for the monitor to heal);
+  /// otherwise the service is stopped so traffic flows normally again.
   Future<void> _connectPsiphon() async {
+    final gen = ++_psiphonConnectGen;
+    bool cancelled() =>
+        gen != _psiphonConnectGen ||
+        _selectedProtocol != 'psiphon' ||
+        _status == VpnConnectionStatus.disconnected ||
+        _status == VpnConnectionStatus.disconnecting;
+
+    // A previous session's monitor (e.g. kill-switch healing loop) must not
+    // fight this fresh connect; it restarts on success below.
+    _stopPsiphonMonitor();
+    _psiphonFailCount = 0;
+
+    _status = VpnConnectionStatus.connecting;
+    _errorMessage = null;
+    notifyListeners();
+
+    final log = ConnectionLogger.instance;
+    log.info('psiphon', 'Connecting to Psiphon…');
+    _startPsiphonLogPump();
+
+    const policy = RetryPolicy.psiphonConnect;
     try {
-      _status = VpnConnectionStatus.connecting;
-      _errorMessage = null;
-      notifyListeners();
+      for (var attempt = 0;
+          policy.shouldRetry(attempt);
+          attempt++) {
+        if (cancelled()) return;
+        if (attempt > 0) {
+          final backoff = policy.delayForAttempt(attempt);
+          log.warning('psiphon',
+              'Retrying in ${backoff.inSeconds}s (attempt ${attempt + 1}/${policy.maxAttempts})…');
+          _errorMessage =
+              'Retrying… (attempt ${attempt + 1}/${policy.maxAttempts})';
+          notifyListeners();
+          await Future<void>.delayed(backoff);
+          if (cancelled()) return;
+        }
 
-      final started = await _psiphonService.start();
-      if (!started) {
-        _status = VpnConnectionStatus.error;
-        _errorMessage = 'Unable to start Psiphon VPN service';
-        notifyListeners();
-        return;
-      }
-
-      // Give Psiphon time to obtain a server and establish the tunnel.
-      for (var i = 0; i < 60; i++) {
-        await Future<void>.delayed(const Duration(seconds: 1));
-        if (_selectedProtocol != 'psiphon' ||
-            _status == VpnConnectionStatus.disconnected ||
-            _status == VpnConnectionStatus.disconnecting) {
+        final started = await _psiphonService.start();
+        if (cancelled()) {
+          try {
+            await _psiphonService.stop();
+          } catch (_) {}
           return;
         }
-        if (await _psiphonService.isConnected) {
+        if (!started) {
+          log.warning('psiphon',
+              'Attempt ${attempt + 1}: service did not start (VPN permission pending?)');
+          continue;
+        }
+
+        // Give Psiphon time to obtain a server and establish the tunnel.
+        var attemptConnected = false;
+        for (var i = 0; i < 25; i++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          if (cancelled()) {
+            try {
+              await _psiphonService.stop();
+            } catch (_) {}
+            return;
+          }
+          if (await _psiphonService.isConnected) {
+            attemptConnected = true;
+            break;
+          }
+        }
+        if (attemptConnected) {
+          _psiphonFailCount = 0;
           _status = VpnConnectionStatus.connected;
           _connectedServer = null;
           _errorMessage = null;
+          log.success('psiphon', 'Connected — device traffic is routed');
           _startDurationTimer();
           _startPingTimer();
+          _startPsiphonTraffic();
           _startPsiphonMonitor();
           notifyListeners();
           return;
         }
+        log.warning(
+            'psiphon', 'Attempt ${attempt + 1}: timed out waiting for tunnel');
+        // Clean slate before the next attempt (native blackhole only applies
+        // to the FINAL failure — see below).
+        try {
+          await _psiphonService.stop();
+        } catch (_) {}
+        await Future<void>.delayed(const Duration(milliseconds: 500));
       }
 
-      _status = VpnConnectionStatus.error;
-      _errorMessage = 'Psiphon connection timed out';
+      // All attempts exhausted.
+      final killSwitch = await isKillSwitchEnabled();
+      if (killSwitch) {
+        // Leave the native service engaged: on failure it holds the TUN as a
+        // blackhole (no leaks) and the monitor keeps healing it.
+        log.error('psiphon',
+            'All attempts failed — kill switch engaged, traffic blocked');
+        try {
+          await _psiphonService.start();
+        } catch (_) {}
+        _status = VpnConnectionStatus.error;
+        _errorMessage =
+            'Psiphon unreachable — kill switch is ON, traffic is blocked. Retry or disconnect.';
+        _startPsiphonMonitor();
+      } else {
+        try {
+          await _psiphonService.stop();
+        } catch (_) {}
+        _stopPsiphonLogPump(); // terminal state: nothing more to merge
+        log.error('psiphon', 'All attempts failed — giving up');
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Psiphon connection timed out';
+      }
       notifyListeners();
     } catch (e) {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Psiphon connection failed: $e';
+      log.error('psiphon', 'Connection failed: $e');
       notifyListeners();
     }
   }
 
+  /// Background liveness monitor: every 20s verifies the tunnel is still
+  /// healthy and heals it with backoff. With the kill switch ON it retries
+  /// forever (capped at 1/min); otherwise it gives up after 5 consecutive
+  /// failures, stops the service and reports an error.
   void _startPsiphonMonitor() {
     _psiphonMonitorTimer?.cancel();
-    _psiphonMonitorTimer = Timer.periodic(const Duration(seconds: 20), (_) async {
+    _psiphonMonitorTimer =
+        Timer.periodic(const Duration(seconds: 20), (_) async {
       if (_selectedProtocol != 'psiphon' ||
-          _status != VpnConnectionStatus.connected) {
+          (_status != VpnConnectionStatus.connected &&
+              _status != VpnConnectionStatus.connecting &&
+              _status != VpnConnectionStatus.error)) {
         return;
       }
+      if (_psiphonMonitorBusy) return; // a recovery is already in flight
+      _psiphonMonitorBusy = true;
       try {
         final healthy = await _psiphonService.isConnected;
-        if (healthy) return;
-        if (_status != VpnConnectionStatus.connected) return;
-        _status = VpnConnectionStatus.connecting;
-        notifyListeners();
-        await _psiphonService.reconnect();
-        for (var i = 0; i < 15; i++) {
-          await Future<void>.delayed(const Duration(seconds: 1));
-          if (await _psiphonService.isConnected) {
+        if (healthy) {
+          if (_status != VpnConnectionStatus.connected) {
+            _psiphonFailCount = 0;
             _status = VpnConnectionStatus.connected;
+            _errorMessage = null;
             _startDurationTimer();
+            notifyListeners();
+          } else if (_psiphonFailCount != 0) {
+            _psiphonFailCount = 0;
+          }
+          return;
+        }
+        if (_status != VpnConnectionStatus.connected &&
+            _status != VpnConnectionStatus.error &&
+            _status != VpnConnectionStatus.connecting) {
+          return; // user is disconnecting; leave it alone
+        }
+
+        _psiphonFailCount++;
+        final killSwitch = await isKillSwitchEnabled();
+        final policy = killSwitch
+            ? RetryPolicy.psiphonMonitorKillSwitch
+            : RetryPolicy.psiphonMonitor;
+        final log = ConnectionLogger.instance;
+
+        if (!policy.shouldRetry(_psiphonFailCount - 1)) {
+          log.error('psiphon',
+              'Connection lost — recovery failed ${_psiphonFailCount - 1} times, giving up');
+          try {
+            await _psiphonService.stop();
+          } catch (_) {}
+          _stopPsiphonTraffic();
+          _stopPsiphonMonitor(); // stop ticking: terminal state reached
+          _stopPsiphonLogPump();
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'Psiphon connection lost';
+          notifyListeners();
+          return;
+        }
+
+        final backoff = policy.delayForAttempt(_psiphonFailCount);
+        log.warning('psiphon',
+            'Tunnel unhealthy — recovery attempt $_psiphonFailCount in ${backoff.inSeconds}s…');
+        _status = VpnConnectionStatus.connecting;
+        _errorMessage =
+            'Connection unstable — retrying (attempt $_psiphonFailCount)…';
+        notifyListeners();
+        await Future<void>.delayed(backoff);
+        if (_selectedProtocol != 'psiphon' ||
+            (_status != VpnConnectionStatus.connecting &&
+                _status != VpnConnectionStatus.error)) {
+          return;
+        }
+        await _psiphonService.reconnect();
+        for (var i = 0; i < 20; i++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          if (_selectedProtocol != 'psiphon') return;
+          if (await _psiphonService.isConnected) {
+            _psiphonFailCount = 0;
+            _status = VpnConnectionStatus.connected;
+            _errorMessage = null;
+            log.success('psiphon', 'Tunnel recovered');
+            _startDurationTimer();
+            _startPsiphonTraffic();
             notifyListeners();
             return;
           }
         }
-        _status = VpnConnectionStatus.error;
-        _errorMessage = 'Psiphon connection lost';
-        notifyListeners();
-      } catch (_) {}
+        log.warning('psiphon', 'Recovery attempt timed out — will retry');
+        // Stay in `connecting` so the next tick keeps healing.
+      } catch (_) {} finally {
+        _psiphonMonitorBusy = false;
+      }
     });
   }
 
   void _stopPsiphonMonitor() {
     _psiphonMonitorTimer?.cancel();
     _psiphonMonitorTimer = null;
+    _psiphonMonitorBusy = false;
+  }
+
+  /// Polls cumulative Psiphon tunnel bytes into the shared data-usage counters
+  /// (same pattern as [_startXrayTraffic]).
+  void _startPsiphonTraffic() {
+    _stopPsiphonTraffic();
+    _totalDownloadBytes = 0;
+    _totalUploadBytes = 0;
+    _psiphonTrafficTimer =
+        Timer.periodic(const Duration(seconds: 2), (timer) async {
+      if (!isConnected || _selectedProtocol != 'psiphon') {
+        timer.cancel();
+        return;
+      }
+      try {
+        final stats = await _psiphonService.queryStats();
+        _totalUploadBytes = stats['uplink'] ?? 0;
+        _totalDownloadBytes = stats['downlink'] ?? 0;
+        notifyListeners();
+      } catch (_) {}
+    });
+  }
+
+  void _stopPsiphonTraffic() {
+    _psiphonTrafficTimer?.cancel();
+    _psiphonTrafficTimer = null;
+  }
+
+  /// Merges timestamped native lines from the `:psiphon` / `:psiphonbridge`
+  /// processes into [ConnectionLogger] while a Psiphon session is active.
+  /// Runs during connect attempts AND while connected (native lines keep
+  /// arriving, e.g. network waits, region updates).
+  void _startPsiphonLogPump() {
+    _stopPsiphonLogPump();
+    _psiphonLogPumpActive = true;
+    _psiphonLogTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!_psiphonLogPumpActive || _selectedProtocol != 'psiphon') return;
+      try {
+        final lines = await _psiphonService.getNativeLogs();
+        if (lines.isEmpty) return;
+        final log = ConnectionLogger.instance;
+        for (final line in lines) {
+          if (_psiphonLogSeen.contains(line)) continue;
+          _psiphonLogSeen.add(line);
+          if (_psiphonLogSeen.length > 400) {
+            _psiphonLogSeen.remove(_psiphonLogSeen.first);
+          }
+          final lower = line.toLowerCase();
+          if (lower.contains('fail') || lower.contains('error')) {
+            log.error('psiphon', 'native: $line');
+          } else if (lower.contains('kill switch') ||
+              lower.contains('waiting for network') ||
+              lower.contains('upstream proxy error')) {
+            log.warning('psiphon', 'native: $line');
+          } else if (lower.contains('connected') ||
+              lower.contains('bridge confirmed') ||
+              lower.contains('bridge active')) {
+            log.success('psiphon', 'native: $line');
+          } else {
+            log.info('psiphon', 'native: $line');
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
+  void _stopPsiphonLogPump() {
+    _psiphonLogPumpActive = false;
+    _psiphonLogTimer?.cancel();
+    _psiphonLogTimer = null;
+  }
+
+  /// Whether the user enabled the kill switch in Settings.
+  Future<bool> isKillSwitchEnabled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool('kill_switch') ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Connect via Direct DNS (separate from SSTP)
@@ -2451,7 +2698,11 @@ class VpnProvider with ChangeNotifier {
     try {
       // Disconnect based on protocol
       if (_selectedProtocol == 'psiphon') {
+        _psiphonConnectGen++; // abort any in-flight connect/retry loop
         _stopPsiphonMonitor();
+        _stopPsiphonTraffic();
+        _stopPsiphonLogPump();
+        ConnectionLogger.instance.info('psiphon', 'Disconnect requested');
         await _psiphonService.stop();
         _stopPingTimer();
         _stopDurationTimer();
@@ -2834,6 +3085,8 @@ class VpnProvider with ChangeNotifier {
     _stopPingTimer();
     _stopXrayTraffic();
     _stopPsiphonMonitor();
+    _stopPsiphonTraffic();
+    _stopPsiphonLogPump();
     _vpnService.dispose();
     super.dispose();
   }
