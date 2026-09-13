@@ -27,6 +27,37 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            // R8 code shrinking + resource shrinking. Safe here because every
+            // reflectively-used / manifest-referenced package (go.*, gi.*,
+            // libv2ray.*, ca.psiphon.*, de.blinkt.openvpn.*, our own
+            // com.forwin.vpn.* services/activities) is explicitly kept in
+            // proguard-rules.pro. Does NOT touch ABIs or produce app bundles —
+            // still one universal APK with all 4 ABIs, just with dead Dart/
+            // Kotlin/Java code and unused resources stripped out.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
+    // ── Native library packaging: favor a smaller universal APK ────────────
+    // AGP's modern default (useLegacyPackaging = false) stores jniLibs
+    // UNCOMPRESSED + page-aligned in the APK so they can be mmap'd directly
+    // without extraction — optimized for install footprint/startup speed at
+    // the cost of a bigger APK/download. This app never exec()s a native lib
+    // as a subprocess (Xray/Psiphon are both dlopen()'d via JNI), so there is
+    // no functional reason to avoid legacy packaging, and legacy packaging
+    // compresses the ~128MB of libgojni.so (Xray) + libpsiphon-gojni.so
+    // (Psiphon, all 4 ABIs each) inside the APK itself — measured ~65%
+    // shrink with plain deflate on these libs. This changes NOTHING about
+    // which ABIs are shipped (still all 4, one universal APK); it only
+    // changes how those bytes are stored inside that one file.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 }
@@ -114,8 +145,54 @@ val relocatePsiphonAar = tasks.register("relocatePsiphonAar") {
     }
 }
 
+// ── Xray core AAR trimming (drop unused GeoIP/GeoSite databases) ───────────
+//
+// libv2ray.aar bundles assets/geoip.dat + assets/geosite.dat +
+// assets/geoip-only-cn-private.dat (~31.2 MB combined) for `geoip:`/
+// `geosite:` routing-rule tags. Nothing in this app's Xray configs (see
+// lib/services/xray_config_builder.dart) ever uses those tags — routing is
+// done with literal outbound tags and IP/CIDR rules only — so these assets
+// are pure dead weight in every release APK. `trimLibv2rayAar` strips them
+// out of the AAR at build time, byte-identical otherwise (classes.jar, the
+// AndroidManifest, proguard.txt and res/ are untouched). This does NOT
+// remove any feature/protocol and does NOT touch ABIs: it only deletes three
+// unused data files, shrinking the universal APK by ~31 MB uncompressed.
+val trimLibv2rayAar = tasks.register("trimLibv2rayAar") {
+    group = "build"
+    description = "Strips unused GeoIP/GeoSite database assets out of " +
+        "libv2ray.aar (never referenced by this app's Xray configs)."
+    val script = rootProject.file("../tools/trim_libv2ray_aar.py")
+    val srcAar = file("libs/libv2ray.aar")
+    val outFile = layout.buildDirectory.file("xray/libv2ray-trimmed.aar")
+    inputs.file(script)
+    inputs.file(srcAar)
+    outputs.file(outFile)
+    doLast {
+        if (!script.exists()) {
+            throw GradleException("trim_libv2ray_aar.py not found at ${script.absolutePath}")
+        }
+        if (!srcAar.exists()) {
+            throw GradleException("libv2ray.aar not found at ${srcAar.absolutePath}")
+        }
+        val python = listOf("python3", "python").firstOrNull { cmd ->
+            runCatching {
+                ProcessBuilder(cmd, "--version").start().waitFor() == 0
+            }.getOrDefault(false)
+        } ?: throw GradleException(
+            "python3 is required to build the libv2ray.aar trimming step. " +
+            "Install Python 3 and re-run the build."
+        )
+        val dst = outFile.get().asFile
+        dst.parentFile.mkdirs()
+        logger.lifecycle("Trimming libv2ray.aar (dropping unused geoip/geosite assets) -> ${dst.name}")
+        exec {
+            commandLine(python, script.absolutePath, "--in", srcAar.absolutePath, "--out", dst.absolutePath)
+        }
+    }
+}
+
 dependencies {
-    implementation(files("libs/libv2ray.aar"))
+    implementation(files(trimLibv2rayAar.map { it.outputs.files.singleFile }))
 
     compileOnly("com.github.nizwar:openvpn_library:b3941ef040")
 
@@ -127,6 +204,9 @@ dependencies {
 }
 
 // Belt & suspenders: virtually every AGP task depends on preBuild, so this
-// guarantees the relocated AAR exists before anything compiles/packages it,
-// regardless of file-collection dependency inference.
-tasks.named("preBuild") { dependsOn(relocatePsiphonAar) }
+// guarantees the relocated/trimmed AARs exist before anything compiles/
+// packages them, regardless of file-collection dependency inference.
+tasks.named("preBuild") {
+    dependsOn(relocatePsiphonAar)
+    dependsOn(trimLibv2rayAar)
+}
