@@ -48,9 +48,9 @@ class VpnProvider with ChangeNotifier {
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
   
-  // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', 'xray' or
-  // 'proxy' (dedicated SOCKS4/SOCKS5/HTTP proxy protocol).
-  String _selectedProtocol = 'psiphon';
+  // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', 'xray',
+  // 'proxy' (dedicated SOCKS4/SOCKS5/HTTP proxy protocol) or 'warp'.
+  String _selectedProtocol = 'xray';
   String get selectedProtocol => _selectedProtocol;
 
   // Xray (real Xray core / v2rayNG) servers
@@ -246,6 +246,19 @@ class VpnProvider with ChangeNotifier {
         _selectedProtocol = 'psiphon';
         await _dnsService.setSelectedProtocol('psiphon');
         await prefs.setBool('psiphon_default_v1', true);
+        notifyListeners();
+      }
+      // One-time migration #2: Xray is now the new default protocol (faster,
+      // no bundled Go-runtime overhead beyond what's already shared with
+      // WARP). Runs exactly once per install, after the Psiphon migration
+      // above, and forces everyone onto 'xray' a single time — mirroring
+      // how the Psiphon migration itself was applied. Any protocol choice
+      // the user makes AFTER this runs is preserved normally forever.
+      final migratedXray = prefs.getBool('xray_default_v1') ?? false;
+      if (!migratedXray) {
+        _selectedProtocol = 'xray';
+        await _dnsService.setSelectedProtocol('xray');
+        await prefs.setBool('xray_default_v1', true);
         notifyListeners();
       }
     } catch (_) {}

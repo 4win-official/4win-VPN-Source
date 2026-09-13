@@ -1,4 +1,4 @@
-// Protocol order: Psiphon, Xray, OpenVPN, SSTP, DNS changer, Proxy, Slow DNS.
+// Protocol order: Psiphon, Xray, WARP, OpenVPN, SSTP, DNS changer, Proxy, Slow DNS.
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -242,7 +242,6 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   subtitle: 'Automatic server selection',
                                   icon: Icons.public,
                                   accent: Colors.deepPurple,
-                                  badge: 'Default',
                                 ),
                                 _protocolTile(
                                   context,
@@ -253,6 +252,17 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   subtitle: 'Real Xray core + TLS fragment',
                                   icon: Icons.rocket_launch,
                                   accent: Colors.tealAccent.shade700,
+                                  badge: 'Default',
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'warp',
+                                  title: 'WARP',
+                                  subtitle: 'Cloudflare WireGuard tunnel',
+                                  icon: Icons.cloud_done,
+                                  accent: const Color(0xFFF38020),
                                 ),
                                 _protocolTile(
                                   context,
