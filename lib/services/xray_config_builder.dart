@@ -1,6 +1,7 @@
 import 'dart:convert';
 import '../models/xray_server.dart';
 import '../models/proxy_server.dart';
+import '../models/warp_account.dart';
 
 class XrayConfigBuilder {
   static String build(XrayServer server, {bool fragmentEnabled = true, String fragmentPackets = 'tlshello', String fragmentLength = '10-20', String fragmentInterval = '10-20', String fragmentHost = '', bool trafficCompression = false, bool proxyMode = false, int proxyPort = 4444}) {
@@ -40,6 +41,50 @@ class XrayConfigBuilder {
     final outbound = {'tag': 'proxy', 'protocol': server.protocol == 'http' ? 'http' : 'socks', 'settings': settings};
     return _encode(proxyMode ? _proxyInbounds(proxyPort) : _vpnInbounds(), [outbound, {'tag': 'direct', 'protocol': 'freedom'}], defaultOutbound: 'proxy');
   }
+
+  /// Cloudflare WARP outbound. Xray-core's bundled native library already
+  /// implements the "wireguard" protocol (documented at
+  /// https://xtls.github.io/en/config/outbounds/wireguard.html), so WARP
+  /// needs no new native code — it is just another outbound config routed
+  /// through the exact same core as the `xray`/`proxy` protocols. The
+  /// outbound MUST be tagged 'proxy' (not e.g. 'warp') because
+  /// XrayVpnService's queryTrafficStats() hardcodes the 'proxy' outbound tag.
+  static String buildForWarp(WarpAccount account, {bool proxyMode = false, int proxyPort = 4444}) {
+    final outbound = _warpOutbound(account);
+    return _encode(proxyMode ? _proxyInbounds(proxyPort) : _vpnInbounds(), [outbound, {'tag': 'direct', 'protocol': 'freedom'}], defaultOutbound: 'proxy');
+  }
+
+  /// Real delay-test config for WARP (same pattern as buildProxyServerDelayTest).
+  static String buildWarpDelayTest(WarpAccount account) {
+    final outbound = _warpOutbound(account);
+    return const JsonEncoder.withIndent('  ').convert({'log': {'loglevel': 'none'}, 'dns': {'servers': ['1.1.1.1', '8.8.8.8', 'localhost']}, 'outbounds': [outbound]});
+  }
+
+  static Map<String, dynamic> _warpOutbound(WarpAccount account) => {
+    'tag': 'proxy',
+    'protocol': 'wireguard',
+    'settings': {
+      'secretKey': account.privateKeyBase64,
+      // Xray's `address` field wants bare IPs (no /CIDR suffix) — it is the
+      // client's in-tunnel source address, not a route.
+      'address': [
+        account.addressV4Bare,
+        if (account.addressV6.isNotEmpty) account.addressV6Bare,
+      ],
+      'peers': [
+        {
+          'endpoint': account.peerEndpoint,
+          'publicKey': account.peerPublicKeyBase64,
+          'allowedIPs': ['0.0.0.0/0', '::/0'],
+          // Keep NAT/firewall mappings alive on mobile networks.
+          'keepAlive': 25,
+        }
+      ],
+      'reserved': account.reserved,
+      'mtu': 1280,
+      'domainStrategy': 'ForceIP',
+    },
+  };
 
   static String buildProxyServerDelayTest(ProxyServer server) {
     final user = <Map<String, dynamic>>[];

@@ -20,6 +20,8 @@ import '../services/xray_connection.dart';
 import '../services/xray_config_builder.dart';
 import '../models/proxy_server.dart';
 import '../services/proxy_service.dart';
+import '../models/warp_account.dart';
+import '../services/warp_service.dart';
 import '../services/psiphon_service.dart';
 import '../services/retry_policy.dart';
 import '../services/connection_logger.dart';
@@ -119,7 +121,19 @@ class VpnProvider with ChangeNotifier {
   final Set<String> _proxyRefreshingGroups = {};
   bool proxyGroupRefreshingFor(String group) =>
       _proxyRefreshingGroups.contains(group);
-  
+
+  // WARP (Cloudflare WireGuard). Unlike Xray/Proxy there is no user-picked
+  // server list — a single auto-registered device identity is reused across
+  // connects, cached in memory after the first successful register/load.
+  final WarpService _warpService = WarpService();
+  WarpAccount? _warpAccount;
+  WarpAccount? get warpAccount => _warpAccount;
+  bool _warpRegistering = false;
+  bool get warpRegistering => _warpRegistering;
+  String? _warpError;
+  String? get warpError => _warpError;
+  int _warpConnectGen = 0;
+
   // Slow DNS configs
   List<SlowDnsConfig> _slowDnsConfigs = [];
   SlowDnsConfig? _selectedSlowDnsConfig;
@@ -230,6 +244,39 @@ class VpnProvider with ChangeNotifier {
     loadXrayServers();
     // بارگیری سرورهای پراکسی
     loadProxyServers();
+    // Load any previously-registered WARP identity (no-op if none yet).
+    _loadWarpAccount();
+  }
+
+  /// Loads a previously-persisted WARP identity, if any, WITHOUT
+  /// registering a new one. Registration only happens lazily on first
+  /// WARP connect (see [_connectWarp]).
+  Future<void> _loadWarpAccount() async {
+    try {
+      _warpAccount = await _warpService.getAccount();
+      if (_warpAccount != null) notifyListeners();
+    } catch (_) {}
+  }
+
+  /// Force a fresh WARP identity (discards the current one). Disconnects
+  /// first if a WARP session is active. Exposed for a "Re-register" action
+  /// in the WARP settings section.
+  Future<void> reregisterWarp() async {
+    if (_selectedProtocol == 'warp' && (isConnected || isConnecting)) {
+      await disconnect();
+    }
+    _warpRegistering = true;
+    _warpError = null;
+    notifyListeners();
+    try {
+      _warpAccount = await _warpService.register();
+    } catch (e) {
+      _warpError = 'Could not register WARP identity: ${e.toString()}';
+      if (kDebugMode) debugPrint('⚠️ WARP re-register failed: $e');
+    } finally {
+      _warpRegistering = false;
+      notifyListeners();
+    }
   }
 
   /// On launch: restore the selected protocol and load the saved OpenVPN
@@ -355,6 +402,7 @@ class VpnProvider with ChangeNotifier {
       if (_selectedProtocol == 'direct_dns' ||
           _selectedProtocol == 'slowdns' ||
           _selectedProtocol == 'xray' ||
+          _selectedProtocol == 'warp' ||
           _selectedProtocol == 'openvpn' ||
           _selectedProtocol == 'psiphon') {
         _connectionDuration += const Duration(seconds: 1);
@@ -454,7 +502,9 @@ class VpnProvider with ChangeNotifier {
     _totalUploadBytes = 0;
     _xrayTrafficTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       if (!isConnected ||
-          (_selectedProtocol != 'xray' && _selectedProtocol != 'proxy')) {
+          (_selectedProtocol != 'xray' &&
+              _selectedProtocol != 'proxy' &&
+              _selectedProtocol != 'warp')) {
         timer.cancel();
         return;
       }
@@ -484,9 +534,11 @@ class VpnProvider with ChangeNotifier {
   void _startPingTimer() {
     _stopPingTimer();
 
-    // Xray: NO automatic timer — the user taps to ping (see manualXrayPing).
-    // Show the "click to ping" hint until the first tap.
-    if (_selectedProtocol == 'xray') {
+    // Xray / WARP: NO automatic timer — the user taps to ping (see
+    // manualXrayPing). Both run the same Xray core under the hood, so they
+    // share the exact same manual-ping mechanism. Show the "click to ping"
+    // hint until the first tap.
+    if (_selectedProtocol == 'xray' || _selectedProtocol == 'warp') {
       _xrayPingAwaitingFirstTap = true;
       _currentPing = null;
       _pingFailed = false;
@@ -504,7 +556,7 @@ class VpnProvider with ChangeNotifier {
   /// Manual, tap-triggered ping for Xray. Runs a single real-delay measurement
   /// each time the user taps the ping indicator on the home screen.
   Future<void> manualXrayPing() async {
-    if (_selectedProtocol != 'xray') return;
+    if (_selectedProtocol != 'xray' && _selectedProtocol != 'warp') return;
     if (_xrayPinging) return; // ignore rapid double taps
     _xrayPingAwaitingFirstTap = false;
     _xrayPinging = true;
@@ -539,6 +591,39 @@ class VpnProvider with ChangeNotifier {
       try {
         _pingFailed = false;
         final config = await _buildDelayConfig(server);
+        final testUrl = await getXrayTestUrl();
+        final delay = await XrayConnection.measureDelay(
+          config,
+          url: testUrl,
+        ).timeout(const Duration(seconds: 6), onTimeout: () => -1);
+        if (delay >= 0) {
+          _currentPing = delay;
+          _pingFailed = false;
+        } else {
+          _currentPing = null;
+          _pingFailed = true;
+        }
+      } catch (_) {
+        _currentPing = null;
+        _pingFailed = true;
+      }
+      notifyListeners();
+      return;
+    }
+
+    // WARP mode: real delay through the WireGuard tunnel (same mechanism as
+    // Xray's manual ping — measureDelay against a real HTTP endpoint).
+    if (_selectedProtocol == 'warp') {
+      final account = _warpAccount;
+      if (account == null) {
+        _currentPing = null;
+        _pingFailed = true;
+        notifyListeners();
+        return;
+      }
+      try {
+        _pingFailed = false;
+        final config = XrayConfigBuilder.buildWarpDelayTest(account);
         final testUrl = await getXrayTestUrl();
         final delay = await XrayConnection.measureDelay(
           config,
@@ -797,12 +882,13 @@ class VpnProvider with ChangeNotifier {
     // what made the setting look ignored).
     final modePrefs = await SharedPreferences.getInstance();
     final proxyMode = (modePrefs.getString('connection_mode') ?? 'vpn') == 'proxy';
-    // Both Xray and the dedicated Proxy protocol run the Xray core and can serve
-    // a local proxy without a system tunnel; every other protocol is an
-    // IP-layer VPN and cannot run in connection-mode "proxy".
+    // Xray, the dedicated Proxy protocol AND WARP all run the Xray core and
+    // can serve a local proxy without a system tunnel; every other protocol
+    // is an IP-layer VPN and cannot run in connection-mode "proxy".
     if (proxyMode &&
         _selectedProtocol != 'xray' &&
-        _selectedProtocol != 'proxy') {
+        _selectedProtocol != 'proxy' &&
+        _selectedProtocol != 'warp') {
       _status = VpnConnectionStatus.error;
       _errorMessage =
           'Proxy mode only supports Xray. Switch to the Xray protocol, '
@@ -834,6 +920,10 @@ class VpnProvider with ChangeNotifier {
     } else if (_selectedProtocol == 'proxy') {
       // ✅ Proxy (real SOCKS4/SOCKS5/HTTP): Use selected proxy server
       await _connectProxy();
+      return;
+    } else if (_selectedProtocol == 'warp') {
+      // ✅ WARP (Cloudflare WireGuard via Xray's wireguard outbound)
+      await _connectWarp();
       return;
     }
 
@@ -2694,6 +2784,100 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
+  /// Connect using Cloudflare WARP (WireGuard), routed through the same
+  /// Xray core as the xray/proxy protocols (Xray's native library already
+  /// implements the "wireguard" outbound — no separate native runtime).
+  /// Unlike Xray/Proxy there is no server list: a single device identity is
+  /// auto-registered with Cloudflare on first use and reused afterwards.
+  Future<void> _connectWarp() async {
+    final int myGen = ++_warpConnectGen;
+    bool cancelled() =>
+        myGen != _warpConnectGen ||
+        _status == VpnConnectionStatus.disconnecting ||
+        _status == VpnConnectionStatus.disconnected;
+
+    try {
+      _status = VpnConnectionStatus.connecting;
+      _warpError = null;
+      notifyListeners();
+
+      WarpAccount account;
+      try {
+        if (_warpAccount != null) {
+          account = _warpAccount!;
+        } else {
+          _warpRegistering = true;
+          notifyListeners();
+          account = await _warpService.getOrRegister();
+          _warpAccount = account;
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('⚠️ WARP registration failed: $e');
+        _status = VpnConnectionStatus.error;
+        _warpError = 'Could not register WARP identity: ${e.toString()}';
+        _errorMessage = _warpError;
+        notifyListeners();
+        return;
+      } finally {
+        _warpRegistering = false;
+      }
+
+      if (cancelled()) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      final proxyMode =
+          (prefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+
+      if (!proxyMode) {
+        final granted = await XrayConnection.requestPermission();
+        if (!granted) {
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'VPN permission denied';
+          notifyListeners();
+          return;
+        }
+      }
+
+      if (cancelled()) return;
+
+      final configJson = XrayConfigBuilder.buildForWarp(
+        account,
+        proxyMode: proxyMode,
+      );
+
+      if (kDebugMode) {
+        debugPrint('🚀 Connecting WARP: ${account.addressV4} '
+            'mode=${proxyMode ? "proxy" : "vpn"}');
+      }
+
+      final connected =
+          await XrayConnection.connect(configJson, proxyMode: proxyMode);
+      if (cancelled()) {
+        try {
+          await XrayConnection.disconnect();
+        } catch (_) {}
+        return;
+      }
+      if (connected) {
+        _status = VpnConnectionStatus.connected;
+        _connectedServer = null;
+        _errorMessage = null;
+        _startDurationTimer();
+        _startPingTimer();
+        _startXrayTraffic();
+      } else {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Failed to start WARP tunnel';
+      }
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ WARP connect failed: $e');
+      _status = VpnConnectionStatus.error;
+      _errorMessage = 'Failed to connect: ${e.toString()}';
+      notifyListeners();
+    }
+  }
+
   /// Disconnect from VPN
   Future<void> disconnect() async {
     if (_status == VpnConnectionStatus.disconnecting || _status == VpnConnectionStatus.disconnected) {
@@ -2704,6 +2888,7 @@ class VpnProvider with ChangeNotifier {
     // progress) so it aborts instead of connecting after the user cancelled.
     _xrayConnectGen++;
     _proxyConnectGen++;
+    _warpConnectGen++;
 
     _status = VpnConnectionStatus.disconnecting;
     notifyListeners();
@@ -2774,6 +2959,20 @@ class VpnProvider with ChangeNotifier {
         _activeProxyServer = null;
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting Proxy...');
+        }
+      } else if (_selectedProtocol == 'warp') {
+        // WARP runs the same Xray core → same native disconnect. The
+        // registered identity itself is NOT cleared (kept in memory + on
+        // disk) so the next connect reuses it instead of re-registering.
+        await XrayConnection.disconnect();
+        _stopPingTimer();
+        _stopDurationTimer();
+        _stopXrayTraffic();
+        _connectionDuration = Duration.zero;
+        _totalDownloadBytes = 0;
+        _totalUploadBytes = 0;
+        if (kDebugMode) {
+          debugPrint('🔌 Disconnecting WARP...');
         }
       } else {
         await _vpnService.disconnect();
