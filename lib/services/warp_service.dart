@@ -10,7 +10,7 @@ import '../models/warp_account.dart';
 ///
 /// Cloudflare's client registration API is the same one used by the
 /// official WARP apps and reverse-engineered tools (wgcf, MSN-GUARD):
-///   POST https://api.cloudflareclient.com/<API_VERSION>/reg
+/// `POST https://api.cloudflareclient.com/{API_VERSION}/reg`
 /// with a device-generated X25519 public key. The response contains the
 /// Cloudflare WireGuard peer's public key + endpoint + the tunnel-assigned
 /// IPv4/IPv6 addresses — everything needed to build an Xray "wireguard"
