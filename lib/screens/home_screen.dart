@@ -585,7 +585,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                                     ? Icons.swap_horiz
                                                                     : vpnProvider.selectedProtocol == 'psiphon'
                                                                         ? Icons.public
-                                                                        : Icons.dns,
+                                                                        : vpnProvider.selectedProtocol == 'warp'
+                                                                            ? Icons.cloud_done
+                                                                            : Icons.dns,
                                                 color: vpnProvider.selectedProtocol == 'sstp'
                                                     ? Colors.green
                                                     : vpnProvider.selectedProtocol == 'openvpn'
@@ -598,12 +600,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                                     ? Colors.tealAccent.shade700
                                                                     : vpnProvider.selectedProtocol == 'psiphon'
                                                                         ? Colors.deepPurple
-                                                                        : Colors.blue,
+                                                                        : vpnProvider.selectedProtocol == 'warp'
+                                                                            ? const Color(0xFFF38020)
+                                                                            : Colors.blue,
                                                 size: 20,
                                               ),
                                               const SizedBox(width: 12),
                                               Text(
-                                                'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : vpnProvider.selectedProtocol == "proxy" ? "Proxy" : vpnProvider.selectedProtocol == "psiphon" ? "Psiphon" : "DNS changer"}',
+                                                'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : vpnProvider.selectedProtocol == "proxy" ? "Proxy" : vpnProvider.selectedProtocol == "psiphon" ? "Psiphon" : vpnProvider.selectedProtocol == "warp" ? "WARP" : "DNS changer"}',
                                                 style: TextStyle(
                                                   fontSize: 14,
                                                   color: isDark ? Colors.white : Colors.black87,
@@ -809,6 +813,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         provider.selectedProtocol == 'direct_dns' ||
                                         provider.selectedProtocol == 'xray' ||
                                         provider.selectedProtocol == 'proxy' ||
+                                        provider.selectedProtocol == 'warp' ||
                                         provider.selectedProtocol == 'openvpn' ||
                                         provider.selectedProtocol == 'psiphon'))
                                   Padding(
@@ -1138,6 +1143,58 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     return const SizedBox.shrink();
                   }
 
+                  // WARP: no user-picked server list (single auto-registered
+                  // Cloudflare identity). Show the assigned tunnel IP and a
+                  // "Re-register" action instead of a server-list button.
+                  if (provider.selectedProtocol == 'warp') {
+                    final account = provider.warpAccount;
+                    final label = provider.warpRegistering
+                        ? 'Registering WARP identity…'
+                        : account != null
+                            ? 'WARP: ${account.addressV4Bare}'
+                            : 'WARP (registers on first connect)';
+                    return SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: (provider.isConnecting ||
+                                provider.isConnected ||
+                                provider.warpRegistering)
+                            ? null
+                            : () async {
+                                await provider.reregisterWarp();
+                                if (!context.mounted) return;
+                                final err = provider.warpError;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(err ??
+                                        'New WARP identity registered'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                        icon: Icon(
+                          Icons.cloud_done,
+                          color: const Color(0xFFF38020),
+                        ),
+                        label: Text(
+                          label,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          side: const BorderSide(color: Color(0xFFF38020)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
                   // SSTP: Show "Next Server" only when connected
                   if (!provider.isConnected) {
                     return const SizedBox.shrink();
@@ -1249,7 +1306,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildPingIndicator(VpnProvider provider, bool isDark) {
     final ping = provider.currentPing;
 
-    if (provider.selectedProtocol == 'xray') {
+    if (provider.selectedProtocol == 'xray' || provider.selectedProtocol == 'warp') {
       final pinging = provider.xrayPinging;
       final awaitingFirst = provider.xrayPingAwaitingFirstTap;
 
