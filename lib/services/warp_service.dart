@@ -21,6 +21,17 @@ import '../models/warp_account.dart';
 /// (github.com/ViRb3/wgcf) and were verified live against Cloudflare's API
 /// during development. If Cloudflare ever bumps the API version and starts
 /// rejecting registrations, update [_apiVersion]/[_clientVersion] here.
+///
+/// IMPORTANT — endpoint selection: the WireGuard peer endpoint MUST be a
+/// numeric IPv4 address, never Cloudflare's documented hostname
+/// ("engage.cloudflareclient.com:2408"). On networks/devices where the
+/// hostname's IPv6 (AAAA) record wins DNS resolution but IPv6 has no real
+/// route (this is common on mobile carriers and was reproduced end-to-end
+/// against the live Cloudflare API during development), the WireGuard UDP
+/// handshake fails permanently with "network is unreachable" while the
+/// local SOCKS/HTTP listener still reports itself as connected — the
+/// exact "always shows connected, never actually passes traffic" bug this
+/// avoids. See [register]'s `peerEndpoint` derivation.
 class WarpService {
   static const String _apiBase = 'https://api.cloudflareclient.com';
   static const String _apiVersion = 'v0a1922';
@@ -30,15 +41,34 @@ class WarpService {
   static const String _storageKey = 'warp_account';
 
   /// Load the persisted WARP identity, if one has been registered before.
+  ///
+  /// Self-heals identities saved by an older build that stored the
+  /// hostname endpoint ("engage.cloudflareclient.com:2408") instead of a
+  /// numeric IP — that hostname is what caused the "always connects, never
+  /// actually passes traffic" bug (see [register]). If a hostname is found
+  /// here, wipe the stored identity so the caller re-registers a fresh one
+  /// with a numeric endpoint instead of reusing the broken one forever.
   Future<WarpAccount?> getAccount() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_storageKey);
     if (raw == null || raw.isEmpty) return null;
     try {
-      return WarpAccount.fromStorageString(raw);
+      final account = WarpAccount.fromStorageString(raw);
+      if (_isHostnameEndpoint(account.peerEndpoint)) {
+        await clearAccount();
+        return null;
+      }
+      return account;
     } catch (_) {
       return null;
     }
+  }
+
+  bool _isHostnameEndpoint(String endpoint) {
+    final host = endpoint.split(':').first;
+    // A numeric IPv4 endpoint always starts with a digit; anything else
+    // (e.g. "engage.cloudflareclient.com") is the old, broken hostname form.
+    return host.isEmpty || int.tryParse(host.split('.').first) == null;
   }
 
   Future<void> _saveAccount(WarpAccount account) async {
@@ -118,13 +148,24 @@ class WarpService {
       // keep default [0,0,0] if client_id is missing/malformed
     }
 
-    // Prefer the documented host:port (rotates through Cloudflare's anycast
-    // network); fall back to the numeric v4 endpoint if host is missing.
-    final host = (endpoint['host'] as String?)?.trim();
-    final v4 = (endpoint['v4'] as String?)?.trim();
-    final peerEndpoint = (host != null && host.isNotEmpty)
-        ? host
-        : (v4 != null && v4.isNotEmpty ? v4 : 'engage.cloudflareclient.com:2408');
+    // Use Cloudflare's numeric IPv4 endpoint, NOT the `host` field
+    // ("engage.cloudflareclient.com:2408"). This was verified live during
+    // development: on networks/devices where IPv6 has no real route (very
+    // common — many mobile carriers and this build environment both hit
+    // it), resolving that hostname picks the AAAA (IPv6) record and the
+    // WireGuard UDP handshake fails at the socket layer with
+    // "network is unreachable" — forever, silently, while the local
+    // SOCKS/HTTP listener still reports "connected". That is exactly the
+    // single-fixed-IP / never-actually-connects bug this fixes.
+    //
+    // Cloudflare's `endpoint.v4` field comes back as "ip:0" (port always
+    // 0 — a placeholder), so always force the real WARP UDP port (2408)
+    // onto whatever IP it gives us. If the API ever omits `v4` entirely,
+    // fall back to a known-good literal WARP edge IP (never a hostname,
+    // so DNS/IPv6 selection can never silently reintroduce this bug).
+    final v4Raw = (endpoint['v4'] as String?)?.trim() ?? '';
+    final v4Ip = v4Raw.contains(':') ? v4Raw.split(':').first : v4Raw;
+    final peerEndpoint = v4Ip.isNotEmpty ? '$v4Ip:2408' : '162.159.192.1:2408';
 
     final account = WarpAccount(
       id: json['id'] as String? ?? '',
