@@ -258,27 +258,6 @@ class VpnProvider with ChangeNotifier {
     } catch (_) {}
   }
 
-  /// Force a fresh WARP identity (discards the current one). Disconnects
-  /// first if a WARP session is active. Exposed for a "Re-register" action
-  /// in the WARP settings section.
-  Future<void> reregisterWarp() async {
-    if (_selectedProtocol == 'warp' && (isConnected || isConnecting)) {
-      await disconnect();
-    }
-    _warpRegistering = true;
-    _warpError = null;
-    notifyListeners();
-    try {
-      _warpAccount = await _warpService.register();
-    } catch (e) {
-      _warpError = 'Could not register WARP identity: ${e.toString()}';
-      if (kDebugMode) debugPrint('⚠️ WARP re-register failed: $e');
-    } finally {
-      _warpRegistering = false;
-      notifyListeners();
-    }
-  }
-
   /// On launch: restore the selected protocol and load the saved OpenVPN
   /// configs so the LAST selected config is remembered/preselected. We do NOT
   /// auto-connect — the user must press the power button to connect.
@@ -2787,8 +2766,11 @@ class VpnProvider with ChangeNotifier {
   /// Connect using Cloudflare WARP (WireGuard), routed through the same
   /// Xray core as the xray/proxy protocols (Xray's native library already
   /// implements the "wireguard" outbound — no separate native runtime).
-  /// Unlike Xray/Proxy there is no server list: a single device identity is
-  /// auto-registered with Cloudflare on first use and reused afterwards.
+  /// Unlike Xray/Proxy there is no server list and no user-facing "register"
+  /// action: a single device identity is auto-registered with Cloudflare on
+  /// first use and reused afterwards. Everything — registration, retrying a
+  /// bad identity, picking a working endpoint — happens automatically here;
+  /// the UI only ever displays the resulting endpoint, it never triggers it.
   Future<void> _connectWarp() async {
     final int myGen = ++_warpConnectGen;
     bool cancelled() =>
@@ -2800,29 +2782,6 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.connecting;
       _warpError = null;
       notifyListeners();
-
-      WarpAccount account;
-      try {
-        if (_warpAccount != null) {
-          account = _warpAccount!;
-        } else {
-          _warpRegistering = true;
-          notifyListeners();
-          account = await _warpService.getOrRegister();
-          _warpAccount = account;
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('⚠️ WARP registration failed: $e');
-        _status = VpnConnectionStatus.error;
-        _warpError = 'Could not register WARP identity: ${e.toString()}';
-        _errorMessage = _warpError;
-        notifyListeners();
-        return;
-      } finally {
-        _warpRegistering = false;
-      }
-
-      if (cancelled()) return;
 
       final prefs = await SharedPreferences.getInstance();
       final proxyMode =
@@ -2840,35 +2799,116 @@ class VpnProvider with ChangeNotifier {
 
       if (cancelled()) return;
 
-      final configJson = XrayConfigBuilder.buildForWarp(
-        account,
-        proxyMode: proxyMode,
-      );
+      // Try to bring WARP up end-to-end (register-if-needed → connect →
+      // verify real traffic actually flows). If verification fails — e.g.
+      // a previously-registered identity/endpoint stopped working — wipe it
+      // and register a brand-new one automatically, once, with zero user
+      // interaction. This is the self-healing the protocol needs instead of
+      // ever asking the user to press a "register" button.
+      const maxAttempts = 2;
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (cancelled()) return;
 
-      if (kDebugMode) {
-        debugPrint('🚀 Connecting WARP: ${account.addressV4} '
-            'mode=${proxyMode ? "proxy" : "vpn"}');
-      }
+        WarpAccount account;
+        try {
+          if (_warpAccount != null && attempt == 1) {
+            account = _warpAccount!;
+          } else {
+            _warpRegistering = true;
+            notifyListeners();
+            account = await _warpService.register(); // always fresh on retry
+            _warpAccount = account;
+          }
+        } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ WARP registration failed: $e');
+          _status = VpnConnectionStatus.error;
+          _warpError = 'Could not register WARP identity: ${e.toString()}';
+          _errorMessage = _warpError;
+          notifyListeners();
+          return;
+        } finally {
+          _warpRegistering = false;
+        }
 
-      final connected =
-          await XrayConnection.connect(configJson, proxyMode: proxyMode);
-      if (cancelled()) {
+        if (cancelled()) return;
+
+        final configJson = XrayConfigBuilder.buildForWarp(
+          account,
+          proxyMode: proxyMode,
+        );
+
+        if (kDebugMode) {
+          debugPrint('🚀 Connecting WARP (attempt $attempt): '
+              '${account.addressV4} via ${account.peerEndpoint} '
+              'mode=${proxyMode ? "proxy" : "vpn"}');
+        }
+
+        final started =
+            await XrayConnection.connect(configJson, proxyMode: proxyMode);
+        if (cancelled()) {
+          try {
+            await XrayConnection.disconnect();
+          } catch (_) {}
+          return;
+        }
+        if (!started) {
+          if (attempt < maxAttempts) continue;
+          _status = VpnConnectionStatus.error;
+          _errorMessage = 'Failed to start WARP tunnel';
+          notifyListeners();
+          return;
+        }
+
+        // The native service starting is NOT proof the WireGuard handshake
+        // completed — verify with a real request through the tunnel before
+        // declaring success (same mechanism as the manual ping check).
+        final testUrl = await getXrayTestUrl();
+        final pingConfig = XrayConfigBuilder.buildWarpDelayTest(account);
+        final delay = await XrayConnection.measureDelay(
+          pingConfig,
+          url: testUrl,
+        ).timeout(const Duration(seconds: 8), onTimeout: () => -1);
+
+        if (cancelled()) {
+          try {
+            await XrayConnection.disconnect();
+          } catch (_) {}
+          return;
+        }
+
+        if (delay >= 0) {
+          _status = VpnConnectionStatus.connected;
+          _connectedServer = null;
+          _errorMessage = null;
+          _currentPing = delay;
+          _pingFailed = false;
+          _startDurationTimer();
+          _startPingTimer();
+          _startXrayTraffic();
+          notifyListeners();
+          return;
+        }
+
+        // Verification failed. Tear the dead tunnel down and, unless this
+        // was already the last attempt, discard the identity and loop to
+        // register + connect fresh automatically.
+        if (kDebugMode) {
+          debugPrint('⚠️ WARP attempt $attempt started but no real traffic — '
+              'retrying with a fresh identity');
+        }
         try {
           await XrayConnection.disconnect();
         } catch (_) {}
-        return;
+        if (attempt < maxAttempts) {
+          await _warpService.clearAccount();
+          _warpAccount = null;
+        }
       }
-      if (connected) {
-        _status = VpnConnectionStatus.connected;
-        _connectedServer = null;
-        _errorMessage = null;
-        _startDurationTimer();
-        _startPingTimer();
-        _startXrayTraffic();
-      } else {
-        _status = VpnConnectionStatus.error;
-        _errorMessage = 'Failed to start WARP tunnel';
-      }
+
+      // Exhausted retries.
+      _status = VpnConnectionStatus.error;
+      _warpError = 'WARP could not reach Cloudflare on this network';
+      _errorMessage = _warpError;
       notifyListeners();
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ WARP connect failed: $e');

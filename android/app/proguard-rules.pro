@@ -86,3 +86,17 @@
     public static **[] values();
     public static ** valueOf(java.lang.String);
 }
+
+# ── Google Play Core (Flutter deferred-components support) ──────────────
+# io.flutter.embedding.engine.deferredcomponents.PlayStoreDeferredComponentManager
+# and FlutterPlayStoreSplitApplication reference com.google.android.play.core.*
+# classes for Play Feature Delivery / dynamic feature modules. This app does
+# NOT use deferred/dynamic components, so the play-core library is not a
+# dependency and these classes genuinely do not exist at compile time. R8
+# treats unresolved references as hard errors by default; since the code
+# paths that use them are never invoked (no deferred components declared),
+# it is safe to tell R8 to stop resolving and just keep them as-is.
+# This is the fix documented by the Flutter team for exactly this error:
+# https://github.com/flutter/flutter/issues/119548
+-dontwarn com.google.android.play.core.**
+-keep class com.google.android.play.core.** { *; }

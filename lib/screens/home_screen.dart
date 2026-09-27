@@ -1143,54 +1143,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     return const SizedBox.shrink();
                   }
 
-                  // WARP: no user-picked server list (single auto-registered
-                  // Cloudflare identity). Show the assigned tunnel IP and a
-                  // "Re-register" action instead of a server-list button.
+                  // WARP: no user-picked server list and no manual "register"
+                  // action — the app registers the Cloudflare identity by
+                  // itself automatically (on first connect, and again by
+                  // itself if a stored identity turns out to be unusable).
+                  // This is a plain read-only status readout showing the
+                  // Cloudflare edge endpoint currently in use, NOT a button.
                   if (provider.selectedProtocol == 'warp') {
                     final account = provider.warpAccount;
                     final label = provider.warpRegistering
                         ? 'Registering WARP identity…'
                         : account != null
-                            ? 'WARP: ${account.addressV4Bare}'
-                            : 'WARP (registers on first connect)';
-                    return SizedBox(
+                            ? 'WARP endpoint: ${account.peerEndpoint}'
+                            : 'WARP (sets up automatically on connect)';
+                    return Container(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: (provider.isConnecting ||
-                                provider.isConnected ||
-                                provider.warpRegistering)
-                            ? null
-                            : () async {
-                                await provider.reregisterWarp();
-                                if (!context.mounted) return;
-                                final err = provider.warpError;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(err ??
-                                        'New WARP identity registered'),
-                                    duration: const Duration(seconds: 2),
-                                  ),
-                                );
-                              },
-                        icon: Icon(
-                          Icons.cloud_done,
-                          color: const Color(0xFFF38020),
-                        ),
-                        label: Text(
-                          label,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 16, horizontal: 16),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                            color: const Color(0xFFF38020).withValues(alpha: 0.5)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.cloud_done,
+                            color: Color(0xFFF38020),
                           ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          side: const BorderSide(color: Color(0xFFF38020)),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              label,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     );
                   }
