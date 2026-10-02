@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vpn_swift/models/proxy_server.dart';
+import 'package:vpn_swift/models/warp_account.dart';
 import 'package:vpn_swift/models/xray_server.dart';
 import 'package:vpn_swift/services/xray_config_builder.dart';
 
@@ -112,6 +113,30 @@ void main() {
         port: 443,
       );
       expect(() => XrayConfigBuilder.build(bad), throwsFormatException);
+    });
+
+    test('buildForWarp disables kernel TUN on Android and configures remote DNS', () {
+      const account = WarpAccount(
+        id: 'id',
+        accountId: 'account',
+        token: 'token',
+        privateKeyBase64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+        publicKeyBase64: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=',
+        peerPublicKeyBase64: 'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=',
+        peerEndpoint: '162.159.192.1:2408',
+        addressV4: '172.16.0.2/32',
+        addressV6: '',
+        reserved: [0, 0, 0],
+      );
+
+      final config = jsonDecode(XrayConfigBuilder.buildForWarp(account))
+          as Map<String, dynamic>;
+      final settings = (config['outbounds'] as List).first['settings']
+          as Map<String, dynamic>;
+
+      expect(settings['noKernelTun'], isTrue);
+      expect(settings['remoteDNS'], ['1.1.1.1', '1.0.0.1']);
+      expect(settings.containsKey('domainStrategy'), isFalse);
     });
   });
 }

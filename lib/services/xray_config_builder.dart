@@ -60,31 +60,70 @@ class XrayConfigBuilder {
     return const JsonEncoder.withIndent('  ').convert({'log': {'loglevel': 'none'}, 'dns': {'servers': ['1.1.1.1', '8.8.8.8', 'localhost']}, 'outbounds': [outbound]});
   }
 
-  static Map<String, dynamic> _warpOutbound(WarpAccount account) => {
-    'tag': 'proxy',
-    'protocol': 'wireguard',
-    'settings': {
-      'secretKey': account.privateKeyBase64,
-      // Xray's `address` field wants bare IPs (no /CIDR suffix) — it is the
-      // client's in-tunnel source address, not a route.
-      'address': [
-        account.addressV4Bare,
-        if (account.addressV6.isNotEmpty) account.addressV6Bare,
-      ],
-      'peers': [
-        {
-          'endpoint': account.peerEndpoint,
-          'publicKey': account.peerPublicKeyBase64,
-          'allowedIPs': ['0.0.0.0/0', '::/0'],
-          // Keep NAT/firewall mappings alive on mobile networks.
-          'keepAlive': 25,
+  static Map<String, dynamic> _warpOutbound(WarpAccount account) {
+    _validateWarpAccount(account);
+    return {
+      'tag': 'proxy',
+      'protocol': 'wireguard',
+      'settings': {
+        'secretKey': account.privateKeyBase64,
+        // Xray's `address` field wants bare IPs (no /CIDR suffix) — it is the
+        // client's in-tunnel source address, not a route.
+        'address': [
+          account.addressV4Bare,
+          if (account.addressV6.isNotEmpty) account.addressV6Bare,
+        ],
+        'peers': [
+          {
+            'endpoint': account.peerEndpoint,
+            'publicKey': account.peerPublicKeyBase64,
+            'allowedIPs': ['0.0.0.0/0', '::/0'],
+            // Keep NAT/firewall mappings alive on mobile networks.
+            'keepAlive': 25,
+          }
+        ],
+        'reserved': account.reserved,
+        'mtu': 1280,
+        // Android's Xray process already owns the app VPN TUN. If the
+        // WireGuard outbound auto-detects kernel TUN here it can try to create
+        // a second privileged TUN and terminate the native Go runtime instead
+        // of returning a config error. Force the in-process gVisor stack.
+        'noKernelTun': true,
+        // WireGuard outbounds need their own IP DNS resolvers for domain
+        // targets; the generic Xray DNS block cannot be used for this path.
+        'remoteDNS': ['1.1.1.1', '1.0.0.1'],
+      },
+    };
+  }
+
+  /// Reject malformed persisted identities before they reach the native
+  /// Xray/Go runtime. A corrupt or partially-written WARP account used to
+  /// make the native wireguard handler terminate the whole app instead of
+  /// returning a normal connection error.
+  static void _validateWarpAccount(WarpAccount account) {
+    for (final key in [
+      account.privateKeyBase64,
+      account.publicKeyBase64,
+      account.peerPublicKeyBase64,
+    ]) {
+      try {
+        if (base64.decode(key).length != 32) {
+          throw const FormatException('WARP key must decode to 32 bytes');
         }
-      ],
-      'reserved': account.reserved,
-      'mtu': 1280,
-      'domainStrategy': 'ForceIP',
-    },
-  };
+      } on FormatException {
+        rethrow;
+      } catch (_) {
+        throw const FormatException('Invalid WARP key encoding');
+      }
+    }
+    if (account.addressV4Bare.isEmpty || account.peerEndpoint.trim().isEmpty) {
+      throw const FormatException('WARP account is missing an address or peer');
+    }
+    if (account.reserved.length != 3 ||
+        account.reserved.any((value) => value < 0 || value > 255)) {
+      throw const FormatException('WARP reserved bytes must contain 3 bytes');
+    }
+  }
 
   static String buildProxyServerDelayTest(ProxyServer server) {
     final user = <Map<String, dynamic>>[];
