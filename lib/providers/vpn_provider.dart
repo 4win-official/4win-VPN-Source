@@ -590,35 +590,14 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
-    // WARP mode: real delay through the WireGuard tunnel (same mechanism as
-    // Xray's manual ping — measureDelay against a real HTTP endpoint).
+    // WARP mode deliberately does not call measureDelay. That API creates a
+    // second Xray core in the app process; doing so while the WARP WireGuard
+    // core is already running can crash libv2ray/native Go on Android.
+    // WARP latency is therefore left unset until a dedicated in-service
+    // health check exists.
     if (_selectedProtocol == 'warp') {
-      final account = _warpAccount;
-      if (account == null) {
-        _currentPing = null;
-        _pingFailed = true;
-        notifyListeners();
-        return;
-      }
-      try {
-        _pingFailed = false;
-        final config = XrayConfigBuilder.buildWarpDelayTest(account);
-        final testUrl = await getXrayTestUrl();
-        final delay = await XrayConnection.measureDelay(
-          config,
-          url: testUrl,
-        ).timeout(const Duration(seconds: 6), onTimeout: () => -1);
-        if (delay >= 0) {
-          _currentPing = delay;
-          _pingFailed = false;
-        } else {
-          _currentPing = null;
-          _pingFailed = true;
-        }
-      } catch (_) {
-        _currentPing = null;
-        _pingFailed = true;
-      }
+      _currentPing = null;
+      _pingFailed = false;
       notifyListeners();
       return;
     }
@@ -2859,16 +2838,6 @@ class VpnProvider with ChangeNotifier {
           return;
         }
 
-        // The native service starting is NOT proof the WireGuard handshake
-        // completed — verify with a real request through the tunnel before
-        // declaring success (same mechanism as the manual ping check).
-        final testUrl = await getXrayTestUrl();
-        final pingConfig = XrayConfigBuilder.buildWarpDelayTest(account);
-        final delay = await XrayConnection.measureDelay(
-          pingConfig,
-          url: testUrl,
-        ).timeout(const Duration(seconds: 8), onTimeout: () => -1);
-
         if (cancelled()) {
           try {
             await XrayConnection.disconnect();
@@ -2876,33 +2845,19 @@ class VpnProvider with ChangeNotifier {
           return;
         }
 
-        if (delay >= 0) {
-          _status = VpnConnectionStatus.connected;
-          _connectedServer = null;
-          _errorMessage = null;
-          _currentPing = delay;
-          _pingFailed = false;
-          _startDurationTimer();
-          _startPingTimer();
-          _startXrayTraffic();
-          notifyListeners();
-          return;
-        }
-
-        // Verification failed. Tear the dead tunnel down and, unless this
-        // was already the last attempt, discard the identity and loop to
-        // register + connect fresh automatically.
-        if (kDebugMode) {
-          debugPrint('⚠️ WARP attempt $attempt started but no real traffic — '
-              'retrying with a fresh identity');
-        }
-        try {
-          await XrayConnection.disconnect();
-        } catch (_) {}
-        if (attempt < maxAttempts) {
-          await _warpService.clearAccount();
-          _warpAccount = null;
-        }
+        // XrayConnection.connect only returns after the service has accepted
+        // the config. Do not call measureDelay here: it starts a second core,
+        // and the concurrent WireGuard core is the native crash trigger.
+        _status = VpnConnectionStatus.connected;
+        _connectedServer = null;
+        _errorMessage = null;
+        _currentPing = null;
+        _pingFailed = false;
+        _startDurationTimer();
+        _startPingTimer();
+        _startXrayTraffic();
+        notifyListeners();
+        return;
       }
 
       // Exhausted retries.
