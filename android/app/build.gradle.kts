@@ -73,7 +73,7 @@ flutter { source = "../.." }
 // Build the native WARP core from source for the ABIs shipped by the
 // universal APK. This deliberately avoids copying a package-specific binary
 // from another application.
-val aetherAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+val aetherAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 aetherAbis.forEach { abi ->
     val taskName = "buildAether${abi.split('-').joinToString("") { it.replaceFirstChar(Char::uppercase) }}"
     tasks.register<Exec>(taskName) {

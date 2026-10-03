@@ -37,6 +37,11 @@ case "$ABI" in
     CLANG_PREFIX="x86_64-linux-android"
     INCLUDE_ARCH="x86_64-linux-android"
     ;;
+  x86)
+    TARGET_TRIPLE="i686-linux-android"
+    CLANG_PREFIX="i686-linux-android"
+    INCLUDE_ARCH="i686-linux-android"
+    ;;
   *)
     echo "Unsupported ABI: $ABI" >&2
     exit 2
