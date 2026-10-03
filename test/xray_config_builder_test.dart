@@ -115,7 +115,7 @@ void main() {
       expect(() => XrayConfigBuilder.build(bad), throwsFormatException);
     });
 
-    test('buildForWarp disables kernel TUN on Android and configures remote DNS', () {
+    test('buildForWarp selects the Aether WireGuard data-plane', () {
       const account = WarpAccount(
         id: 'id',
         accountId: 'account',
@@ -131,12 +131,11 @@ void main() {
 
       final config = jsonDecode(XrayConfigBuilder.buildForWarp(account))
           as Map<String, dynamic>;
-      final settings = (config['outbounds'] as List).first['settings']
-          as Map<String, dynamic>;
 
-      expect(settings['noKernelTun'], isTrue);
-      expect(settings['remoteDNS'], ['1.1.1.1', '1.0.0.1']);
-      expect(settings.containsKey('domainStrategy'), isFalse);
+      expect(config['protocol'], 'wg');
+      expect(config['wireguard_data_check'], isTrue);
+      expect(config['endpoint_discovery'], 'cache');
+      expect(config['config_path'], contains('__APP_FILES__'));
     });
   });
 }

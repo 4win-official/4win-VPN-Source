@@ -590,14 +590,27 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
-    // WARP mode deliberately does not call measureDelay. That API creates a
-    // second Xray core in the app process; doing so while the WARP WireGuard
-    // core is already running can crash libv2ray/native Go on Android.
-    // WARP latency is therefore left unset until a dedicated in-service
-    // health check exists.
+    // WARP uses Aether's already-running core. The native measureDelay branch
+    // returns the endpoint handshake + HTTP data-plane RTT and never starts a
+    // second Xray core.
     if (_selectedProtocol == 'warp') {
-      _currentPing = null;
-      _pingFailed = false;
+      final account = _warpAccount;
+      if (account == null) {
+        _currentPing = null;
+        _pingFailed = true;
+        notifyListeners();
+        return;
+      }
+      try {
+        final delay = await XrayConnection.measureDelay(
+          XrayConfigBuilder.buildWarpDelayTest(account),
+        ).timeout(const Duration(seconds: 6), onTimeout: () => -1);
+        _currentPing = delay >= 0 ? delay : null;
+        _pingFailed = delay < 0;
+      } catch (_) {
+        _currentPing = null;
+        _pingFailed = true;
+      }
       notifyListeners();
       return;
     }

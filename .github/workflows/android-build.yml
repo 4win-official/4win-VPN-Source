@@ -57,6 +57,14 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Set up Rust for Aether WARP
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
       - name: Build release APK
         shell: bash
         run: |

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import org.json.JSONObject
 import androidx.core.app.NotificationCompat
 import go.Seq
 import libv2ray.CoreCallbackHandler
@@ -30,6 +31,7 @@ class XrayVpnService : VpnService() {
     private var coreController: CoreController? = null
     private var configJson: String? = null
     @Volatile private var isRunning = false
+    @Volatile private var aetherActive = false
 
     companion object {
         const val ACTION_CONNECT = "com.forwin.vpn.XRAY_CONNECT"
@@ -100,6 +102,10 @@ class XrayVpnService : VpnService() {
         }
 
         try {
+            if (config.contains("__APP_FILES__")) {
+                startAether(config)
+                return
+            }
             val builder = Builder()
                 .setSession("4win VPN - Xray")
                 .setMtu(VPN_MTU)
@@ -165,6 +171,67 @@ class XrayVpnService : VpnService() {
         }
     }
 
+    /** Starts WARP through Aether, not Xray's WireGuard outbound. Aether only
+     * emits ready after endpoint handshake plus a real HTTP probe. */
+    private fun startAether(rawConfig: String) {
+        if (isRunning || aetherActive) return
+        var tun: ParcelFileDescriptor? = null
+        try {
+            val config = rawConfig.replace("__APP_FILES__", filesDir.absolutePath)
+            NativeCore.attach(this)
+            val addresses = NativeCore.prepare(config)
+            val builder = Builder()
+                .setSession("4win VPN - WARP")
+                .setMtu(1280)
+                .addAddress(addresses.ipv4.substringBefore('/'), 32)
+                .addRoute("0.0.0.0", 0)
+                .addDnsServer("1.1.1.1")
+                .addDnsServer("8.8.8.8")
+            if (addresses.ipv6.isNotBlank()) {
+                runCatching {
+                    builder.addAddress(addresses.ipv6.substringBefore('/'), 128)
+                    builder.addRoute("::", 0)
+                }
+            }
+            if (SplitTunnel.mode(applicationContext) != "include") {
+                runCatching { builder.addDisallowedApplication(packageName) }
+            }
+            SplitTunnel.apply(applicationContext, builder, packageName)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
+            tun = builder.establish() ?: error("Failed to establish WARP VPN interface")
+            vpnInterface = tun
+            aetherActive = true
+            isRunning = true
+            isServiceRunning = true
+            totalUplink = 0L
+            totalDownlink = 0L
+            val result = NativeCore.start(config, tun.fd)
+            if (result != 0) error(NativeCore.lastError().ifBlank { "Aether exited with code $result" })
+            stopXray()
+        } catch (t: Throwable) {
+            android.util.Log.e(TAG, "Aether WARP failed: ${t.message}", t)
+            runCatching { NativeCore.stop() }
+            runCatching { NativeCore.detach() }
+            aetherActive = false
+            stopXray()
+        }
+    }
+
+    /** Called by the Aether JNI callback; status=connected is emitted only after
+     * its data-plane validation, unlike the old Xray handshake-only path. */
+    fun onEvent(json: String) {
+        runCatching {
+            val event = JSONObject(json)
+            if (event.optString("type") == "traffic") {
+                totalUplink = event.optLong("tx")
+                totalDownlink = event.optLong("rx")
+            }
+            android.util.Log.d(TAG, "Aether event: $json")
+        }
+    }
+
+    fun protectSocket(fd: Int): Boolean = protect(fd)
+
     private fun stopXray() {
         try {
             isRunning = false
@@ -173,6 +240,11 @@ class XrayVpnService : VpnService() {
             totalUplink = 0L
             totalDownlink = 0L
 
+            if (aetherActive) {
+                runCatching { NativeCore.stop() }
+                runCatching { NativeCore.detach() }
+                aetherActive = false
+            }
             try {
                 coreController?.stopLoop()
             } catch (e: Exception) {

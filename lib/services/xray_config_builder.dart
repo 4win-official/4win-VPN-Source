@@ -42,58 +42,29 @@ class XrayConfigBuilder {
     return _encode(proxyMode ? _proxyInbounds(proxyPort) : _vpnInbounds(), [outbound, {'tag': 'direct', 'protocol': 'freedom'}], defaultOutbound: 'proxy');
   }
 
-  /// Cloudflare WARP outbound. Xray-core's bundled native library already
-  /// implements the "wireguard" protocol (documented at
-  /// https://xtls.github.io/en/config/outbounds/wireguard.html), so WARP
-  /// needs no new native code — it is just another outbound config routed
-  /// through the exact same core as the `xray`/`proxy` protocols. The
-  /// outbound MUST be tagged 'proxy' (not e.g. 'warp') because
-  /// XrayVpnService's queryTrafficStats() hardcodes the 'proxy' outbound tag.
+  /// Cloudflare WARP configuration for the Aether native core. Unlike the old
+  /// Xray outbound, Aether owns the Cloudflare registration, endpoint scan,
+  /// WireGuard reserved/client-id framing and data-plane validation.
   static String buildForWarp(WarpAccount account, {bool proxyMode = false, int proxyPort = 4444}) {
-    final outbound = _warpOutbound(account);
-    return _encode(proxyMode ? _proxyInbounds(proxyPort) : _vpnInbounds(), [outbound, {'tag': 'direct', 'protocol': 'freedom'}], defaultOutbound: 'proxy');
+    _validateWarpAccount(account);
+    return const JsonEncoder.withIndent('  ').convert({
+      'config_path': '__APP_FILES__/aether-warp.toml',
+      'wireguard_config_path': '__APP_FILES__/aether-warp.toml',
+      'protocol': 'wg',
+      'listen': '127.0.0.1:1819',
+      'scan_mode': 'balanced',
+      'ip_scan': 'v4',
+      'endpoint_discovery': 'cache',
+      'wireguard_data_check': true,
+      'retry_obfuscation_profiles': true,
+      'tls_curve_preset': 'chrome',
+      'log_level': 'info',
+    });
   }
 
   /// Real delay-test config for WARP (same pattern as buildProxyServerDelayTest).
   static String buildWarpDelayTest(WarpAccount account) {
-    final outbound = _warpOutbound(account);
-    return const JsonEncoder.withIndent('  ').convert({'log': {'loglevel': 'none'}, 'dns': {'servers': ['1.1.1.1', '8.8.8.8', 'localhost']}, 'outbounds': [outbound]});
-  }
-
-  static Map<String, dynamic> _warpOutbound(WarpAccount account) {
-    _validateWarpAccount(account);
-    return {
-      'tag': 'proxy',
-      'protocol': 'wireguard',
-      'settings': {
-        'secretKey': account.privateKeyBase64,
-        // Xray's `address` field wants bare IPs (no /CIDR suffix) — it is the
-        // client's in-tunnel source address, not a route.
-        'address': [
-          account.addressV4Bare,
-          if (account.addressV6.isNotEmpty) account.addressV6Bare,
-        ],
-        'peers': [
-          {
-            'endpoint': account.peerEndpoint,
-            'publicKey': account.peerPublicKeyBase64,
-            'allowedIPs': ['0.0.0.0/0', '::/0'],
-            // Keep NAT/firewall mappings alive on mobile networks.
-            'keepAlive': 25,
-          }
-        ],
-        'reserved': account.reserved,
-        'mtu': 1280,
-        // Android's Xray process already owns the app VPN TUN. If the
-        // WireGuard outbound auto-detects kernel TUN here it can try to create
-        // a second privileged TUN and terminate the native Go runtime instead
-        // of returning a config error. Force the in-process gVisor stack.
-        'noKernelTun': true,
-        // WireGuard outbounds need their own IP DNS resolvers for domain
-        // targets; the generic Xray DNS block cannot be used for this path.
-        'remoteDNS': ['1.1.1.1', '1.0.0.1'],
-      },
-    };
+    return buildForWarp(account);
   }
 
   /// Reject malformed persisted identities before they reach the native

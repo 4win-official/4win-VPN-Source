@@ -335,6 +335,25 @@ class MainActivity: FlutterActivity() {
                     } else {
                         startService(intent)
                     }
+                    if (configJson.contains("__APP_FILES__")) {
+                        // Aether scans endpoints and performs a real data-plane
+                        // check before emitting ready. Do not let Flutter mark
+                        // the tunnel connected merely because the service was
+                        // accepted by Android.
+                        Thread {
+                            val deadline = System.currentTimeMillis() + 45_000L
+                            var ready = false
+                            while (System.currentTimeMillis() < deadline) {
+                                if (runCatching { NativeCore.isReady() }.getOrDefault(false)) {
+                                    ready = true
+                                    break
+                                }
+                                Thread.sleep(250L)
+                            }
+                            runOnUiThread { result.success(ready) }
+                        }.start()
+                        return@setMethodCallHandler
+                    }
                     result.success(true)
                 }
                 "disconnectXray" -> {
@@ -380,6 +399,16 @@ class MainActivity: FlutterActivity() {
                     val configJson = call.argument<String>("configJson") ?: ""
                     val url = call.argument<String>("url")
                         ?: "https://www.google.com/generate_204"
+                    if (configJson.contains("__APP_FILES__")) {
+                        // WARP is already running in Aether. Its connect path
+                        // performs the same handshake + HTTP data-plane check;
+                        // return that measured RTT instead of starting a second
+                        // native core in this process.
+                        result.success(
+                            if (NativeCore.isReady()) NativeCore.lastRttMs().toInt() else -1
+                        )
+                        return@setMethodCallHandler
+                    }
                     Thread {
                         val delay = measureXrayDelay(configJson, url)
                         runOnUiThread { result.success(delay) }
