@@ -74,8 +74,10 @@ flutter { source = "../.." }
 // universal APK. This deliberately avoids copying a package-specific binary
 // from another application.
 val aetherAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+val aetherTaskNames = mutableListOf<String>()
 aetherAbis.forEach { abi ->
     val taskName = "buildAether${abi.split('-').joinToString("") { it.replaceFirstChar(Char::uppercase) }}"
+    aetherTaskNames += taskName
     tasks.register<Exec>(taskName) {
         group = "build"
         description = "Builds the Aether WARP core for $abi"
@@ -90,6 +92,17 @@ aetherAbis.forEach { abi ->
         outputs.file(file("src/main/jniLibs/$abi/libaether.so"))
     }
     tasks.named("preBuild").configure { dependsOn(taskName) }
+}
+
+// The Android Gradle plugin configures/imports CMake before `preBuild`. The
+// imported Aether shared library must therefore exist before either the CMake
+// configure task or the CMake build task starts; depending only on preBuild is
+// too late and produces a misleading "libaether.so missing" error.
+tasks.matching {
+    it.name.contains("CMake", ignoreCase = true) ||
+        it.name.contains("ExternalNativeBuild", ignoreCase = true)
+}.configureEach {
+    dependsOn(aetherTaskNames)
 }
 
 repositories {
