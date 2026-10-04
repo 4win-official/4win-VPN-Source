@@ -58,6 +58,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CRATE="$SCRIPT_DIR/aether"
 TARGET="$CRATE/target-android"
+# Each ABI build produces a large Rust/BoringSSL intermediate tree. The final
+# APK only needs the copied shared library, so always remove intermediates when
+# this script exits; otherwise the sequential universal build can exhaust the
+# GitHub runner disk before Gradle packages the APK.
+trap 'rm -rf "$TARGET"' EXIT
 
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 if [[ -z "$SDK" ]]; then
