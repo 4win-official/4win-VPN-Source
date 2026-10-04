@@ -149,7 +149,7 @@ cd "$CRATE"
 cargo build --release --lib --target "$TARGET_TRIPLE"
 
 LIBRARY="$TARGET/$TARGET_TRIPLE/release/libaether.so"
-for DESTINATION in "$ROOT/core/android-libs/$ABI" "$ROOT/app/src/main/jniLibs/$ABI"; do
+for DESTINATION in "$SCRIPT_DIR/android-libs/$ABI" "$ROOT/android/app/src/main/jniLibs/$ABI"; do
   mkdir -p "$DESTINATION"
   cp -f "$LIBRARY" "$DESTINATION/libaether.so"
 done
