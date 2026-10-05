@@ -77,6 +77,20 @@ class XrayConnection {
     }
   }
 
+  /// Reads the RTT recorded by the already-running native WARP tunnel.
+  /// This never starts or probes a second core when the indicator is tapped.
+  static Future<int> measureWarpDelay() async {
+    try {
+      final result = await platform.invokeMethod('measureWarpDelay');
+      if (result is int) return result;
+      if (result is num) return result.toInt();
+      return -1;
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ WARP measureDelay error: $e');
+      return -1;
+    }
+  }
+
   /// Cumulative outbound traffic since connect: {'uplink': bytes, 'downlink': bytes}.
   /// Polled while connected to display data usage on the home screen.
   static Future<Map<String, int>> queryStats() async {

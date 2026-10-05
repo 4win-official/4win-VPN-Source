@@ -1,4 +1,4 @@
-// Protocol order: Psiphon, Xray, WARP, OpenVPN, SSTP, DNS changer, Proxy, Slow DNS.
+// Protocol order: Xray, Psiphon, WARP, OpenVPN, SSTP, DNS changer, Proxy, Slow DNS.
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -237,22 +237,22 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   context,
                                   provider: vpnProvider,
                                   isDark: isDark,
-                                  protocol: 'psiphon',
-                                  title: 'Psiphon',
-                                  subtitle: 'Automatic server selection',
-                                  icon: Icons.public,
-                                  accent: Colors.deepPurple,
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
                                   protocol: 'xray',
                                   title: 'Xray',
                                   subtitle: 'Real Xray core + TLS fragment',
                                   icon: Icons.rocket_launch,
                                   accent: Colors.tealAccent.shade700,
                                   badge: 'Default',
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'psiphon',
+                                  title: 'Psiphon',
+                                  subtitle: 'Automatic server selection',
+                                  icon: Icons.public,
+                                  accent: Colors.deepPurple,
                                 ),
                                 _protocolTile(
                                   context,

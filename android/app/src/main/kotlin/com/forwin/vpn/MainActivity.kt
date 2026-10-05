@@ -414,6 +414,17 @@ class MainActivity: FlutterActivity() {
                         runOnUiThread { result.success(delay) }
                     }.start()
                 }
+                "measureWarpDelay" -> {
+                    // Read the RTT from the already-running Aether session.
+                    // Never start a second core for a repeated UI tap.
+                    result.success(
+                        if (runCatching { NativeCore.isReady() }.getOrDefault(false)) {
+                            NativeCore.lastRttMs().toInt()
+                        } else {
+                            -1
+                        }
+                    )
+                }
                 else -> result.notImplemented()
             }
         }

@@ -602,9 +602,10 @@ class VpnProvider with ChangeNotifier {
         return;
       }
       try {
-        final delay = await XrayConnection.measureDelay(
-          XrayConfigBuilder.buildWarpDelayTest(account),
-        ).timeout(const Duration(seconds: 6), onTimeout: () => -1);
+        // WARP is already running in Aether. Read its validated RTT directly;
+        // the generic Xray delay path must not create a temporary core.
+        final delay = await XrayConnection.measureWarpDelay()
+            .timeout(const Duration(seconds: 6), onTimeout: () => -1);
         _currentPing = delay >= 0 ? delay : null;
         _pingFailed = delay < 0;
       } catch (_) {
