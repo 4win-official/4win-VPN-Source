@@ -615,6 +615,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   Widget _buildServerTile(VpnProvider provider, XrayServer s, bool selected,
       bool isDark, Color accent) {
     final testing = provider.xrayTestingIds.contains(s.id);
+    final tcpTesting = provider.xrayTcpTestingIds.contains(s.id);
     return Container(
       color: isDark
           ? Colors.white.withValues(alpha: 0.04)
@@ -650,9 +651,25 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              _pingLabel(s.ping),
+              'URL ${_pingLabel(s.ping)}',
               style: TextStyle(
                 color: _pingColor(s.ping),
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: _pingColor(s.tcpPing).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              'TCP ${_pingLabel(s.tcpPing)}',
+              style: TextStyle(
+                color: _pingColor(s.tcpPing),
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
               ),
@@ -678,6 +695,18 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   )
                 : Icon(Icons.speed, color: accent),
             onPressed: testing ? null : () => provider.measureXrayDelay(s),
+          ),
+          IconButton(
+            tooltip: 'TCP ping (direct server connect)',
+            icon: tcpTesting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(Icons.cable, color: accent, size: 18),
+            onPressed:
+                tcpTesting ? null : () => provider.measureXrayTcpPing(s),
           ),
           if (selected)
             Icon(Icons.check_circle, color: accent)

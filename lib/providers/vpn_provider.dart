@@ -75,6 +75,9 @@ class VpnProvider with ChangeNotifier {
   // ids of servers currently being delay-tested (for spinner UI)
   final Set<String> _xrayTestingIds = {};
   Set<String> get xrayTestingIds => _xrayTestingIds;
+  // Server ids currently running a direct TCP connect test.
+  final Set<String> _xrayTcpTestingIds = {};
+  Set<String> get xrayTcpTestingIds => _xrayTcpTestingIds;
   // group names currently running a delay test (per-group spinner)
   final Set<String> _xrayTestingGroups = {};
   bool xrayGroupTestingFor(String group) =>
@@ -2018,6 +2021,43 @@ class VpnProvider with ChangeNotifier {
       _xrayTestingIds.remove(server.id);
       notifyListeners();
     }
+  }
+
+  /// Measures only the TCP connection latency to the server endpoint.
+  /// This does not build an Xray config and does not use the HTTP test URL.
+  Future<int> measureXrayTcpPing(XrayServer server) async {
+    if (_xrayTcpTestingIds.contains(server.id)) return -1;
+    _xrayTcpTestingIds.add(server.id);
+    notifyListeners();
+    Socket? socket;
+    var delay = -1;
+    try {
+      final stopwatch = Stopwatch()..start();
+      socket = await Socket.connect(
+        server.address,
+        server.port,
+        timeout: const Duration(seconds: 6),
+      );
+      stopwatch.stop();
+      delay = stopwatch.elapsedMilliseconds;
+      await _xrayService.updateTcpPing(server.id, delay);
+      _applyTcpPing(server.id, delay);
+      return delay;
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ measureXrayTcpPing: $e');
+      await _xrayService.updateTcpPing(server.id, -1);
+      _applyTcpPing(server.id, -1);
+      return -1;
+    } finally {
+      socket?.destroy();
+      _xrayTcpTestingIds.remove(server.id);
+      notifyListeners();
+    }
+  }
+
+  void _applyTcpPing(String id, int? ping) {
+    final idx = _xrayServers.indexWhere((s) => s.id == id);
+    if (idx >= 0) _xrayServers[idx] = _xrayServers[idx].copyWith(tcpPing: ping);
   }
 
   void _applyPing(String id, int? ping) {
