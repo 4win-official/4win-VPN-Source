@@ -2034,14 +2034,17 @@ class VpnProvider with ChangeNotifier {
   /// reliable. Defaults to a single round.
   Future<void> testXrayServers(List<XrayServer> servers,
       {int rounds = 1}) async {
-    if (servers.isEmpty || _xrayGroupTesting) return;
+    if (servers.isEmpty) return;
+    final groups = servers.map((s) => s.group).toSet();
+    // Different groups may run in parallel; prevent duplicate jobs for the
+    // same group when its button is tapped repeatedly.
+    if (groups.any(_xrayTestingGroups.contains)) return;
     _xrayGroupTesting = true;
     // Snapshot the connect token so a delay-test launched by a group connect
     // stops as soon as the user cancels (disconnect bumps _xrayConnectGen).
     final int testGen = _xrayConnectGen;
     // Mark only the group(s) these servers belong to as "testing" so the
     // spinner shows on the tapped group only, not every group.
-    final groups = servers.map((s) => s.group).toSet();
     _xrayTestingGroups.addAll(groups);
     notifyListeners();
     try {
@@ -2050,14 +2053,6 @@ class VpnProvider with ChangeNotifier {
       final int totalRounds = rounds.clamp(1, 5);
       // Best ping seen per server across all rounds (lower positive = better).
       final results = <String, int?>{};
-
-      // Precompute an id -> index map ONCE. Previously every result did
-      // `indexWhere` over the whole list (O(n) each → O(n²) overall), which is
-      // the main freeze when a subscription has thousands of servers.
-      final indexById = <String, int>{};
-      for (var i = 0; i < _xrayServers.length; i++) {
-        indexById[_xrayServers[i].id] = i;
-      }
 
       // Merge a fresh measurement into the best-so-far for a server.
       void mergeBest(String id, int ping) {
@@ -2096,9 +2091,15 @@ class VpnProvider with ChangeNotifier {
               _xrayTestingIds.remove(s.id);
             }
           }));
+          // Another group may finish and sort the shared list while this job
+          // is running, so resolve ids against the current list every batch.
+          final currentIndexById = <String, int>{};
+          for (var j = 0; j < _xrayServers.length; j++) {
+            currentIndexById[_xrayServers[j].id] = j;
+          }
           // Apply the best-so-far pings in one pass, then a SINGLE notify.
           for (final s in batch) {
-            final idx = indexById[s.id];
+            final idx = currentIndexById[s.id];
             if (idx != null && idx < _xrayServers.length) {
               _xrayServers[idx] =
                   _xrayServers[idx].copyWith(ping: results[s.id]);
@@ -2107,11 +2108,10 @@ class VpnProvider with ChangeNotifier {
           notifyListeners();
         }
       }
-      await _xrayService.updatePings(results);
       await _sortXrayByPing();
     } finally {
-      _xrayGroupTesting = false;
       _xrayTestingGroups.removeAll(groups);
+      _xrayGroupTesting = _xrayTestingGroups.isNotEmpty;
       notifyListeners();
     }
   }

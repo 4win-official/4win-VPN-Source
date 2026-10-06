@@ -419,7 +419,6 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         : accentIn;
     // Only this group's spinner shows while this group is being tested.
     final testing = provider.xrayGroupTestingFor(groupKey);
-    final anyTesting = provider.xrayGroupTesting;
     // A named group can be selected as a whole; a specific selected server in
     // this group also counts as "this group active".
     final groupSelected = locked && provider.xrayGroupSelectedFor(groupKey);
@@ -538,7 +537,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                                 CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Icon(Icons.speed, color: accent),
-                    onPressed: anyTesting
+                    onPressed: testing
                         ? null
                         : () => provider.testXrayServers(servers),
                   ),
