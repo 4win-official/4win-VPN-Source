@@ -1812,9 +1812,9 @@ class VpnProvider with ChangeNotifier {
     await loadXrayServers();
   }
 
-  Future<bool> removeXrayGroup(String groupKey) async {
-    final removed = await _xrayService.removeGroup(groupKey);
-    if (removed) await loadXrayServers();
+  Future<int> removeXrayGroupServers(String groupKey, String mode) async {
+    final removed = await _xrayService.removeServersFromGroup(groupKey, mode);
+    if (removed > 0) await loadXrayServers();
     return removed;
   }
 

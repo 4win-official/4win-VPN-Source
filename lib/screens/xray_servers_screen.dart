@@ -141,23 +141,43 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     }
   }
   Future<void> _confirmDeleteGroup(String groupKey, String title) async {
-    if (XrayServer.isBuiltInGroup(groupKey)) return;
-    final ok = await showDialog<bool>(
+    final mode = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete group?'),
-        content: Text('Remove "$title" and all its servers?'),
+        title: Text('Delete servers from "$title"?'),
+        content: const Text(
+          'The group itself will remain. Choose which servers to remove.',
+        ),
+        actionsAlignment: MainAxisAlignment.stretch,
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, 'untested'),
+            child: const Text('Delete servers without a ping'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, 'bad'),
+            child: const Text('Delete failed or bad-ping servers'),
+          ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            onPressed: () => Navigator.pop(ctx, 'all'),
+            child: const Text('Delete all servers in this group'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
           ),
         ],
       ),
     );
-    if (ok == true && mounted) {
-      await context.read<VpnProvider>().removeXrayGroup(groupKey);
+    if (mode != null && mounted) {
+      final removed = await context
+          .read<VpnProvider>()
+          .removeXrayGroupServers(groupKey, mode);
+      if (mounted) {
+        _toast(removed == 0
+            ? 'No matching servers found'
+            : '$removed server${removed == 1 ? '' : 's'} deleted');
+      }
     }
   }
 
@@ -551,18 +571,12 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     onPressed: () => _exportServers(servers, title),
                   ),
                   IconButton(
-                    tooltip: XrayServer.isBuiltInGroup(groupKey)
-                        ? 'Built-in group'
-                        : 'Delete group',
+                    tooltip: 'Delete selected servers',
                     icon: Icon(
                       Icons.delete_outline,
-                      color: XrayServer.isBuiltInGroup(groupKey)
-                          ? (isDark ? Colors.white24 : Colors.black26)
-                          : Colors.redAccent,
+                      color: Colors.redAccent,
                     ),
-                    onPressed: XrayServer.isBuiltInGroup(groupKey)
-                        ? null
-                        : () => _confirmDeleteGroup(groupKey, title),
+                    onPressed: () => _confirmDeleteGroup(groupKey, title),
                   ),
                   PopupMenuButton<String>(
                     tooltip: 'More group actions',

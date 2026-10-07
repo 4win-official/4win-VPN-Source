@@ -248,27 +248,22 @@ class XrayServerService {
     if (remaining.length != all.length) await saveServers(remaining);
   }
 
-  /// Removes a user-created group and its source subscription, if any.
-  /// Built-in groups are protected and are intentionally left untouched.
-  Future<bool> removeGroup(String groupKey) async {
-    if (groupKey == XrayServer.freeGroup || groupKey == XrayServer.plusGroup) {
-      return false;
+  /// Removes selected servers from a group while preserving the group and its
+  /// subscription source. [mode] is: all, untested, or bad.
+  Future<int> removeServersFromGroup(String groupKey, String mode) async {
+    final all = await loadServers();
+    final before = all.length;
+    bool shouldRemove(XrayServer server) {
+      if (server.group != groupKey) return false;
+      if (mode == 'all') return true;
+      final ping = server.ping;
+      if (mode == 'untested') return ping == null || ping < 0;
+      // Keep good and usable servers; remove failed or very slow ones.
+      return ping == null || ping < 0 || ping >= 800;
     }
-    if (groupKey == userLinksGroup || groupKey.isEmpty) {
-      final all = await loadServers();
-      final remaining = all.where((s) => s.group != groupKey).toList();
-      if (remaining.length != all.length) await saveServers(remaining);
-      return remaining.length != all.length;
-    }
-    final urls = await getSubUrls();
-    final names = await getSubNames();
-    for (final url in urls) {
-      if (groupNameForUrl(url, names) == groupKey) {
-        await removeSubUrl(url);
-        return true;
-      }
-    }
-    return false;
+    final remaining = all.where((server) => !shouldRemove(server)).toList();
+    if (remaining.length != before) await saveServers(remaining);
+    return before - remaining.length;
   }
 
   /// Changes the URL of an existing subscription (keeping its custom name).
