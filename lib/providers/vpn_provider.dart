@@ -542,9 +542,21 @@ class VpnProvider with ChangeNotifier {
     if (_xrayPinging) return; // ignore rapid double taps
     _xrayPingAwaitingFirstTap = false;
     _xrayPinging = true;
+    // Clear the previous result before every request. This makes repeated
+    // taps visible even when the native WARP RTT happens to be unchanged.
+    _currentPing = null;
+    _pingFailed = false;
     notifyListeners();
     try {
+      final started = Stopwatch()..start();
       await _updateCurrentPing();
+      // Keep the loading state visible briefly. WARP currently exposes the
+      // most recent validated RTT, so a repeated tap can otherwise complete
+      // too quickly and look like the tap was ignored when the value is equal.
+      final remaining = 220 - started.elapsedMilliseconds;
+      if (remaining > 0) {
+        await Future<void>.delayed(Duration(milliseconds: remaining));
+      }
     } finally {
       _xrayPinging = false;
       notifyListeners();

@@ -633,47 +633,24 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
       ),
-      subtitle: Row(
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Text(
-              '${s.protocol.toUpperCase()} • ${s.fullAddress}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
-            ),
+          Text(
+            '${s.protocol.toUpperCase()} • ${s.fullAddress}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12),
           ),
-          const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: _pingColor(s.ping).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              'URL ${_pingLabel(s.ping)}',
-              style: TextStyle(
-                color: _pingColor(s.ping),
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: _pingColor(s.tcpPing).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              'TCP ${_pingLabel(s.tcpPing)}',
-              style: TextStyle(
-                color: _pingColor(s.tcpPing),
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+          const SizedBox(height: 5),
+          Wrap(
+            spacing: 4,
+            runSpacing: 3,
+            children: [
+              _pingBadge('URL', s.ping),
+              _pingBadge('TCP', s.tcpPing),
+            ],
           ),
         ],
       ),
@@ -683,6 +660,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           IconButton(
             tooltip: 'Copy link',
             icon: Icon(Icons.copy, color: accent, size: 18),
+            visualDensity: VisualDensity.compact,
             onPressed: () => _copyOneServer(s),
           ),
           IconButton(
@@ -694,6 +672,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Icon(Icons.speed, color: accent),
+            visualDensity: VisualDensity.compact,
             onPressed: testing ? null : () => provider.measureXrayDelay(s),
           ),
           IconButton(
@@ -705,6 +684,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Icon(Icons.cable, color: accent, size: 18),
+            visualDensity: VisualDensity.compact,
             onPressed:
                 tcpTesting ? null : () => provider.measureXrayTcpPing(s),
           ),
@@ -726,6 +706,25 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
       ),
       onTap: () => provider.selectXrayServer(s),
     ),
+    );
+  }
+
+  Widget _pingBadge(String label, int? ping) {
+    final color = _pingColor(ping);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '$label ${_pingLabel(ping)}',
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
