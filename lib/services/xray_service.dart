@@ -248,6 +248,29 @@ class XrayServerService {
     if (remaining.length != all.length) await saveServers(remaining);
   }
 
+  /// Removes a user-created group and its source subscription, if any.
+  /// Built-in groups are protected and are intentionally left untouched.
+  Future<bool> removeGroup(String groupKey) async {
+    if (groupKey == XrayServer.freeGroup || groupKey == XrayServer.plusGroup) {
+      return false;
+    }
+    if (groupKey == userLinksGroup || groupKey.isEmpty) {
+      final all = await loadServers();
+      final remaining = all.where((s) => s.group != groupKey).toList();
+      if (remaining.length != all.length) await saveServers(remaining);
+      return remaining.length != all.length;
+    }
+    final urls = await getSubUrls();
+    final names = await getSubNames();
+    for (final url in urls) {
+      if (groupNameForUrl(url, names) == groupKey) {
+        await removeSubUrl(url);
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Changes the URL of an existing subscription (keeping its custom name).
   /// Returns false if [newUrl] is invalid or already exists. The old URL's
   /// cached servers are dropped; the caller should refresh to fetch the new

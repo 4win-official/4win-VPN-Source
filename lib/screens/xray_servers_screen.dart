@@ -121,6 +121,45 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     if (!mounted) return;
     _toast(s.encrypted ? 'Encrypted link copied' : 'Link copied');
   }
+  Future<void> _confirmDeleteServer(XrayServer s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete server?'),
+        content: Text('Remove "${s.remark.isEmpty ? s.address : s.remark}"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      await context.read<VpnProvider>().removeXrayServer(s.id);
+    }
+  }
+  Future<void> _confirmDeleteGroup(String groupKey, String title) async {
+    if (XrayServer.isBuiltInGroup(groupKey)) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete group?'),
+        content: Text('Remove "$title" and all its servers?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      await context.read<VpnProvider>().removeXrayGroup(groupKey);
+    }
+  }
 
   void _toast(String msg) {
     if (!mounted) return;
@@ -419,6 +458,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         : accentIn;
     // Only this group's spinner shows while this group is being tested.
     final testing = provider.xrayGroupTestingFor(groupKey);
+    final tcpTesting = provider.xrayGroupTcpTestingFor(groupKey);
     // A named group can be selected as a whole; a specific selected server in
     // this group also counts as "this group active".
     final groupSelected = locked && provider.xrayGroupSelectedFor(groupKey);
@@ -430,7 +470,6 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     // group ("My Sub Links") and individual servers have no source URL.
     final isRefreshable =
         locked && groupKey != XrayServerService.userLinksGroup;
-    final refreshing = provider.xrayGroupRefreshingFor(groupKey);
 
     return Container(
       margin: EdgeInsets.only(bottom: expanded ? 0 : 12),
@@ -505,41 +544,83 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                       padding: const EdgeInsets.only(right: 4),
                       child: Icon(Icons.check_circle, color: accent),
                     ),
-                  // Refresh this subscription link (clear + re-download).
-                  if (isRefreshable)
-                    IconButton(
-                      tooltip: 'Update this sub link',
-                      icon: refreshing
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(Icons.refresh, color: accent),
-                      onPressed: refreshing
-                          ? null
-                          : () => _refreshOneGroup(provider, groupKey, title),
-                    ),
                   // Export whole group (copy all links to clipboard)
                   IconButton(
                     tooltip: 'Export group',
                     icon: Icon(Icons.copy_all, color: accent),
                     onPressed: () => _exportServers(servers, title),
                   ),
-                  // Test-all button
                   IconButton(
-                    tooltip: 'Test all',
-                    icon: testing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(Icons.speed, color: accent),
-                    onPressed: testing
+                    tooltip: XrayServer.isBuiltInGroup(groupKey)
+                        ? 'Built-in group'
+                        : 'Delete group',
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: XrayServer.isBuiltInGroup(groupKey)
+                          ? (isDark ? Colors.white24 : Colors.black26)
+                          : Colors.redAccent,
+                    ),
+                    onPressed: XrayServer.isBuiltInGroup(groupKey)
                         ? null
-                        : () => provider.testXrayServers(servers),
+                        : () => _confirmDeleteGroup(groupKey, title),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'More group actions',
+                    icon: Icon(Icons.more_vert, color: accent),
+                    itemBuilder: (ctx) => [
+                      if (isRefreshable)
+                        const PopupMenuItem(
+                          value: 'refresh',
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.refresh),
+                            title: Text('Update group'),
+                          ),
+                        ),
+                      PopupMenuItem(
+                        value: 'url_ping',
+                        enabled: !testing,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: testing
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.speed),
+                          title: const Text('URL ping all'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'tcp_ping',
+                        enabled: !tcpTesting,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: tcpTesting
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.cable),
+                          title: const Text('TCP ping all'),
+                        ),
+                      ),
+                    ],
+                    onSelected: (action) {
+                      switch (action) {
+                        case 'refresh':
+                          _refreshOneGroup(provider, groupKey, title);
+                          break;
+                        case 'url_ping':
+                          provider.testXrayServers(servers);
+                          break;
+                        case 'tcp_ping':
+                          provider.testXrayTcpServers(servers);
+                          break;
+                      }
+                    },
                   ),
                   // Expand / collapse arrow
                   IconButton(
@@ -663,30 +744,51 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             visualDensity: VisualDensity.compact,
             onPressed: () => _copyOneServer(s),
           ),
-          IconButton(
-            tooltip: 'Real delay test',
-            icon: testing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(Icons.speed, color: accent),
-            visualDensity: VisualDensity.compact,
-            onPressed: testing ? null : () => provider.measureXrayDelay(s),
-          ),
-          IconButton(
-            tooltip: 'TCP ping (direct server connect)',
-            icon: tcpTesting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(Icons.cable, color: accent, size: 18),
-            visualDensity: VisualDensity.compact,
-            onPressed:
-                tcpTesting ? null : () => provider.measureXrayTcpPing(s),
+          PopupMenuButton<String>(
+            tooltip: 'More server actions',
+            icon: Icon(Icons.more_vert, color: accent),
+            itemBuilder: (ctx) => [
+              PopupMenuItem(
+                value: 'url_ping',
+                enabled: !testing,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: testing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.speed),
+                  title: const Text('URL ping'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'tcp_ping',
+                enabled: !tcpTesting,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: tcpTesting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cable),
+                  title: const Text('TCP ping'),
+                ),
+              ),
+            ],
+            onSelected: (action) {
+              switch (action) {
+                case 'url_ping':
+                  provider.measureXrayDelay(s);
+                  break;
+                case 'tcp_ping':
+                  provider.measureXrayTcpPing(s);
+                  break;
+              }
+            },
           ),
           if (selected)
             Icon(Icons.check_circle, color: accent)
@@ -694,8 +796,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             const Icon(Icons.radio_button_unchecked, color: Colors.grey),
           if (s.group.isEmpty || s.group == XrayServerService.userLinksGroup)
             IconButton(
+              tooltip: 'Delete server',
               icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-              onPressed: () => provider.removeXrayServer(s.id),
+              onPressed: () => _confirmDeleteServer(s),
             )
           else
             const Padding(

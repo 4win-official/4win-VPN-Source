@@ -80,8 +80,11 @@ class VpnProvider with ChangeNotifier {
   Set<String> get xrayTcpTestingIds => _xrayTcpTestingIds;
   // group names currently running a delay test (per-group spinner)
   final Set<String> _xrayTestingGroups = {};
+  final Set<String> _xrayTcpTestingGroups = {};
   bool xrayGroupTestingFor(String group) =>
       _xrayTestingGroups.contains(group);
+  bool xrayGroupTcpTestingFor(String group) =>
+      _xrayTcpTestingGroups.contains(group);
   bool _xrayGroupTesting = false;
   bool get xrayGroupTesting => _xrayGroupTesting;
   bool _xrayRefreshing = false;
@@ -1809,6 +1812,12 @@ class VpnProvider with ChangeNotifier {
     await loadXrayServers();
   }
 
+  Future<bool> removeXrayGroup(String groupKey) async {
+    final removed = await _xrayService.removeGroup(groupKey);
+    if (removed) await loadXrayServers();
+    return removed;
+  }
+
   /// Select an Xray server (for connecting). Picking a specific server clears
   /// the group selection. If the VPN is already connected via Xray, cleanly
   /// switch: fully disconnect, then reconnect to the new server.
@@ -2063,6 +2072,21 @@ class VpnProvider with ChangeNotifier {
     } finally {
       socket?.destroy();
       _xrayTcpTestingIds.remove(server.id);
+      notifyListeners();
+    }
+  }
+
+  /// Runs direct TCP latency tests for every server in a group concurrently.
+  Future<void> testXrayTcpServers(List<XrayServer> servers) async {
+    if (servers.isEmpty) return;
+    final groups = servers.map((s) => s.group).toSet();
+    if (groups.any(_xrayTcpTestingGroups.contains)) return;
+    _xrayTcpTestingGroups.addAll(groups);
+    notifyListeners();
+    try {
+      await Future.wait(servers.map(measureXrayTcpPing));
+    } finally {
+      _xrayTcpTestingGroups.removeAll(groups);
       notifyListeners();
     }
   }

@@ -21,6 +21,8 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity: FlutterActivity() {
     private val DNS_CHANNEL = "com.forwin.vpn/dns"
@@ -400,13 +402,13 @@ class MainActivity: FlutterActivity() {
                     val url = call.argument<String>("url")
                         ?: "https://www.google.com/generate_204"
                     if (configJson.contains("__APP_FILES__")) {
-                        // WARP is already running in Aether. Its connect path
-                        // performs the same handshake + HTTP data-plane check;
-                        // return that measured RTT instead of starting a second
-                        // native core in this process.
-                        result.success(
-                            if (NativeCore.isReady()) NativeCore.lastRttMs().toInt() else -1
-                        )
+                        // WARP is already running in Aether. Use a fresh
+                        // request through the active VPN instead of returning
+                        // the connect-time RTT stored by the native core.
+                        Thread {
+                            val delay = measureFreshWarpDelay()
+                            runOnUiThread { result.success(delay) }
+                        }.start()
                         return@setMethodCallHandler
                     }
                     Thread {
@@ -415,15 +417,13 @@ class MainActivity: FlutterActivity() {
                     }.start()
                 }
                 "measureWarpDelay" -> {
-                    // Read the RTT from the already-running Aether session.
-                    // Never start a second core for a repeated UI tap.
-                    result.success(
-                        if (runCatching { NativeCore.isReady() }.getOrDefault(false)) {
-                            NativeCore.lastRttMs().toInt()
-                        } else {
-                            -1
-                        }
-                    )
+                    // Perform a fresh HTTP request through the active Android
+                    // VPN. NativeCore.lastRttMs() is only the connect-time
+                    // validation value and becomes stale after the first tap.
+                    Thread {
+                        val delay = measureFreshWarpDelay()
+                        runOnUiThread { result.success(delay) }
+                    }.start()
                 }
                 else -> result.notImplemented()
             }
@@ -455,6 +455,31 @@ class MainActivity: FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun measureFreshWarpDelay(): Int {
+        if (!XrayVpnService.isServiceRunning ||
+            !runCatching { NativeCore.isReady() }.getOrDefault(false)) return -1
+        var connection: HttpURLConnection? = null
+        return try {
+            val start = System.nanoTime()
+            connection = (URL("https://www.gstatic.com/generate_204").openConnection()
+                as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 6000
+                requestMethod = "GET"
+                useCaches = false
+                setRequestProperty("Cache-Control", "no-cache, no-store")
+                setRequestProperty("Pragma", "no-cache")
+            }
+            val code = connection.responseCode
+            val elapsed = ((System.nanoTime() - start) / 1_000_000L).toInt()
+            if (code in 200..399) elapsed else -1
+        } catch (_: Exception) {
+            -1
+        } finally {
+            connection?.disconnect()
         }
     }
 
