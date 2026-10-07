@@ -148,7 +148,6 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         content: const Text(
           'The group itself will remain. Choose which servers to remove.',
         ),
-        actionsAlignment: MainAxisAlignment.stretch,
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, 'untested'),
