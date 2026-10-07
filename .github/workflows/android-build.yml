@@ -65,6 +65,31 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
+      - name: Free runner disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Disk usage before cleanup:'
+          df -h /
+          # Emulator binaries and system images are not used by this build.
+          sudo rm -rf "$ANDROID_HOME/system-images" "$ANDROID_HOME/emulator"
+          # Keep the Aether NDK and the newest NDK selected by Flutter; remove
+          # older duplicate installations that consume several GB.
+          keep_ndks=("$ANDROID_HOME/ndk/26.3.11579264")
+          latest_ndk="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d \
+            -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)"
+          [[ -n "$latest_ndk" ]] && keep_ndks+=("$latest_ndk")
+          for ndk in "$ANDROID_HOME"/ndk/*; do
+            [[ -d "$ndk" ]] || continue
+            keep=false
+            for wanted in "${keep_ndks[@]}"; do
+              [[ "$ndk" == "$wanted" ]] && keep=true
+            done
+            [[ "$keep" == true ]] || sudo rm -rf "$ndk"
+          done
+          echo 'Disk usage after cleanup:'
+          df -h /
+
       - name: Build Aether native libraries for universal APK
         shell: bash
         run: |
@@ -75,6 +100,11 @@ jobs:
           done
           echo "Aether libraries staged in android/app/src/main/jniLibs"
           find android/app/src/main/jniLibs -path '*/libaether.so' -print
+          # Cargo intermediates are no longer needed once libaether.so files
+          # have been copied; reclaim the space before Gradle packageRelease.
+          rm -rf "$HOME/.cargo/registry/cache" "$HOME/.cargo/git/checkouts"
+          echo 'Disk usage after Aether build:'
+          df -h /
 
       - name: Build release APK
         shell: bash
