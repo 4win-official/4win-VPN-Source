@@ -631,15 +631,6 @@ class XrayServerService {
     await saveServers(servers);
   }
 
-  /// Persists the direct TCP connect latency for one server.
-  Future<void> updateTcpPing(String id, int? tcpPing) async {
-    final servers = await loadServers();
-    final idx = servers.indexWhere((s) => s.id == id);
-    if (idx < 0) return;
-    servers[idx] = servers[idx].copyWith(tcpPing: tcpPing);
-    await saveServers(servers);
-  }
-
   /// Persists measured pings for many servers at once (id -> ping).
   Future<void> updatePings(Map<String, int?> pings) async {
     if (pings.isEmpty) return;

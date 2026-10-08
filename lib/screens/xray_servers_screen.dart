@@ -742,8 +742,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             spacing: 4,
             runSpacing: 3,
             children: [
-              _pingBadge('URL', s.ping),
-              _pingBadge('TCP', s.tcpPing),
+              _pingBadge('Ping', s.ping),
             ],
           ),
         ],

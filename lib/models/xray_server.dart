@@ -12,9 +12,9 @@ class XrayServer {
   final String address;
   final int port;
   final DateTime addedAt;
+  /// Latest measured latency. URL ping and TCP ping intentionally share this
+  /// field; whichever test runs last replaces the previous result.
   int? ping;
-  /// TCP connect latency to [address]:[port], independent of an HTTP test URL.
-  int? tcpPing;
 
   /// True when this server was imported from a 4win ENCRYPTED link (`4ws://`).
   /// [link] still holds the real decoded share link (so we can connect), but
@@ -50,7 +50,6 @@ class XrayServer {
     required this.port,
     DateTime? addedAt,
     this.ping,
-    this.tcpPing,
     this.group = '',
     this.encrypted = false,
   }) : addedAt = addedAt ?? DateTime.now();
@@ -64,7 +63,6 @@ class XrayServer {
         'port': port,
         'addedAt': addedAt.toIso8601String(),
         'ping': ping,
-        'tcpPing': tcpPing,
         'group': group,
         'encrypted': encrypted,
       };
@@ -78,13 +76,16 @@ class XrayServer {
         port: (json['port'] as num?)?.toInt() ?? 443,
         addedAt: DateTime.tryParse(json['addedAt'] as String? ?? '') ??
             DateTime.now(),
-        ping: (json['ping'] as num?)?.toInt(),
-        tcpPing: (json['tcpPing'] as num?)?.toInt(),
+        // Read old installs too: before the unified field, TCP results were
+        // stored separately. They become the current ping if no URL result
+        // exists yet.
+        ping: (json['ping'] as num?)?.toInt() ??
+            (json['tcpPing'] as num?)?.toInt(),
         group: json['group'] as String? ?? '',
         encrypted: json['encrypted'] as bool? ?? false,
       );
 
-  XrayServer copyWith({int? ping, int? tcpPing, String? group}) => XrayServer(
+  XrayServer copyWith({int? ping, String? group}) => XrayServer(
         id: id,
         remark: remark,
         link: link,
@@ -93,7 +94,6 @@ class XrayServer {
         port: port,
         addedAt: addedAt,
         ping: ping ?? this.ping,
-        tcpPing: tcpPing ?? this.tcpPing,
         group: group ?? this.group,
         encrypted: encrypted,
       );

@@ -2061,13 +2061,13 @@ class VpnProvider with ChangeNotifier {
       );
       stopwatch.stop();
       delay = stopwatch.elapsedMilliseconds;
-      await _xrayService.updateTcpPing(server.id, delay);
-      _applyTcpPing(server.id, delay);
+      await _xrayService.updatePing(server.id, delay);
+      _applyPing(server.id, delay);
       return delay;
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ measureXrayTcpPing: $e');
-      await _xrayService.updateTcpPing(server.id, -1);
-      _applyTcpPing(server.id, -1);
+      await _xrayService.updatePing(server.id, -1);
+      _applyPing(server.id, -1);
       return -1;
     } finally {
       socket?.destroy();
@@ -2089,11 +2089,6 @@ class VpnProvider with ChangeNotifier {
       _xrayTcpTestingGroups.removeAll(groups);
       notifyListeners();
     }
-  }
-
-  void _applyTcpPing(String id, int? ping) {
-    final idx = _xrayServers.indexWhere((s) => s.id == id);
-    if (idx >= 0) _xrayServers[idx] = _xrayServers[idx].copyWith(tcpPing: ping);
   }
 
   void _applyPing(String id, int? ping) {

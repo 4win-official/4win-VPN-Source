@@ -94,5 +94,19 @@ void main() {
       expect(restored.port, s.port);
       expect(restored.remark, s.remark);
     });
+
+    test('migrates legacy tcp ping into the shared ping field', () {
+      final s = XrayServer.fromJson({
+        'id': 'legacy',
+        'remark': 'Legacy',
+        'link': 'trojan://p@4.4.4.4:443#Legacy',
+        'protocol': 'trojan',
+        'address': '4.4.4.4',
+        'port': 443,
+        'tcpPing': 123,
+      });
+      expect(s.ping, 123);
+      expect(s.toJson().containsKey('tcpPing'), isFalse);
+    });
   });
 }
