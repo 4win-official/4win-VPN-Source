@@ -267,19 +267,19 @@ class OpenVpnConfig {
     // the server sends nothing compressed, it is a harmless no-op — so it never
     // breaks a working config, unlike a forced `compress` line.
     //
-    // We always strip any compression directives the profile shipped with, then
-    // add exactly one authoritative directive based on the toggle, so the switch
-    // behaves identically across every OpenVPN config.
-    normalized = normalized.replaceAll(
-        RegExp(r'^\s*(compress|comp-lzo|allow-compression)\b.*$',
-            multiLine: true),
-        '');
-    normalized = normalized.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+    // Do not rewrite a profile's compression settings when the data-saver
+    // toggle is off. Some servers require the compression mode declared by the
+    // profile; replacing it with `allow-compression no` lets the control
+    // channel connect while silently breaking the data channel.
     if (trafficCompressionEnabled) {
+      // With data-saver enabled, make decompression asymmetric and avoid
+      // forcing compression in the upload direction.
+      normalized = normalized.replaceAll(
+          RegExp(r'^\s*(compress|comp-lzo|allow-compression)\b.*$',
+              multiLine: true),
+          '');
+      normalized = normalized.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
       normalized = 'allow-compression asym\n$normalized';
-    } else {
-      // Explicitly forbid compression so a working tunnel is never altered.
-      normalized = 'allow-compression no\n$normalized';
     }
 
     // ALWAYS end with a newline (see plugin's client-cert-not-required append).

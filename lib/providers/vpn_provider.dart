@@ -1478,8 +1478,8 @@ class VpnProvider with ChangeNotifier {
 
   /// Connect via OpenVPN. Keeps retrying every 4 seconds (restarting the whole
   /// connect from scratch, silently — no UI churn) until it either connects OR
-  /// hits a HARD auth failure (wrong user/pass). The client cert requirement is
-  /// always bypassed (the user has already consented once).
+  /// hits a HARD auth failure (wrong user/pass). Client-certificate bypass is
+  /// used only when the caller explicitly passes forceBypassCert.
   Future<void> _connectOpenVpn({bool forceBypassCert = false}) async {
     // Apply the global Traffic Compression toggle before building the config.
     try {
@@ -1646,8 +1646,12 @@ class VpnProvider with ChangeNotifier {
       try {
         await OpenVpnConnection.connect(
           _selectedOpenVpnConfig!,
-          // Always bypass the cert requirement (user consented once).
-          forceBypassCert: true,
+          // Username/password-only profiles must tell ics-openvpn that a
+          // client certificate is not required. Preserve a valid certificate
+          // profile unless the user explicitly chose "connect anyway" after
+          // a certificate warning.
+          forceBypassCert: forceBypassCert ||
+              !_selectedOpenVpnConfig!.hasClientCert,
         );
       } catch (e) {
         if (kDebugMode) debugPrint('⚠️ attempt $attempt threw: $e');
