@@ -2194,6 +2194,34 @@ class VpnProvider with ChangeNotifier {
     await testXrayServers(all);
   }
 
+  /// Sorts only one Xray group by its latest measured ping. Working servers
+  /// come first (lowest latency), followed by untested, then failed servers.
+  Future<void> sortXrayGroupByPing(String groupKey) async {
+    int rank(XrayServer s) {
+      final p = s.ping;
+      if (p == null) return 1;
+      if (p < 0) return 2;
+      return 0;
+    }
+
+    final indexes = <int>[];
+    for (var i = 0; i < _xrayServers.length; i++) {
+      if (_xrayServers[i].group == groupKey) indexes.add(i);
+    }
+    if (indexes.length < 2) return;
+    final sorted = indexes.map((i) => _xrayServers[i]).toList()
+      ..sort((a, b) {
+        final byRank = rank(a).compareTo(rank(b));
+        if (byRank != 0) return byRank;
+        return (a.ping ?? 999999).compareTo(b.ping ?? 999999);
+      });
+    for (var i = 0; i < indexes.length; i++) {
+      _xrayServers[indexes[i]] = sorted[i];
+    }
+    await _xrayService.saveServers(_xrayServers);
+    notifyListeners();
+  }
+
   /// Sort servers so that lower (better) ping comes first within each group.
   /// Ordering key: working pings ascending, then untested, then failed last.
   /// The new order is persisted so "next server" walks best -> worst.

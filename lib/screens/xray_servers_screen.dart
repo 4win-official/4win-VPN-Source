@@ -590,6 +590,14 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                             title: Text('Update group'),
                           ),
                         ),
+                      const PopupMenuItem(
+                        value: 'sort',
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.sort),
+                          title: Text('Sort by ping'),
+                        ),
+                      ),
                       PopupMenuItem(
                         value: 'url_ping',
                         enabled: !testing,
@@ -625,6 +633,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                       switch (action) {
                         case 'refresh':
                           _refreshOneGroup(provider, groupKey, title);
+                          break;
+                        case 'sort':
+                          provider.sortXrayGroupByPing(groupKey);
                           break;
                         case 'url_ping':
                           provider.testXrayServers(servers);
