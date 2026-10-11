@@ -152,6 +152,21 @@ class XrayServerService {
     }
   }
 
+  /// Resolves a displayed group name back to its subscription URL.
+  /// Built-in groups are included for lookup, although the UI keeps them
+  /// protected from editing.
+  Future<String?> subUrlForGroup(String groupKey) async {
+    for (final entry in builtInSubs.entries) {
+      if (entry.value == groupKey) return entry.key;
+    }
+    final urls = await getSubUrls();
+    final names = await getSubNames();
+    for (final url in urls) {
+      if (groupNameForUrl(url, names) == groupKey) return url;
+    }
+    return null;
+  }
+
   /// Add a subscription URL. Returns false if empty/duplicate/invalid.
   Future<bool> addSubUrl(String url) async {
     final u = url.trim();
@@ -397,6 +412,20 @@ class XrayServerService {
     }
     if (added > 0) await saveServers(servers);
     return added;
+  }
+
+  /// Updates a user-imported server. Subscription-managed and encrypted 4ws
+  /// servers are deliberately immutable.
+  Future<bool> updateServer(XrayServer updated) async {
+    if (updated.encrypted ||
+        (updated.group.isNotEmpty && updated.group != userLinksGroup)) {
+      return false;
+    }
+    final servers = await loadServers();
+    final idx = servers.indexWhere((s) => s.id == updated.id);
+    if (idx < 0 || servers[idx].encrypted) return false;
+    servers[idx] = updated;
+    return saveServers(servers);
   }
 
   /// Wipes the stored ping value on every server. Called on app launch so

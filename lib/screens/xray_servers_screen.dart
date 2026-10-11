@@ -121,6 +121,133 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     if (!mounted) return;
     _toast(s.encrypted ? 'Encrypted link copied' : 'Link copied');
   }
+
+  Future<void> _editServer(XrayServer server) async {
+    if (server.encrypted ||
+        (server.group.isNotEmpty &&
+            server.group != XrayServerService.userLinksGroup)) {
+      _toast('This server is protected and cannot be edited');
+      return;
+    }
+    final nameController = TextEditingController(text: server.remark);
+    final linkController = TextEditingController(text: server.link);
+    final result = await showDialog<(String, String)?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit server'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: linkController,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Share link / configuration',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              ctx,
+              (nameController.text.trim(), linkController.text.trim()),
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null || result.$2.isEmpty || !mounted) return;
+    try {
+      final parsed = XrayServer.fromLink(result.$2);
+      final updated = XrayServer(
+        id: server.id,
+        remark: result.$1.isEmpty ? parsed.remark : result.$1,
+        link: parsed.link,
+        protocol: parsed.protocol,
+        address: parsed.address,
+        port: parsed.port,
+        addedAt: server.addedAt,
+        ping: parsed.link == server.link ? server.ping : null,
+        group: server.group,
+      );
+      final ok = await context.read<VpnProvider>().updateXrayServer(updated);
+      if (mounted) _toast(ok ? 'Server updated' : 'Could not update server');
+    } catch (_) {
+      _toast('Invalid Xray link');
+    }
+  }
+
+  Future<void> _editSubscriptionGroup(
+      VpnProvider provider, String groupKey, String title) async {
+    if (XrayServer.isBuiltInGroup(groupKey)) {
+      _toast('This subscription is protected');
+      return;
+    }
+    final oldUrl = await provider.xraySubUrlForGroup(groupKey);
+    if (oldUrl == null || !mounted) return;
+    final urlController = TextEditingController(text: oldUrl);
+    final nameController = TextEditingController(text: title);
+    final result = await showDialog<(String, String)?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit subscription group'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Group name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: urlController,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: 'Subscription URL',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              ctx,
+              (nameController.text.trim(), urlController.text.trim()),
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null || result.$2.isEmpty || !mounted) return;
+    var ok = true;
+    if (result.$2 != oldUrl) {
+      ok = await provider.changeXraySubUrl(oldUrl, result.$2);
+    }
+    if (ok) {
+      final currentUrl = result.$2 == oldUrl ? oldUrl : result.$2;
+      await provider.setXraySubName(currentUrl, result.$1);
+    }
+    if (mounted) _toast(ok ? 'Subscription group updated' : 'Could not update group');
+  }
+
   Future<void> _confirmDeleteServer(XrayServer s) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -188,6 +315,92 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   }
 
   Future<void> _showAddDialog() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text('Add to Xray'),
+              subtitle: Text('Choose a server or a subscription group'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.dns_outlined),
+              title: const Text('Add server'),
+              subtitle: const Text('Paste one or more share links'),
+              onTap: () => Navigator.pop(ctx, 'server'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.link),
+              title: const Text('Add subscription group'),
+              subtitle: const Text('Add an HTTP(S) subscription URL'),
+              onTap: () => Navigator.pop(ctx, 'subscription'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'subscription') {
+      await _showAddSubscriptionDialog();
+    } else {
+      await _showAddServerDialog();
+    }
+  }
+
+  Future<void> _showAddSubscriptionDialog() async {
+    final urlController = TextEditingController();
+    final nameController = TextEditingController();
+    final result = await showDialog<(String, String)?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Subscription Group'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: urlController,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: 'Subscription URL',
+                hintText: 'https://example.com/sub.txt',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Group name (optional)',
+                hintText: 'My subscription',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              ctx,
+              (urlController.text.trim(), nameController.text.trim()),
+            ),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (result == null || result.$1.isEmpty || !mounted) return;
+    final ok = await context.read<VpnProvider>().addXraySubUrl(
+          result.$1,
+          name: result.$2.isEmpty ? null : result.$2,
+        );
+    if (mounted) _toast(ok ? 'Subscription group added' : 'Could not add subscription');
+  }
+
+  Future<void> _showAddServerDialog() async {
     final controller = TextEditingController();
     final clip = await Clipboard.getData('text/plain');
     final clipText = clip?.text ?? '';
@@ -381,7 +594,15 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               // still used for connecting/testing (fastest across ALL servers).
               final show = servers.length > 500 ? 500 : servers.length;
               for (var i = 0; i < show; i++) {
-                rows.add(_Row.tile(servers[i], locked));
+                rows.add(_Row.tile(
+                  servers[i],
+                  locked,
+                  groupKey: key,
+                  groupAccent: key == XrayServer.plusGroup
+                      ? const Color(0xFFE6B800)
+                      : accent,
+                  groupLast: i == show - 1 && servers.length <= show,
+                ));
               }
               if (servers.length > show) {
                 rows.add(_Row.more(servers.length - show));
@@ -427,6 +648,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                       row.locked && s.group == XrayServer.plusGroup
                           ? const Color(0xFFE6B800)
                           : accent,
+                      groupAccent: row.groupAccent,
+                      groupLast: row.groupLast,
                     );
                   case _RowKind.more:
                     return Padding(
@@ -489,6 +712,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     // group ("My Sub Links") and individual servers have no source URL.
     final isRefreshable =
         locked && groupKey != XrayServerService.userLinksGroup;
+    final isUserSubscription =
+        isRefreshable && !XrayServer.isBuiltInGroup(groupKey);
 
     return Container(
       margin: EdgeInsets.only(bottom: expanded ? 0 : 12),
@@ -500,7 +725,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             ? const BorderRadius.vertical(top: Radius.circular(14))
             : BorderRadius.circular(14),
         border: Border.all(
-          color: highlight ? accent : Colors.transparent,
+          color: expanded
+              ? accent.withValues(alpha: highlight ? 0.95 : 0.45)
+              : (highlight ? accent : Colors.transparent),
           width: 2,
         ),
       ),
@@ -581,6 +808,15 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     tooltip: 'More group actions',
                     icon: Icon(Icons.more_vert, color: accent),
                     itemBuilder: (ctx) => [
+                      if (isUserSubscription)
+                        const PopupMenuItem(
+                          value: 'edit_subscription',
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.edit_outlined),
+                            title: Text('Edit subscription'),
+                          ),
+                        ),
                       if (isRefreshable)
                         const PopupMenuItem(
                           value: 'refresh',
@@ -631,6 +867,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     ],
                     onSelected: (action) {
                       switch (action) {
+                        case 'edit_subscription':
+                          _editSubscriptionGroup(provider, groupKey, title);
+                          break;
                         case 'refresh':
                           _refreshOneGroup(provider, groupKey, title);
                           break;
@@ -663,7 +902,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           ),
           // Server tiles are rendered as separate lazy rows by the parent
           // ListView.builder (see [build]); the header stops here.
-          if (expanded) const Divider(height: 1),
+          if (expanded)
+            Divider(
+              height: 1,
+              color: accent.withValues(alpha: 0.45),
+            ),
         ],
       ),
     );
@@ -717,14 +960,35 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     return '$ping ms';
   }
 
-  Widget _buildServerTile(VpnProvider provider, XrayServer s, bool selected,
-      bool isDark, Color accent) {
+  Widget _buildServerTile(
+    VpnProvider provider,
+    XrayServer s,
+    bool selected,
+    bool isDark,
+    Color accent, {
+    Color? groupAccent,
+    bool groupLast = false,
+  }) {
     final testing = provider.xrayTestingIds.contains(s.id);
     final tcpTesting = provider.xrayTcpTestingIds.contains(s.id);
     return Container(
-      color: isDark
-          ? Colors.white.withValues(alpha: 0.04)
-          : Colors.black.withValues(alpha: 0.03),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : Colors.black.withValues(alpha: 0.03),
+        border: groupAccent == null
+            ? null
+            : Border(
+                left: BorderSide(
+                    color: groupAccent.withValues(alpha: 0.85), width: 2),
+                right: BorderSide(
+                    color: groupAccent.withValues(alpha: 0.85), width: 2),
+                bottom: groupLast
+                    ? BorderSide(
+                        color: groupAccent.withValues(alpha: 0.85), width: 2)
+                    : BorderSide.none,
+              ),
+      ),
       child: ListTile(
       dense: true,
       leading: CircleAvatar(
@@ -771,6 +1035,17 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             tooltip: 'More server actions',
             icon: Icon(Icons.more_vert, color: accent),
             itemBuilder: (ctx) => [
+              if (!s.encrypted &&
+                  (s.group.isEmpty ||
+                      s.group == XrayServerService.userLinksGroup))
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Edit'),
+                  ),
+                ),
               PopupMenuItem(
                 value: 'url_ping',
                 enabled: !testing,
@@ -804,6 +1079,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             ],
             onSelected: (action) {
               switch (action) {
+                case 'edit':
+                  _editServer(s);
+                  break;
                 case 'url_ping':
                   provider.measureXrayDelay(s);
                   break;
@@ -869,6 +1147,8 @@ class _Row {
   final XrayServer? server;
   final bool locked;
   final bool expanded;
+  final Color? groupAccent;
+  final bool groupLast;
   final int moreCount;
 
   _Row._({
@@ -879,6 +1159,8 @@ class _Row {
     this.server,
     this.locked = false,
     this.expanded = false,
+    this.groupAccent,
+    this.groupLast = false,
     this.moreCount = 0,
   });
 
@@ -893,8 +1175,21 @@ class _Row {
         expanded: expanded,
       );
 
-  factory _Row.tile(XrayServer server, bool locked) =>
-      _Row._(kind: _RowKind.tile, server: server, locked: locked);
+  factory _Row.tile(
+    XrayServer server,
+    bool locked, {
+    String? groupKey,
+    Color? groupAccent,
+    bool groupLast = false,
+  }) =>
+      _Row._(
+        kind: _RowKind.tile,
+        server: server,
+        locked: locked,
+        groupKey: groupKey,
+        groupAccent: groupAccent,
+        groupLast: groupLast,
+      );
 
   factory _Row.more(int count) =>
       _Row._(kind: _RowKind.more, moreCount: count);

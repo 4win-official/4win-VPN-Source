@@ -85,17 +85,26 @@ class XrayServer {
         encrypted: json['encrypted'] as bool? ?? false,
       );
 
-  XrayServer copyWith({int? ping, String? group}) => XrayServer(
+  XrayServer copyWith({
+    String? remark,
+    String? link,
+    String? protocol,
+    String? address,
+    int? port,
+    int? ping,
+    String? group,
+    bool? encrypted,
+  }) => XrayServer(
         id: id,
-        remark: remark,
-        link: link,
-        protocol: protocol,
-        address: address,
-        port: port,
+        remark: remark ?? this.remark,
+        link: link ?? this.link,
+        protocol: protocol ?? this.protocol,
+        address: address ?? this.address,
+        port: port ?? this.port,
         addedAt: addedAt,
         ping: ping ?? this.ping,
         group: group ?? this.group,
-        encrypted: encrypted,
+        encrypted: encrypted ?? this.encrypted,
       );
 
   String get fullAddress => '$address:$port';

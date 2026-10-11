@@ -1816,6 +1816,12 @@ class VpnProvider with ChangeNotifier {
     await loadXrayServers();
   }
 
+  Future<bool> updateXrayServer(XrayServer server) async {
+    final ok = await _xrayService.updateServer(server);
+    if (ok) await loadXrayServers();
+    return ok;
+  }
+
   Future<int> removeXrayGroupServers(String groupKey, String mode) async {
     final removed = await _xrayService.removeServersFromGroup(groupKey, mode);
     if (removed > 0) await loadXrayServers();
@@ -1885,6 +1891,9 @@ class VpnProvider with ChangeNotifier {
     await loadXrayServers();
     notifyListeners();
   }
+
+  Future<String?> xraySubUrlForGroup(String groupKey) =>
+      _xrayService.subUrlForGroup(groupKey);
 
   /// Accepts an http subscription URL OR raw share link(s). Returns true if
   /// anything was added. Refreshes so the new entries show in the list.
