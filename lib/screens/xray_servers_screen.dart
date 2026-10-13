@@ -577,93 +577,87 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               if (!XrayServer.isBuiltInGroup(k)) k,
           ];
 
-          // PERFORMANCE: build a FLAT list of lightweight "rows" (group headers
-          // + individual server tiles) and render them with a LAZY
-          // ListView.builder. Only rows actually scrolled into view are ever
-          // built, so a subscription with hundreds/thousands of servers no
-          // longer builds every widget up front — that eager build was the
-          // "server list lags when there are many servers" the user reported.
-          final rows = <_Row>[];
-          void addGroupRows(String key, String title, List<XrayServer> servers,
-              bool locked) {
-            final expanded = _expandedGroups.contains(key);
-            rows.add(_Row.header(key, title, servers, locked, expanded));
-            if (expanded) {
-              // Cap the visible tiles so a single huge group can't build an
-              // unbounded tree even when lazily scrolled. The full group is
-              // still used for connecting/testing (fastest across ALL servers).
-              final show = servers.length > 500 ? 500 : servers.length;
-              for (var i = 0; i < show; i++) {
-                rows.add(_Row.tile(
-                  servers[i],
-                  locked,
-                  groupKey: key,
-                  groupAccent: key == XrayServer.plusGroup
-                      ? const Color(0xFFE6B800)
-                      : accent,
-                  groupLast: i == show - 1 && servers.length <= show,
-                ));
-              }
-              if (servers.length > show) {
-                rows.add(_Row.more(servers.length - show));
-              }
-            }
+          // PERFORMANCE: keep only one lightweight descriptor per group. The
+          // previous implementation allocated one _Row object per visible
+          // server before ListView.builder could do its job. That made a 2k
+          // group janky and made 10k groups impractical. The builder below
+          // resolves an index to a server on demand, so off-screen configs do
+          // not create widgets or row objects at all.
+          const maxVisiblePerGroup = 10000;
+          final specs = <_GroupSpec>[
+            for (final key in orderedKeys)
+              _GroupSpec(key, key, groups[key]!, true),
+            if (individual.isNotEmpty)
+              _GroupSpec('', 'My Servers', individual, false),
+          ];
+          int rowCountFor(_GroupSpec spec) {
+            if (!_expandedGroups.contains(spec.key)) return 1;
+            final shown = spec.servers.length > maxVisiblePerGroup
+                ? maxVisiblePerGroup
+                : spec.servers.length;
+            return 1 + shown + (spec.servers.length > shown ? 1 : 0);
           }
 
-          for (final key in orderedKeys) {
-            addGroupRows(key, key, groups[key]!, true);
-          }
-          if (individual.isNotEmpty) {
-            addGroupRows('', 'My Servers', individual, false);
-          }
+          final itemCount = specs.fold<int>(0, (sum, spec) => sum + rowCountFor(spec));
 
           return RefreshIndicator(
             onRefresh: _refreshFreeGroup,
             child: ListView.builder(
               padding: const EdgeInsets.all(12),
-              itemCount: rows.length,
-              // A stable key per row keeps element recycling cheap while
-              // scrolling through very long lists.
+              itemCount: itemCount,
               itemBuilder: (context, index) {
-                final row = rows[index];
-                switch (row.kind) {
-                  case _RowKind.header:
+                var localIndex = index;
+                for (final spec in specs) {
+                  final count = rowCountFor(spec);
+                  if (localIndex >= count) {
+                    localIndex -= count;
+                    continue;
+                  }
+                  final expanded = _expandedGroups.contains(spec.key);
+                  if (localIndex == 0) {
                     return _buildGroupHeader(
                       provider: provider,
                       isDark: isDark,
                       accentIn: accent,
-                      title: row.title!,
-                      groupKey: row.groupKey!,
-                      servers: row.servers!,
-                      locked: row.locked,
-                      expanded: row.expanded,
+                      title: spec.title,
+                      groupKey: spec.key,
+                      servers: spec.servers,
+                      locked: spec.locked,
+                      expanded: expanded,
                     );
-                  case _RowKind.tile:
-                    final s = row.server!;
+                  }
+                  final serverIndex = localIndex - 1;
+                  final shown = spec.servers.length > maxVisiblePerGroup
+                      ? maxVisiblePerGroup
+                      : spec.servers.length;
+                  if (serverIndex < shown) {
+                    final s = spec.servers[serverIndex];
+                    final groupAccent = spec.key == XrayServer.plusGroup
+                        ? const Color(0xFFE6B800)
+                        : accent;
                     return _buildServerTile(
                       provider,
                       s,
                       provider.selectedXrayServer?.id == s.id,
                       isDark,
-                      row.locked && s.group == XrayServer.plusGroup
-                          ? const Color(0xFFE6B800)
-                          : accent,
-                      groupAccent: row.groupAccent,
-                      groupLast: row.groupLast,
+                      key: ValueKey('xray-server-${s.id}'),
+                      groupAccent: groupAccent,
+                      groupLast: serverIndex == shown - 1 && spec.servers.length <= shown,
                     );
-                  case _RowKind.more:
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        '…and ${row.moreCount} more servers',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? Colors.white54 : Colors.black45,
-                        ),
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      '…and ${spec.servers.length - shown} more servers',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white54 : Colors.black45,
                       ),
-                    );
+                    ),
+                  );
                 }
+                return const SizedBox.shrink();
               },
             ),
           );
@@ -767,20 +761,59 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
-                        if (locked)
-                          Text(
-                            groupSelected
-                                ? 'Selected — connects to the fastest server'
-                                : 'Tap to select • auto-picks fastest',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: groupSelected
-                                  ? accent
-                                  : (isDark
-                                      ? Colors.white54
-                                      : Colors.black45),
-                            ),
-                          ),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(
+                                opacity: animation,
+                                child: SizeTransition(
+                                  sizeFactor: animation,
+                                  axisAlignment: -1,
+                                  child: child,
+                                ),
+                              ),
+                          child: (testing || tcpTesting)
+                              ? Row(
+                                  key: const ValueKey('group-testing'),
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 1.8,
+                                        color: accent,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      tcpTesting
+                                          ? 'TCP ping in progress…'
+                                          : 'Ping in progress…',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: accent,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Text(
+                                  locked
+                                      ? (groupSelected
+                                          ? 'Selected — connects to the fastest server'
+                                          : 'Tap to select • auto-picks fastest')
+                                      : 'Tap to select a server',
+                                  key: const ValueKey('group-idle'),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: groupSelected
+                                        ? accent
+                                        : (isDark
+                                            ? Colors.white54
+                                            : Colors.black45),
+                                  ),
+                                ),
                       ],
                     ),
                   ),
@@ -966,16 +999,32 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     bool selected,
     bool isDark,
     Color accent, {
+    Key? key,
     Color? groupAccent,
     bool groupLast = false,
   }) {
     final testing = provider.xrayTestingIds.contains(s.id);
     final tcpTesting = provider.xrayTcpTestingIds.contains(s.id);
-    return Container(
+    return TweenAnimationBuilder<double>(
+      key: key,
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) => ClipRect(
+        child: Align(
+          alignment: Alignment.topCenter,
+          heightFactor: value,
+          child: Opacity(opacity: value, child: child),
+        ),
+      ),
+      child: Container(
       decoration: BoxDecoration(
         color: isDark
             ? Colors.white.withValues(alpha: 0.04)
             : Colors.black.withValues(alpha: 0.03),
+        borderRadius: groupLast
+            ? const BorderRadius.vertical(bottom: Radius.circular(14))
+            : null,
         border: groupAccent == null
             ? null
             : Border(
@@ -1013,13 +1062,16 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(height: 5),
-          Wrap(
-            spacing: 4,
-            runSpacing: 3,
-            children: [
-              _pingBadge('Ping', s.ping),
-            ],
-          ),
+            Wrap(
+              spacing: 4,
+              runSpacing: 3,
+              children: [
+                if (testing || tcpTesting)
+                  _testingBadge(tcpTesting ? 'TCP testing…' : 'Ping testing…')
+                else
+                  _pingBadge('Ping', s.ping),
+              ],
+            ),
         ],
       ),
       trailing: Row(
@@ -1110,6 +1162,36 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
       ),
       onTap: () => provider.selectXrayServer(s),
     ),
+      ),
+    );
+  }
+
+  Widget _testingBadge(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.amber.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(strokeWidth: 1.8),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.amber,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1135,6 +1217,17 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
 
 /// Kinds of flat rows in the lazy server ListView.
 enum _RowKind { header, tile, more }
+
+/// One descriptor per group. Individual server rows are resolved by index in
+/// the ListView builder instead of being allocated up front.
+class _GroupSpec {
+  final String key;
+  final String title;
+  final List<XrayServer> servers;
+  final bool locked;
+
+  const _GroupSpec(this.key, this.title, this.servers, this.locked);
+}
 
 /// A single lightweight row descriptor used by the lazy [ListView.builder] in
 /// [_XrayServersScreenState.build]. Building rows lazily (only what's on

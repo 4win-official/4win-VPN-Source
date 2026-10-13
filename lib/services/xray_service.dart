@@ -189,7 +189,7 @@ class XrayServerService {
   /// Max servers stored per subscription group. Parsing/encoding now runs on a
   /// background isolate, so large subscriptions no longer freeze the UI; this
   /// cap only guards against pathological (tens of thousands) storage bloat.
-  static const int maxServersPerGroup = 2000;
+  static const int maxServersPerGroup = 10000;
 
   Future<int> addSubInput(String raw) async {
     final text = raw.trim();
