@@ -934,24 +934,19 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   ),
                 ],
               ),
-              if (expanded)
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOutCubic,
-                  child: Container(
-                    height: 1,
-                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    color: accent.withValues(alpha: 0.3),
-                  ),
-                ),
             ),
           ),
           // Server tiles are rendered as separate lazy rows by the parent
           // ListView.builder (see [build]); the header stops here.
           if (expanded)
-            Divider(
-              height: 1,
-              color: accent.withValues(alpha: 0.45),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOutCubic,
+              child: Container(
+                height: 1,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: accent.withValues(alpha: 0.45),
+              ),
             ),
         ],
       ),
