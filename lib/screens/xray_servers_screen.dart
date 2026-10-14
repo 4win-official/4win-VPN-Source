@@ -705,12 +705,13 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     // A group is refreshable only if it's backed by a subscription URL — the
     // built-in free group or a user sub-link group. The user-pasted links
     // group ("My Sub Links") and individual servers have no source URL.
-    final isRefreshable =
-        locked && groupKey != XrayServerService.userLinksGroup;
+    final isRefreshable = locked && groupKey != XrayServerService.userLinksGroup;
     final isUserSubscription =
         isRefreshable && !XrayServer.isBuiltInGroup(groupKey);
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeInOutCubic,
       margin: EdgeInsets.only(bottom: expanded ? 0 : 12),
       decoration: BoxDecoration(
         color: isDark
@@ -933,6 +934,16 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   ),
                 ],
               ),
+              if (expanded)
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOutCubic,
+                  child: Container(
+                    height: 1,
+                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    color: accent.withValues(alpha: 0.3),
+                  ),
+                ),
             ),
           ),
           // Server tiles are rendered as separate lazy rows by the parent
