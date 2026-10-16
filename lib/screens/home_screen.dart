@@ -330,7 +330,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // Dark/Light toggle removed from home — it now lives inside the Theme
           // selection screen (opened via the palette icon).
 
-          // Donate Button - animated rainbow heart to grab attention
+          // Donate button: liquid-glass heart with an occasional Support Us callout.
           RainbowHeartButton(
             tooltip: 'Support Us',
             onPressed: () {
