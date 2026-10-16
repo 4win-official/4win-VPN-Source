@@ -132,15 +132,16 @@ class OpenVpnConfig {
       config.contains('<auth-user-pass>') ||
       config.contains(RegExp(r'^\s*auth-user-pass\b', multiLine: true));
 
-  /// True when the config carries a CLIENT certificate/key (inline `<cert>` /
-  /// `<key>` blocks or file-based `cert`/`key` directives). When it does NOT,
-  /// the core
-  /// must be told the client cert is not required, otherwise it waits for a
-  /// certificate that never comes and the handshake stalls — the classic
-  /// "connects to nothing" symptom for username/password-only servers.
+  /// True when the config carries client certificate/key material (inline
+  /// `<cert>` / `<key>` / `<pkcs12>` blocks or file-based `cert` / `key` /
+  /// `pkcs12` directives). This is used to identify profiles whose client
+  /// credentials must be preserved. It does not set the server's client-cert
+  /// policy; `client-cert-not-required` is a server-side option and must not
+  /// be injected into a client profile.
   bool get hasClientCert =>
       config.contains('<cert>') ||
       config.contains('<key>') ||
+      config.contains('<pkcs12>') ||
       config.contains(RegExp(r'^\s*cert\s+\S+', multiLine: true)) ||
       config.contains(RegExp(r'^\s*key\s+\S+', multiLine: true)) ||
       config.contains(RegExp(r'^\s*pkcs12\s+\S+', multiLine: true));
@@ -282,7 +283,8 @@ class OpenVpnConfig {
       normalized = 'allow-compression asym\n$normalized';
     }
 
-    // ALWAYS end with a newline (see plugin's client-cert-not-required append).
+    // Always end with a newline so the native parser receives clean line
+    // boundaries, including for profiles ending in inline PEM blocks.
     if (!normalized.endsWith('\n')) normalized = '$normalized\n';
 
     _normalizedCache = normalized;

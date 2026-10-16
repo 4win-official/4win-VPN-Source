@@ -301,7 +301,13 @@ class OpenVpnConnection {
         config.name,
         username: username,
         password: password,
-        certIsRequired: !forceBypassCert,
+        // openvpn_flutter 1.3.4 appends `client-cert-not-required` to the
+        // *client* profile whenever this is false. That is a server-side option
+        // removed in OpenVPN 2.5, so the core can reject an otherwise valid
+        // profile. The profile content (including any explicit cert bypass)
+        // already determines the client credentials; keep the plugin from
+        // mutating it here.
+        certIsRequired: true,
         bypassPackages: [],
       );
       _connectedConfigName = config.name;

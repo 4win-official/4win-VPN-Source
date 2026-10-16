@@ -1476,10 +1476,10 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  /// Connect via OpenVPN. Keeps retrying every 4 seconds (restarting the whole
-  /// connect from scratch, silently — no UI churn) until it either connects OR
-  /// hits a HARD auth failure (wrong user/pass). Client-certificate bypass is
-  /// used only when the caller explicitly passes forceBypassCert.
+  /// Connect via OpenVPN. Give each started attempt enough time for DNS, TLS
+  /// and authentication before silently restarting it; stop immediately on a
+  /// HARD auth failure (wrong user/pass). Client-certificate material is
+  /// bypassed when explicitly requested or when the profile has none to keep.
   Future<void> _connectOpenVpn({bool forceBypassCert = false}) async {
     // Apply the global Traffic Compression toggle before building the config.
     try {
@@ -1548,7 +1548,7 @@ class VpnProvider with ChangeNotifier {
     // The instant the native core reports an auth failure, stop the whole
     // retry cycle and surface the error — like the official OpenVPN app.
     // `_finishCurrentAttempt` lets the auth callback complete the in-flight
-    // attempt's completer immediately (so we don't wait for the 4s watchdog).
+    // attempt's completer immediately (so we don't wait for the watchdog).
     bool authAborted = false;
     void Function(bool)? finishCurrentAttempt;
     OpenVpnConnection.onAuthFailed = () {
@@ -1638,18 +1638,16 @@ class VpnProvider with ChangeNotifier {
         }
       };
 
-      // Per-attempt watchdog: if the config hasn't reached "connected" within
-      // 4s, time out, fully tear the tunnel down and restart from scratch —
-      // silently (the UI stays on "connecting").
-      final watchdog = Timer(const Duration(seconds: 4), () => finish(false));
+      // A VPN handshake can legitimately take longer than a few seconds, even
+      // when the same profile connects quickly in another client. Keep the
+      // longer timeout while allowing stage and auth failures to finish early.
+      final watchdog = Timer(const Duration(seconds: 30), () => finish(false));
 
       try {
         await OpenVpnConnection.connect(
           _selectedOpenVpnConfig!,
-          // Username/password-only profiles must tell ics-openvpn that a
-          // client certificate is not required. Preserve a valid certificate
-          // profile unless the user explicitly chose "connect anyway" after
-          // a certificate warning.
+          // This controls whether client-certificate material is stripped.
+          // Inline PKCS#12 is recognized as a client credential too.
           forceBypassCert: forceBypassCert ||
               !_selectedOpenVpnConfig!.hasClientCert,
         );
@@ -1692,9 +1690,9 @@ class VpnProvider with ChangeNotifier {
         return;
       }
 
-      // Reset the native session and retry after 4s — silently (UI stays on
-      // "connecting", no error shown). Do NOT clear the auth-failed state here,
-      // so a wrong-password detected late (during teardown) still aborts.
+      // Reset the native session and retry silently (UI stays on "connecting",
+      // no error shown). Do NOT clear the auth-failed state here, so a
+      // wrong-password detected late (during teardown) still aborts.
       try {
         await OpenVpnConnection.disconnect(resetAuthState: false);
       } catch (_) {}

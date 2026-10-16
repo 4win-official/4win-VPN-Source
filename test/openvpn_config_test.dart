@@ -59,4 +59,65 @@ PRIVATE KEY
     expect(config.normalizedConfig, contains('<key>'));
     expect(config.hasClientCert, isTrue);
   });
+
+  test('recognizes and preserves an inline PKCS#12 client credential', () {
+    final config = OpenVpnConfig(
+      name: 'pkcs12',
+      config: '''client
+remote vpn.example 1194
+proto udp
+<pkcs12>
+PKCS12 DATA
+</pkcs12>
+''',
+    );
+
+    expect(config.hasClientCert, isTrue);
+    expect(config.normalizedConfig, contains('<pkcs12>'));
+    expect(config.configWithoutClientCert, isNot(contains('<pkcs12>')));
+  });
+
+  test('certificate bypass preserves server CA and auth settings', () {
+    final config = OpenVpnConfig(
+      name: 'bypass',
+      config: '''client
+remote vpn.example 1194
+proto udp
+auth-user-pass
+<ca>
+SERVER CA
+</ca>
+<cert>
+CLIENT CERT
+</cert>
+<key>
+CLIENT KEY
+</key>
+''',
+    );
+
+    expect(config.configWithoutClientCert, contains('<ca>'));
+    expect(config.configWithoutClientCert, contains('auth-user-pass'));
+    expect(config.configWithoutClientCert, isNot(contains('<cert>')));
+    expect(config.configWithoutClientCert, isNot(contains('<key>')));
+  });
+
+  test('does not add the server-only cert option to a client profile', () {
+    final config = OpenVpnConfig(
+      name: 'password-only',
+      config: '''client
+remote vpn.example 1194
+proto udp
+auth-user-pass
+<ca>
+SERVER CA
+</ca>
+''',
+    );
+
+    expect(
+      config.normalizedConfig,
+      isNot(contains('client-cert-not-required')),
+    );
+  });
 }
