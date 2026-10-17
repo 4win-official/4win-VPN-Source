@@ -28,7 +28,8 @@ class RainbowHeartButton extends StatefulWidget {
 class _RainbowHeartButtonState extends State<RainbowHeartButton>
     with SingleTickerProviderStateMixin {
   static const _calloutDuration = Duration(seconds: 4);
-  static const _calloutWidth = 136.0;
+  static const _maxCalloutWidth = 176.0;
+  static const _calloutHeight = 44.0;
 
   final math.Random _random = math.Random();
   final LayerLink _layerLink = LayerLink();
@@ -66,17 +67,38 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
     }
     _removeCallout();
 
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final calloutWidth = math.min(
+      _maxCalloutWidth,
+      math.min(screenWidth - 32, math.max(120.0, screenWidth * 0.44)),
+    ).toDouble();
+    final textDirection = Directionality.of(context);
+    final anchor = AlignmentDirectional.bottomEnd.resolve(textDirection);
+    final followerAnchor = AlignmentDirectional.topEnd.resolve(textDirection);
+
     _calloutEntry = OverlayEntry(
-      builder: (context) => CompositedTransformFollower(
-        link: _layerLink,
-        showWhenUnlinked: false,
-        targetAnchor: Alignment.bottomCenter,
-        followerAnchor: Alignment.topRight,
-        offset: const Offset(10, 8),
-        child: _buildCallout(context),
+      builder: (overlayContext) => Positioned.fill(
+        child: Align(
+          alignment: Alignment.topLeft,
+          widthFactor: 1,
+          heightFactor: 1,
+          child: CompositedTransformFollower(
+            link: _layerLink,
+            showWhenUnlinked: false,
+            targetAnchor: anchor,
+            followerAnchor: followerAnchor,
+            offset: const Offset(0, 8),
+            child: SizedBox(
+              width: calloutWidth,
+              height: _calloutHeight,
+              child: _buildCallout(overlayContext),
+            ),
+          ),
+        ),
       ),
     );
-    Overlay.of(context, rootOverlay: true).insert(_calloutEntry!);
+    overlay.insert(_calloutEntry!);
     _dismissTimer = Timer(_calloutDuration, () {
       _removeCallout();
       if (mounted) _scheduleCallout();
@@ -112,8 +134,6 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
               child: Container(
-                width: _calloutWidth,
-                height: 38,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
                   color: isDark
@@ -121,7 +141,9 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
                       : const Color(0xE6FFF9FD),
                   borderRadius: BorderRadius.circular(15),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: isDark ? 0.34 : 0.78),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.34)
+                        : const Color(0xFFE79ABC),
                     width: 1,
                   ),
                   boxShadow: [
@@ -194,7 +216,10 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
               scale: scale,
               child: CustomPaint(
                 size: Size(widget.size, widget.size),
-                painter: _LiquidGlassHeartPainter(glow: _beatCurve.value),
+                painter: _LiquidGlassHeartPainter(
+                  glow: _beatCurve.value,
+                  isDark: Theme.of(context).brightness == Brightness.dark,
+                ),
               ),
             );
           },
@@ -206,8 +231,9 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
 
 class _LiquidGlassHeartPainter extends CustomPainter {
   final double glow;
+  final bool isDark;
 
-  const _LiquidGlassHeartPainter({required this.glow});
+  const _LiquidGlassHeartPainter({required this.glow, required this.isDark});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -216,7 +242,9 @@ class _LiquidGlassHeartPainter extends CustomPainter {
 
     // Pink light blooming from behind the translucent glass heart.
     final glowPaint = Paint()
-      ..color = const Color(0xFFFF54AE).withValues(alpha: 0.48 + glow * 0.18)
+      ..color = const Color(0xFFFF3688).withValues(
+        alpha: isDark ? 0.48 + glow * 0.18 : 0.28 + glow * 0.12,
+      )
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, 7 + glow * 5);
     canvas.drawPath(path, glowPaint);
 
@@ -224,12 +252,19 @@ class _LiquidGlassHeartPainter extends CustomPainter {
       ..shader = LinearGradient(
         begin: const Alignment(-0.8, -1),
         end: const Alignment(0.8, 1),
-        colors: [
-          Colors.white.withValues(alpha: 0.68),
-          const Color(0xFFFFA5D8).withValues(alpha: 0.42),
-          const Color(0xFFE3C9FF).withValues(alpha: 0.38),
-          const Color(0xFFFFF7FC).withValues(alpha: 0.62),
-        ],
+        colors: isDark
+            ? [
+                Colors.white.withValues(alpha: 0.68),
+                const Color(0xFFFFA5D8).withValues(alpha: 0.42),
+                const Color(0xFFE3C9FF).withValues(alpha: 0.38),
+                const Color(0xFFFFF7FC).withValues(alpha: 0.62),
+              ]
+            : const [
+                Color(0xFFFF9BCB),
+                Color(0xFFEF4B8C),
+                Color(0xFFD91E66),
+                Color(0xFFFF78B3),
+              ],
         stops: const [0, 0.36, 0.7, 1],
       ).createShader(rect)
       ..isAntiAlias = true;
@@ -274,11 +309,17 @@ class _LiquidGlassHeartPainter extends CustomPainter {
       ..shader = LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [
-          Colors.white.withValues(alpha: 0.98),
-          const Color(0xFFFFB5DF).withValues(alpha: 0.88),
-          Colors.white.withValues(alpha: 0.72),
-        ],
+        colors: isDark
+            ? [
+                Colors.white.withValues(alpha: 0.98),
+                const Color(0xFFFFB5DF).withValues(alpha: 0.88),
+                Colors.white.withValues(alpha: 0.72),
+              ]
+            : const [
+                Color(0xFFFFE2EF),
+                Color(0xFF9E174D),
+                Color(0xFFFFC1DA),
+              ],
       ).createShader(rect)
       ..isAntiAlias = true;
     canvas.drawPath(path, rim);
@@ -296,5 +337,5 @@ class _LiquidGlassHeartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_LiquidGlassHeartPainter oldDelegate) =>
-      oldDelegate.glow != glow;
+      oldDelegate.glow != glow || oldDelegate.isDark != isDark;
 }

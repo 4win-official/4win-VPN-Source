@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../models/xray_server.dart';
 import '../services/xray_service.dart';
+import '../widgets/animated_server_group.dart';
 
 /// Server list screen for the Xray protocol (real Xray core / v2rayNG).
 /// Servers are shown in collapsible groups: the locked free subscription
@@ -590,76 +591,26 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             if (individual.isNotEmpty)
               _GroupSpec('', 'My Servers', individual, false),
           ];
-          int rowCountFor(_GroupSpec spec) {
-            if (!_expandedGroups.contains(spec.key)) return 1;
-            final shown = spec.servers.length > maxVisiblePerGroup
-                ? maxVisiblePerGroup
-                : spec.servers.length;
-            return 1 + shown + (spec.servers.length > shown ? 1 : 0);
-          }
-
-          final itemCount = specs.fold<int>(0, (sum, spec) => sum + rowCountFor(spec));
-
           return RefreshIndicator(
             onRefresh: _refreshFreeGroup,
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: itemCount,
-              itemBuilder: (context, index) {
-                var localIndex = index;
-                for (final spec in specs) {
-                  final count = rowCountFor(spec);
-                  if (localIndex >= count) {
-                    localIndex -= count;
-                    continue;
-                  }
-                  final expanded = _expandedGroups.contains(spec.key);
-                  if (localIndex == 0) {
-                    return _buildGroupHeader(
-                      provider: provider,
-                      isDark: isDark,
-                      accentIn: accent,
-                      title: spec.title,
-                      groupKey: spec.key,
-                      servers: spec.servers,
-                      locked: spec.locked,
-                      expanded: expanded,
-                    );
-                  }
-                  final serverIndex = localIndex - 1;
-                  final shown = spec.servers.length > maxVisiblePerGroup
-                      ? maxVisiblePerGroup
-                      : spec.servers.length;
-                  if (serverIndex < shown) {
-                    final s = spec.servers[serverIndex];
-                    final groupAccent = spec.key == XrayServer.plusGroup
-                        ? const Color(0xFFE6B800)
-                        : accent;
-                    return _buildServerTile(
-                      provider,
-                      s,
-                      provider.selectedXrayServer?.id == s.id,
-                      isDark,
-                      groupAccent,
-                      key: ValueKey('xray-server-${s.id}'),
-                      groupAccent: groupAccent,
-                      groupLast: serverIndex == shown - 1 && spec.servers.length <= shown,
-                    );
-                  }
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      '…and ${spec.servers.length - shown} more servers',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.white54 : Colors.black45,
-                      ),
-                    ),
-                  );
-                }
-                return const SizedBox.shrink();
-              },
+            child: CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.all(12),
+                  sliver: SliverMainAxisGroup(
+                    slivers: [
+                      for (final spec in specs)
+                        _buildAnimatedGroup(
+                          provider: provider,
+                          spec: spec,
+                          isDark: isDark,
+                          accent: accent,
+                          maxVisible: maxVisiblePerGroup,
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           );
         },
@@ -673,10 +624,73 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     );
   }
 
-  /// A collapsible group HEADER only (tap = select group, arrow = expand).
-  /// The server tiles themselves are rendered as separate rows by the lazy
-  /// ListView.builder in [build] so a huge group never builds all its tiles at
-  /// once.
+  Widget _buildAnimatedGroup({
+    required VpnProvider provider,
+    required _GroupSpec spec,
+    required bool isDark,
+    required Color accent,
+    required int maxVisible,
+  }) {
+    final expanded = _expandedGroups.contains(spec.key);
+    final groupAccent = spec.key == XrayServer.plusGroup
+        ? const Color(0xFFE6B800)
+        : accent;
+    final highlight =
+        (spec.locked && provider.xrayGroupSelectedFor(spec.key)) ||
+        spec.servers.any((s) => provider.selectedXrayServer?.id == s.id);
+    final shown = spec.servers.length > maxVisible
+        ? maxVisible
+        : spec.servers.length;
+
+    return AnimatedServerGroup(
+      key: ValueKey('xray-group-${spec.key}'),
+      expanded: expanded,
+      backgroundColor: isDark
+          ? Colors.white.withValues(alpha: 0.04)
+          : Colors.black.withValues(alpha: 0.03),
+      collapsedBorderColor: highlight ? groupAccent : Colors.transparent,
+      expandedBorderColor: groupAccent.withValues(
+        alpha: highlight ? 0.95 : 0.45,
+      ),
+      header: _buildGroupHeader(
+        provider: provider,
+        isDark: isDark,
+        accentIn: accent,
+        title: spec.title,
+        groupKey: spec.key,
+        servers: spec.servers,
+        locked: spec.locked,
+        expanded: expanded,
+      ),
+      itemCount: shown + (spec.servers.length > shown ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index == shown) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              '…and ${spec.servers.length - shown} more servers',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white54 : Colors.black45,
+              ),
+            ),
+          );
+        }
+        final server = spec.servers[index];
+        return _buildServerTile(
+          provider,
+          server,
+          provider.selectedXrayServer?.id == server.id,
+          isDark,
+          groupAccent,
+          key: ValueKey('xray-server-${server.id}'),
+        );
+      },
+    );
+  }
+
+  /// Header actions stay separate from the single animated group frame.
   Widget _buildGroupHeader({
     required VpnProvider provider,
     required bool isDark,
@@ -699,256 +713,213 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     // A named group can be selected as a whole; a specific selected server in
     // this group also counts as "this group active".
     final groupSelected = locked && provider.xrayGroupSelectedFor(groupKey);
-    final aServerInGroupSelected = servers
-        .any((s) => provider.selectedXrayServer?.id == s.id);
-    final highlight = groupSelected || aServerInGroupSelected;
     // A group is refreshable only if it's backed by a subscription URL — the
     // built-in free group or a user sub-link group. The user-pasted links
     // group ("My Sub Links") and individual servers have no source URL.
-    final isRefreshable = locked && groupKey != XrayServerService.userLinksGroup;
+    final isRefreshable =
+        locked && groupKey != XrayServerService.userLinksGroup;
     final isUserSubscription =
         isRefreshable && !XrayServer.isBuiltInGroup(groupKey);
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 350),
-      curve: Curves.easeInOutCubic,
-      margin: EdgeInsets.only(bottom: expanded ? 0 : 12),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : Colors.black.withValues(alpha: 0.03),
-        borderRadius: expanded
-            ? const BorderRadius.vertical(top: Radius.circular(14))
-            : BorderRadius.circular(14),
-        border: Border.all(
-          color: expanded
-              ? accent.withValues(alpha: highlight ? 0.95 : 0.45)
-              : (highlight ? accent : Colors.transparent),
-          width: 2,
-        ),
-      ),
-      child: Column(
-        children: [
-          // ---- Header ----
-          InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: locked
-                ? () => provider.selectXrayGroup(groupKey)
-                : onToggleExpand,
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: locked ? () => provider.selectXrayGroup(groupKey) : onToggleExpand,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              !locked
+                  ? Icons.folder
+                  : (groupKey == XrayServer.plusGroup
+                        ? Icons.workspace_premium
+                        : (groupKey == XrayServer.freeGroup
+                              ? Icons.lock
+                              : Icons.cloud_outlined)),
+              size: 20,
+              color: accent,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                      !locked
-                          ? Icons.folder
-                          : (groupKey == XrayServer.plusGroup
-                              ? Icons.workspace_premium
-                              : (groupKey == XrayServer.freeGroup
-                                  ? Icons.lock
-                                  : Icons.cloud_outlined)),
-                      size: 20,
-                      color: accent),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '$title (${servers.length})',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 220),
-                          transitionBuilder: (child, animation) =>
-                              FadeTransition(
-                                opacity: animation,
-                                child: SizeTransition(
-                                  sizeFactor: animation,
-                                  axisAlignment: -1,
-                                  child: child,
+                  Text(
+                    '$title (${servers.length})',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SizeTransition(
+                        sizeFactor: animation,
+                        axisAlignment: -1,
+                        child: child,
+                      ),
+                    ),
+                    child: (testing || tcpTesting)
+                        ? Row(
+                            key: const ValueKey('group-testing'),
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.8,
+                                  color: accent,
                                 ),
                               ),
-                          child: (testing || tcpTesting)
-                              ? Row(
-                                  key: const ValueKey('group-testing'),
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 1.8,
-                                        color: accent,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      tcpTesting
-                                          ? 'TCP ping in progress…'
-                                          : 'Ping in progress…',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: accent,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Text(
-                                  locked
-                                      ? (groupSelected
-                                          ? 'Selected — connects to the fastest server'
-                                          : 'Tap to select • auto-picks fastest')
-                                      : 'Tap to select a server',
-                                  key: const ValueKey('group-idle'),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: groupSelected
-                                        ? accent
-                                        : (isDark
-                                            ? Colors.white54
-                                            : Colors.black45),
-                                  ),
+                              const SizedBox(width: 5),
+                              Text(
+                                tcpTesting
+                                    ? 'TCP ping in progress…'
+                                    : 'Ping in progress…',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: accent,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Selected indicator for the whole free group
-                  if (groupSelected)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Icon(Icons.check_circle, color: accent),
-                    ),
-                  // Export whole group (copy all links to clipboard)
-                  IconButton(
-                    tooltip: 'Export group',
-                    icon: Icon(Icons.copy_all, color: accent),
-                    onPressed: () => _exportServers(servers, title),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete selected servers',
-                    icon: Icon(
-                      Icons.delete_outline,
-                      color: Colors.redAccent,
-                    ),
-                    onPressed: () => _confirmDeleteGroup(groupKey, title),
-                  ),
-                  PopupMenuButton<String>(
-                    tooltip: 'More group actions',
-                    icon: Icon(Icons.more_vert, color: accent),
-                    itemBuilder: (ctx) => [
-                      if (isUserSubscription)
-                        const PopupMenuItem(
-                          value: 'edit_subscription',
-                          child: ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(Icons.edit_outlined),
-                            title: Text('Edit subscription'),
+                              ),
+                            ],
+                          )
+                        : Text(
+                            locked
+                                ? (groupSelected
+                                      ? 'Selected — connects to the fastest server'
+                                      : 'Tap to select • auto-picks fastest')
+                                : 'Tap to select a server',
+                            key: const ValueKey('group-idle'),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: groupSelected
+                                  ? accent
+                                  : (isDark ? Colors.white54 : Colors.black45),
+                            ),
                           ),
-                        ),
-                      if (isRefreshable)
-                        const PopupMenuItem(
-                          value: 'refresh',
-                          child: ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(Icons.refresh),
-                            title: Text('Update group'),
-                          ),
-                        ),
-                      const PopupMenuItem(
-                        value: 'sort',
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.sort),
-                          title: Text('Sort by ping'),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'url_ping',
-                        enabled: !testing,
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: testing
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.speed),
-                          title: const Text('URL ping all'),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'tcp_ping',
-                        enabled: !tcpTesting,
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: tcpTesting
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.cable),
-                          title: const Text('TCP ping all'),
-                        ),
-                      ),
-                    ],
-                    onSelected: (action) {
-                      switch (action) {
-                        case 'edit_subscription':
-                          _editSubscriptionGroup(provider, groupKey, title);
-                          break;
-                        case 'refresh':
-                          _refreshOneGroup(provider, groupKey, title);
-                          break;
-                        case 'sort':
-                          provider.sortXrayGroupByPing(groupKey);
-                          break;
-                        case 'url_ping':
-                          provider.testXrayServers(servers);
-                          break;
-                        case 'tcp_ping':
-                          provider.testXrayTcpServers(servers);
-                          break;
-                      }
-                    },
-                  ),
-                  // Expand / collapse arrow
-                  IconButton(
-                    tooltip: expanded ? 'Collapse' : 'Expand',
-                    icon: AnimatedRotation(
-                      turns: expanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 200),
-                      child: Icon(Icons.keyboard_arrow_down,
-                          color: isDark ? Colors.white70 : Colors.black54),
-                    ),
-                    onPressed: onToggleExpand,
                   ),
                 ],
               ),
             ),
-          ),
-          // Server tiles are rendered as separate lazy rows by the parent
-          // ListView.builder (see [build]); the header stops here.
-          if (expanded)
-            AnimatedSize(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOutCubic,
-              child: Container(
-                height: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: accent.withValues(alpha: 0.45),
+            // Selected indicator for the whole free group
+            if (groupSelected)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(Icons.check_circle, color: accent),
               ),
+            // Export whole group (copy all links to clipboard)
+            IconButton(
+              tooltip: 'Export group',
+              icon: Icon(Icons.copy_all, color: accent),
+              onPressed: () => _exportServers(servers, title),
             ),
-        ],
+            IconButton(
+              tooltip: 'Delete selected servers',
+              icon: Icon(Icons.delete_outline, color: Colors.redAccent),
+              onPressed: () => _confirmDeleteGroup(groupKey, title),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'More group actions',
+              icon: Icon(Icons.more_vert, color: accent),
+              itemBuilder: (ctx) => [
+                if (isUserSubscription)
+                  const PopupMenuItem(
+                    value: 'edit_subscription',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.edit_outlined),
+                      title: Text('Edit subscription'),
+                    ),
+                  ),
+                if (isRefreshable)
+                  const PopupMenuItem(
+                    value: 'refresh',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.refresh),
+                      title: Text('Update group'),
+                    ),
+                  ),
+                const PopupMenuItem(
+                  value: 'sort',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.sort),
+                    title: Text('Sort by ping'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'url_ping',
+                  enabled: !testing,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: testing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.speed),
+                    title: const Text('URL ping all'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'tcp_ping',
+                  enabled: !tcpTesting,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: tcpTesting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.cable),
+                    title: const Text('TCP ping all'),
+                  ),
+                ),
+              ],
+              onSelected: (action) {
+                switch (action) {
+                  case 'edit_subscription':
+                    _editSubscriptionGroup(provider, groupKey, title);
+                    break;
+                  case 'refresh':
+                    _refreshOneGroup(provider, groupKey, title);
+                    break;
+                  case 'sort':
+                    provider.sortXrayGroupByPing(groupKey);
+                    break;
+                  case 'url_ping':
+                    provider.testXrayServers(servers);
+                    break;
+                  case 'tcp_ping':
+                    provider.testXrayTcpServers(servers);
+                    break;
+                }
+              },
+            ),
+            // Expand / collapse arrow
+            IconButton(
+              tooltip: expanded ? 'Collapse' : 'Expand',
+              icon: AnimatedRotation(
+                turns: expanded ? 0.5 : 0,
+                duration: AnimatedServerGroup.duration,
+                curve: AnimatedServerGroup.curve,
+                child: Icon(
+                  Icons.keyboard_arrow_down,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+              ),
+              onPressed: onToggleExpand,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -958,8 +929,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.rocket_launch,
-              size: 64, color: accent.withValues(alpha: 0.6)),
+          Icon(
+            Icons.rocket_launch,
+            size: 64,
+            color: accent.withValues(alpha: 0.6),
+          ),
           const SizedBox(height: 16),
           Text(
             'No Xray servers yet',
@@ -1008,45 +982,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     bool isDark,
     Color accent, {
     Key? key,
-    Color? groupAccent,
-    bool groupLast = false,
   }) {
     final testing = provider.xrayTestingIds.contains(s.id);
     final tcpTesting = provider.xrayTcpTestingIds.contains(s.id);
-    return TweenAnimationBuilder<double>(
+    return ListTile(
       key: key,
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-      builder: (context, value, child) => ClipRect(
-        child: Align(
-          alignment: Alignment.topCenter,
-          heightFactor: value,
-          child: Opacity(opacity: value, child: child),
-        ),
-      ),
-      child: Container(
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : Colors.black.withValues(alpha: 0.03),
-        borderRadius: groupLast
-            ? const BorderRadius.vertical(bottom: Radius.circular(14))
-            : null,
-        border: groupAccent == null
-            ? null
-            : Border(
-                left: BorderSide(
-                    color: groupAccent.withValues(alpha: 0.85), width: 2),
-                right: BorderSide(
-                    color: groupAccent.withValues(alpha: 0.85), width: 2),
-                bottom: groupLast
-                    ? BorderSide(
-                        color: groupAccent.withValues(alpha: 0.85), width: 2)
-                    : BorderSide.none,
-              ),
-      ),
-      child: ListTile(
       dense: true,
       leading: CircleAvatar(
         radius: 18,
@@ -1070,16 +1010,16 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(height: 5),
-            Wrap(
-              spacing: 4,
-              runSpacing: 3,
-              children: [
-                if (testing || tcpTesting)
-                  _testingBadge(tcpTesting ? 'TCP testing…' : 'Ping testing…')
-                else
-                  _pingBadge('Ping', s.ping),
-              ],
-            ),
+          Wrap(
+            spacing: 4,
+            runSpacing: 3,
+            children: [
+              if (testing || tcpTesting)
+                _testingBadge(tcpTesting ? 'TCP testing…' : 'Ping testing…')
+              else
+                _pingBadge('Ping', s.ping),
+            ],
+          ),
         ],
       ),
       trailing: Row(
@@ -1169,8 +1109,6 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         ],
       ),
       onTap: () => provider.selectXrayServer(s),
-    ),
-      ),
     );
   }
 
