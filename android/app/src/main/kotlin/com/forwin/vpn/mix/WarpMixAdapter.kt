@@ -30,17 +30,8 @@ class WarpMixAdapter : MixAdapter {
                 val originalAccount = File(originalRoot, "aether-warp.toml")
                 check(originalAccount.isFile) { "Initialize WARP once before adding it to a Mix chain" }
                 originalAccount.copyTo(File(privateRoot, "aether-warp.toml"), overwrite = true)
-                val effective = JSONObject(config.toString())
-                effective.keys().asSequence().toList().forEach { key ->
-                    val value = effective.opt(key)
-                    if (value is String && value.contains("__APP_FILES__")) {
-                        effective.put(key, value.replace("__APP_FILES__", privateRoot.absolutePath))
-                    }
-                }
-                effective.put("listen", "127.0.0.1:${environment.listenPort}")
-                    .put("mix_force_tunnel", true).put("gateway", false)
-                if (environment.upstreamSocksUrl != null) effective.put("upstream_proxy", environment.upstreamSocksUrl)
-                else effective.remove("upstream_proxy")
+                val effective = MixWarpConfig.build(config, privateRoot.absolutePath,
+                    environment.listenPort, environment.upstreamSocksUrl)
                 synchronized(lock) {
                     if (stopped) return@execute
                     val result = NativeCore.startProxy(effective.toString())

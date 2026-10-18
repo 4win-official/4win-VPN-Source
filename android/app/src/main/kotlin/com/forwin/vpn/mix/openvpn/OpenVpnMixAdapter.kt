@@ -37,7 +37,7 @@ class OpenVpnMixAdapter : MixAdapter {
                 val raw = sequenceOf("config", "inlineConfig", "ovpn").mapNotNull { config.optString(it, "").takeIf(String::isNotBlank) }.firstOrNull()
                     ?: error("missing inline OpenVPN config")
                 val upstream = environment.upstreamSocksUrl?.let(::parseSocks)
-                val upstreamSupportsUdp = config.optBoolean("upstreamSupportsUdp", true)
+                val upstreamSupportsUdp = environment.upstreamSupportsUdp
                 val parser = ConfigParser()
                 parser.parseConfig(StringReader(stripProxyOptions(raw, upstream)))
                 val profile = parser.convertProfile()

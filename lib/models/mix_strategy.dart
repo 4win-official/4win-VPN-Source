@@ -54,11 +54,10 @@ class MixStrategy {
 
   String? get validationError {
     if (name.trim().isEmpty) return 'Enter a strategy name.';
-    if (hops.isEmpty) return 'Add at least one tunnel block after Start.';
+    if (hops.isEmpty) return 'Add at least one block after Start.';
     if (hops.length > maxBlocks) {
       return 'At most $maxBlocks blocks are supported.';
     }
-    var tunnels = 0;
     for (var i = 0; i < hops.length; i++) {
       final hop = hops[i];
       final reason = unavailableReason(hop.protocol);
@@ -76,12 +75,7 @@ class MixStrategy {
             hop.serverId!.isEmpty) {
           return 'DNS must use a server IP reference, not a group.';
         }
-      } else {
-        tunnels++;
       }
-    }
-    if (tunnels == 0) {
-      return 'Add at least one tunnel block; DNS is a resolver, not a VPN hop.';
     }
     return null;
   }

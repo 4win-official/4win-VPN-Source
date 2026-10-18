@@ -1322,3 +1322,7 @@ mod tests {
         .is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "mix_wireguard_tests.rs"]
+mod mix_wireguard_tests;

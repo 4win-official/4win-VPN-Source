@@ -76,7 +76,8 @@ open class MixWorkerService : Service() {
                         emit(sessionId, hopId, "error", message)
                         stopAdapter()
                     }
-                }, workerSlot = intent.getIntExtra("workerSlot", 0)))
+                }, workerSlot = intent.getIntExtra("workerSlot", 0),
+                upstreamSupportsUdp = intent.getBooleanExtra("upstreamSupportsUdp", true)))
         } catch (error: Throwable) {
             emit(sessionId, hopId, "error", error.message ?: "Mix engine failed")
             stopAdapter()

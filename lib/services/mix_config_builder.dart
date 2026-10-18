@@ -25,7 +25,20 @@ class MixConfigBuilder {
     // Each boundary retains its preceding tunnel prefix. The last policy is
     // effective for app DNS; earlier policies remain scoped to their prefixes.
     final dnsPolicies = <({String address, int prefixLength})>[];
-    Map<String, dynamic>? base;
+    // DNS-only Mix is a resolver configuration, not an encrypted tunnel. Keep
+    // the normal TUN shape, but use a direct freedom outbound for non-DNS
+    // traffic when there are no transport blocks.
+    final dummy = ProxyServer(
+      id: '__mix_dummy__',
+      remark: 'Mix',
+      link: 'socks5://127.0.0.1:1',
+      protocol: 'socks5',
+      address: '127.0.0.1',
+      port: 1,
+    );
+    Map<String, dynamic> base =
+        jsonDecode(XrayConfigBuilder.buildForProxyServer(dummy))
+            as Map<String, dynamic>;
     var tcpOnly = false;
     for (final hop in strategy.hops) {
       if (hop.protocol == 'direct_dns') {
@@ -81,7 +94,7 @@ class MixConfigBuilder {
         );
       }
       final decoded = jsonDecode(standalone) as Map<String, dynamic>;
-      base ??= decoded;
+      if (tunnels.isEmpty) base = decoded;
       final outbound = Map<String, dynamic>.from(
         (decoded['outbounds'] as List).first as Map,
       );
@@ -108,15 +121,23 @@ class MixConfigBuilder {
       outbound['streamSettings'] = stream;
       tunnels.add(outbound);
     }
-    if (base == null || tunnels.isEmpty) {
-      throw const FormatException('A tunnel block is required.');
-    }
     // Keep the existing native traffic counter's tag for the exit only.
-    tunnels.last['tag'] = 'proxy';
-    final outbounds = <Map<String, dynamic>>[
-      tunnels.last,
-      ...tunnels.take(tunnels.length - 1),
-    ];
+    final List<Map<String, dynamic>> outbounds;
+    if (tunnels.isEmpty) {
+      outbounds = [
+        {
+          'tag': 'proxy',
+          'protocol': 'freedom',
+          'settings': <String, dynamic>{},
+          'streamSettings': {
+            'sockopt': {'domainStrategy': 'AsIs'},
+          },
+        },
+      ];
+    } else {
+      tunnels.last['tag'] = 'proxy';
+      outbounds = [tunnels.last, ...tunnels.take(tunnels.length - 1)];
+    }
     if (dnsPolicies.isEmpty) {
       dnsPolicies.add((address: '1.1.1.1', prefixLength: tunnels.length));
     }

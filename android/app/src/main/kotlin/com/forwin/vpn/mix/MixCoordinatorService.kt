@@ -221,8 +221,9 @@ class MixCoordinatorService : VpnService() {
                 .setAction(MixWorkerService.ACTION_START).putExtra("sessionId", current.id)
                 .putExtra("hopId", i.toString()).putExtra("protocol", protocol)
                 .putExtra("workerSlot", worker.slot)
+                .putExtra("upstreamSupportsUdp", supportsUdp)
                 .putExtra("config", JSONObject(hop.optJSONObject("config")?.toString() ?: "{}")
-                    .put("upstreamSupportsUdp", supportsUdp).toString())
+                    .toString())
                 .putExtra("listenPort", workerPorts.getValue(i))
             if (i > 0) intent.putExtra("upstreamSocksUrl", "socks5://127.0.0.1:${prefixPorts[i - 1]}")
             worker.started = true

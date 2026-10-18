@@ -201,9 +201,12 @@ def make_config(ports, dns, out, dart, dns_prefixes):
     helper = ROOT / "tools/.mix_builder_runner.dart"
     hops = []
     for i, port in enumerate(ports):
-        if i in dns_prefixes: hops.append(f"const MixHop(protocol:'direct_dns',serverId:'{dns}')")
+        # Preserve multiplicity: adjacent DNS hops are deliberate test input.
+        for _ in range(dns_prefixes.count(i)):
+            hops.append(f"const MixHop(protocol:'direct_dns',serverId:'{dns}')")
         hops.append(f"MixHop(protocol:'proxy',serverId:'p{port}')")
-    if len(ports) in dns_prefixes: hops.append(f"const MixHop(protocol:'direct_dns',serverId:'{dns}')")
+    for _ in range(dns_prefixes.count(len(ports))):
+        hops.append(f"const MixHop(protocol:'direct_dns',serverId:'{dns}')")
     helper.write_text(f"""import 'dart:io';
 import 'package:vpn_swift/models/proxy_server.dart';
 import 'package:vpn_swift/models/dns_server.dart';
@@ -309,11 +312,70 @@ def run_case(position, blocks, xray, dart):
         fixture.close(); [r.close() for r in relays]
 
 
+def run_dns_only(count, xray, dart):
+    fixture = Fixture(); proc = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="mix-dns-only-") as td:
+            cfg = Path(td) / "config.json"
+            make_config([], "127.0.0.1", cfg, dart, [0] * count)
+            c = json.loads(cfg.read_text())
+            s = socket.socket(); s.bind(("127.0.0.1", 0)); policy_port = s.getsockname()[1]; s.close()
+            c.setdefault("inbounds", []).append({"tag": "dns-only-test", "listen": "127.0.0.1", "port": policy_port,
+                "protocol": "dokodemo-door", "settings": {"address": "203.0.113.53", "port": 53, "network": "udp"}})
+            c.setdefault("routing", {}).setdefault("rules", []).insert(0, {"type": "field", "inboundTag": ["dns-only-test"], "outboundTag": "mix-dns"})
+            cfg.write_text(json.dumps(c)); proc = start_xray(xray, cfg)
+            hr = http_probe(f"http://127.0.0.1:{fixture.http_port}/")
+            assert hr.returncode == 0 and hr.stdout == "MIX-OK-123", f"dns-only-{count}: direct HTTP failed: {hr.stderr}"
+            before = len(fixture.dns_queries)
+            ans = send_dns(policy_port, b"\x80\x01", f"only{count}{time.time_ns()}")
+            assert ans[:2] == b"\x80\x01" and ans[2] & 0x80 and not ans[3] & 0x0f and b"\x7f\x00\x00\x01" in ans
+            assert len(fixture.dns_queries) == before + 1, f"dns-only-{count}: resolver query count mismatch"
+            print(f"[dns-only-{count}] dns-hops={count} HTTP=PASS DNS=PASS resolver=127.0.0.1:53 query-count=1 no-recursion=PASS")
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try: proc.wait(timeout=5)
+            except subprocess.TimeoutExpired: proc.kill(); proc.wait()
+        fixture.close()
+
+
+def run_dns_consecutive(xray, dart):
+    blocks = 5; prefixes = [2, 2, 2]
+    relays = [Relay() for _ in range(blocks)]; fixture = Fixture(); proc = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="mix-dns-consecutive-") as td:
+            cfg = Path(td) / "config.json"
+            make_config([r.port for r in relays], "127.0.0.1", cfg, dart, prefixes)
+            c = json.loads(cfg.read_text())
+            s = socket.socket(); s.bind(("127.0.0.1", 0)); policy_port = s.getsockname()[1]; s.close()
+            c.setdefault("inbounds", []).append({"tag": "dns-consecutive-test", "listen": "127.0.0.1", "port": policy_port,
+                "protocol": "dokodemo-door", "settings": {"address": "203.0.113.53", "port": 53, "network": "udp"}})
+            c.setdefault("routing", {}).setdefault("rules", []).insert(0, {"type": "field", "inboundTag": ["dns-consecutive-test"], "outboundTag": "mix-dns"})
+            cfg.write_text(json.dumps(c)); proc = start_xray(xray, cfg)
+            before = [len(r.logs) for r in relays]
+            hr = http_probe(f"http://target.test:{fixture.http_port}/")
+            assert hr.returncode == 0 and hr.stdout == "MIX-OK-123", f"dns-consecutive-3: HTTP failed: {hr.stderr}"
+            assert_log_delta(relays, before, [True] * blocks, "DNS-consecutive-3 HTTP")
+            before_queries = len(fixture.dns_queries); before = [len(r.logs) for r in relays]
+            ans = send_dns(policy_port, b"\x81\x01", f"consecutive{time.time_ns()}")
+            assert ans[:2] == b"\x81\x01" and ans[2] & 0x80 and not ans[3] & 0x0f and b"\x7f\x00\x00\x01" in ans
+            assert len(fixture.dns_queries) == before_queries + 1, "dns-consecutive-3: selected resolver query mismatch"
+            assert_log_delta(relays, before, [True, True, False, False, False], "DNS-consecutive-3 prefix")
+            print("[dns-consecutive-3] proxy-blocks=5 dns-hops=3 consecutive-at-prefix=2 HTTP=PASS DNS=PASS resolver=127.0.0.1:53 no-recursion=PASS")
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try: proc.wait(timeout=5)
+            except subprocess.TimeoutExpired: proc.kill(); proc.wait()
+        fixture.close(); [r.close() for r in relays]
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run real local Xray Mix DNS/HTTP integration scenarios.")
     ap.add_argument("--xray", default="/tmp/xray-mix-test/xray")
     ap.add_argument("--dart", default=os.environ.get("DART") or shutil.which("dart"))
     ap.add_argument("--dns-position", choices=("beginning", "middle", "end", "repeated", "all"), default="all")
+    ap.add_argument("--case", choices=("dns-only-3", "dns-only-50", "dns-consecutive-3"), help="run one explicit DNS integration scenario")
     ap.add_argument("--blocks", type=int, default=50, help="total Mix blocks (maximum 50)")
     args = ap.parse_args()
     if os.geteuid() != 0: ap.error("binds fixture TCP/53; run with sudo python3")
@@ -323,6 +385,15 @@ def main():
     if cached.is_file(): dart = cached
     xray = Path(args.xray)
     if not xray.is_file() or not os.access(xray, os.X_OK): ap.error(f"Xray executable not found: {xray}")
+    if args.case:
+        try:
+            if args.case == "dns-only-3": run_dns_only(3, xray, str(dart))
+            elif args.case == "dns-only-50": run_dns_only(50, xray, str(dart))
+            else: run_dns_consecutive(xray, str(dart))
+        except (AssertionError, OSError, subprocess.SubprocessError) as exc:
+            print(f"[{args.case}] FAIL actual assertion/error: {exc}")
+            return 1
+        return 0
     positions = ["beginning", "middle", "end", "repeated"] if args.dns_position == "all" else [args.dns_position]
     if "repeated" in positions and args.blocks < 6: ap.error("repeated requires at least 6 blocks for distinct beginning/middle/end boundaries")
     failures = 0

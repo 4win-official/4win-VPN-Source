@@ -21,4 +21,6 @@ data class MixAdapterEnvironment(
     val onReady: (supportsUdp: Boolean) -> Unit,
     val onFailure: (String) -> Unit,
     val workerSlot: Int = 0,
+    /** Coordinator metadata, never part of any native engine's config schema. */
+    val upstreamSupportsUdp: Boolean = true,
 )

@@ -89,9 +89,9 @@ void main() {
       }
     },
   );
-  test('DNS may occupy any position but is not a standalone tunnel', () {
+  test('DNS may occupy any position, including DNS-only strategies', () {
     final dnsHop = MixHop(protocol: 'direct_dns', serverId: dns.primaryDns);
-    expect(strategy([dnsHop]).validationError, isNotNull);
+    expect(strategy([dnsHop]).validationError, isNull);
     expect(
       strategy([
         dnsHop,
@@ -106,6 +106,19 @@ void main() {
       ]).validationError,
       isNull,
     );
+  });
+  test('three consecutive DNS blocks compile without tunnel semantics', () {
+    final dnsHop = MixHop(protocol: 'direct_dns', serverId: dns.primaryDns);
+    final config = compile([dnsHop, dnsHop, dnsHop]);
+    final outbounds = config['outbounds'] as List;
+    expect(
+      outbounds.where((outbound) => outbound['protocol'] == 'dns'),
+      hasLength(3),
+    );
+    expect(outbounds.first['tag'], 'proxy');
+    expect(outbounds.first['protocol'], 'freedom');
+    expect(config['dns']['servers'], ['tcp://${dns.primaryDns}']);
+    expect(config['routing']['rules'].last['outboundTag'], 'proxy');
   });
   test('single tunnel has no dangling previous-hop reference', () {
     final config = compile([MixHop(protocol: 'xray', serverId: first.id)]);

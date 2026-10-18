@@ -91,7 +91,7 @@ impl MixUdpSocket {
     pub async fn send(&self, packet: &[u8]) -> io::Result<usize> {
         // A failed control channel must be terminal: never retry the packet on
         // the physical network, which would violate the upstream privacy rule.
-        self.control_check().await?;
+        self.control_check()?;
         let mut frame = Vec::with_capacity(packet.len() + 32);
         frame.extend_from_slice(&[0, 0, 0]);
         append_addr(&mut frame, self.peer);
@@ -141,24 +141,21 @@ impl MixUdpSocket {
             }
         }
     }
-    async fn control_check(&self) -> io::Result<()> {
-        match self.control.ready(tokio::io::Interest::READABLE).await {
-            Ok(ready) if ready.is_readable() => {
-                let mut one = [0u8; 1];
-                match self.control.try_read(&mut one) {
-                    Ok(0) => Err(io::Error::new(
-                        io::ErrorKind::ConnectionReset,
-                        "SOCKS5 control connection closed",
-                    )),
-                    Ok(_) => Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "unexpected SOCKS5 control data",
-                    )),
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(()),
-                    Err(e) => Err(e),
-                }
-            }
-            Ok(_) => Ok(()),
+    fn control_check(&self) -> io::Result<()> {
+        // A healthy UDP association keeps TCP open and idle. Waiting for TCP
+        // readability here deadlocks the FIRST UDP packet until that channel
+        // closes. Check for EOF without waiting; recv() still monitors closure.
+        let mut one = [0u8; 1];
+        match self.control.try_read(&mut one) {
+            Ok(0) => Err(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "SOCKS5 control connection closed",
+            )),
+            Ok(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unexpected SOCKS5 control data",
+            )),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(()),
             Err(e) => Err(e),
         }
     }
@@ -325,9 +322,21 @@ mod tests {
         let (proxy, server) = fake_socks(false).await;
         let peer: SocketAddr = "127.0.0.1:51820".parse().unwrap();
         let socket = MixUdpSocket::connect(&proxy, peer).await.unwrap();
-        assert_eq!(socket.send(b"payload").await.unwrap(), 7);
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), socket.send(b"payload"))
+                .await
+                .expect("idle TCP control must not block UDP")
+                .unwrap(),
+            7
+        );
         let mut out = [0; 64];
-        assert_eq!(socket.recv(&mut out).await.unwrap(), 7);
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), socket.recv(&mut out))
+                .await
+                .expect("UDP reply deadline")
+                .unwrap(),
+            7
+        );
         assert_eq!(&out[..7], b"payload");
         drop(socket);
         server.await.unwrap();
@@ -341,6 +350,8 @@ mod tests {
             .unwrap();
         let mut out = [0; 8];
         let err = socket.recv(&mut out).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
+        let err = socket.send(b"must not bypass").await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
         server.await.unwrap();
     }

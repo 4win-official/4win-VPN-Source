@@ -42,7 +42,19 @@ void main() {
   });
 
   test('DNS requires a server IP reference and never counts as a tunnel', () {
-    expect(strategy([dns('9.9.9.9')]).validationError, isNotNull);
+    expect(strategy([dns('9.9.9.9')]).validationError, isNull);
+    expect(
+      strategy(List.generate(3, (_) => dns('9.9.9.9'))).validationError,
+      isNull,
+    );
+    expect(
+      strategy(List.generate(50, (_) => dns('9.9.9.9'))).validationError,
+      isNull,
+    );
+    expect(
+      strategy(List.generate(51, (_) => dns('9.9.9.9'))).validationError,
+      'At most 50 blocks are supported.',
+    );
     expect(
       strategy([
         const MixHop(protocol: 'direct_dns', group: 'resolvers'),
