@@ -29,7 +29,7 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
     with SingleTickerProviderStateMixin {
   static const _calloutDuration = Duration(seconds: 4);
   static const _maxCalloutWidth = 176.0;
-  static const _calloutHeight = 44.0;
+  static const _calloutHeight = 54.0;
 
   final math.Random _random = math.Random();
   final LayerLink _layerLink = LayerLink();
@@ -52,9 +52,7 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
 
   void _scheduleCallout({bool first = false}) {
     _calloutTimer?.cancel();
-    final seconds = first
-        ? 2 + _random.nextInt(5)
-        : 18 + _random.nextInt(31);
+    final seconds = first ? 2 + _random.nextInt(5) : 18 + _random.nextInt(31);
     _calloutTimer = Timer(Duration(seconds: seconds), _showCallout);
   }
 
@@ -69,10 +67,12 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
 
     final overlay = Overlay.of(context, rootOverlay: true);
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final calloutWidth = math.min(
-      _maxCalloutWidth,
-      math.min(screenWidth - 32, math.max(120.0, screenWidth * 0.44)),
-    ).toDouble();
+    final calloutWidth = math
+        .min(
+          _maxCalloutWidth,
+          math.min(screenWidth - 32, math.max(120.0, screenWidth * 0.44)),
+        )
+        .toDouble();
     final textDirection = Directionality.of(context);
     final anchor = AlignmentDirectional.bottomEnd.resolve(textDirection);
     final followerAnchor = AlignmentDirectional.topEnd.resolve(textDirection);
@@ -88,11 +88,14 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
             showWhenUnlinked: false,
             targetAnchor: anchor,
             followerAnchor: followerAnchor,
-            offset: const Offset(0, 8),
-            child: SizedBox(
-              width: calloutWidth,
-              height: _calloutHeight,
-              child: _buildCallout(overlayContext),
+            offset: const Offset(0, 2),
+            child: Directionality(
+              textDirection: textDirection,
+              child: SizedBox(
+                width: calloutWidth,
+                height: _calloutHeight,
+                child: _buildCallout(context),
+              ),
             ),
           ),
         ),
@@ -117,69 +120,101 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : const Color(0xFF281D29);
 
-    return Semantics(
-      button: true,
-      label: 'Support Us',
-      child: Material(
-        type: MaterialType.transparency,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            _removeCallout();
-            _scheduleCallout();
-            widget.onPressed();
-          },
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(15),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xD91B1422)
-                      : const Color(0xE6FFF9FD),
-                  borderRadius: BorderRadius.circular(15),
-                  border: Border.all(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.34)
-                        : const Color(0xFFE79ABC),
-                    width: 1,
+    final shape = _SupportCalloutBorder(
+      pointerOnRight: Directionality.of(context) == TextDirection.ltr,
+      side: BorderSide(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.48)
+            : const Color(0xFFE79ABC),
+      ),
+    );
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) => Opacity(
+        opacity: value,
+        child: Transform.scale(
+          scale: 0.94 + 0.06 * value,
+          alignment: Directionality.of(context) == TextDirection.ltr
+              ? Alignment.topRight
+              : Alignment.topLeft,
+          child: child,
+        ),
+      ),
+      child: Semantics(
+        button: true,
+        label: widget.tooltip,
+        child: Material(
+          type: MaterialType.transparency,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              _removeCallout();
+              _scheduleCallout();
+              widget.onPressed();
+            },
+            // One continuous speech-bubble outline: its tip sits directly
+            // beneath the heart's centre, including in RTL layouts.
+            child: DecoratedBox(
+              decoration: ShapeDecoration(
+                shape: shape,
+                shadows: [
+                  BoxShadow(
+                    color: const Color(0xFFFF69B4).withValues(alpha: 0.24),
+                    blurRadius: 18,
+                    offset: const Offset(0, 4),
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFFF69B4).withValues(alpha: 0.36),
-                      blurRadius: 18,
-                      spreadRadius: 1,
+                ],
+              ),
+              child: ClipPath(
+                key: const ValueKey('support-callout-pointer'),
+                clipper: ShapeBorderClipper(shape: shape),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                  child: DecoratedBox(
+                    key: const ValueKey('support-callout'),
+                    decoration: ShapeDecoration(
+                      color: isDark
+                          ? const Color(0xF01B1422)
+                          : const Color(0xF5FFF9FD),
+                      shape: shape,
                     ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.favorite_rounded,
-                      size: 15,
-                      color: Color(0xFFFF72B8),
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      'Support Us',
-                      maxLines: 1,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.2,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.favorite_rounded,
+                            size: 15,
+                            color: Color(0xFFFF72B8),
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: Text(
+                              widget.tooltip,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: textColor,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            size: 10,
+                            color: textColor.withValues(alpha: 0.65),
+                          ),
+                        ],
                       ),
                     ),
-                    const Spacer(),
-                    Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      size: 10,
-                      color: textColor.withValues(alpha: 0.65),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -229,6 +264,53 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
   }
 }
 
+/// A single glass bubble with an integrated upward-pointing tail.
+class _SupportCalloutBorder extends ShapeBorder {
+  const _SupportCalloutBorder({
+    required this.pointerOnRight,
+    required this.side,
+  });
+
+  final bool pointerOnRight;
+  final BorderSide side;
+
+  @override
+  EdgeInsetsGeometry get dimensions => const EdgeInsets.only(top: 10);
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
+    final centre = pointerOnRight ? rect.right - 24 : rect.left + 24;
+    final body = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(rect.left, rect.top + 10, rect.right, rect.bottom),
+          const Radius.circular(15),
+        ),
+      );
+    final pointer = Path()
+      ..moveTo(centre - 9, rect.top + 11)
+      ..lineTo(centre, rect.top)
+      ..lineTo(centre + 9, rect.top + 11)
+      ..close();
+    return Path.combine(PathOperation.union, body, pointer);
+  }
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
+      getOuterPath(rect.deflate(side.width), textDirection: textDirection);
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    canvas.drawPath(getOuterPath(rect.deflate(side.width / 2)), side.toPaint());
+  }
+
+  @override
+  ShapeBorder scale(double t) => _SupportCalloutBorder(
+    pointerOnRight: pointerOnRight,
+    side: side.scale(t),
+  );
+}
+
 class _LiquidGlassHeartPainter extends CustomPainter {
   final double glow;
   final bool isDark;
@@ -242,9 +324,9 @@ class _LiquidGlassHeartPainter extends CustomPainter {
 
     // Pink light blooming from behind the translucent glass heart.
     final glowPaint = Paint()
-      ..color = const Color(0xFFFF3688).withValues(
-        alpha: isDark ? 0.48 + glow * 0.18 : 0.28 + glow * 0.12,
-      )
+      ..color = const Color(
+        0xFFFF3688,
+      ).withValues(alpha: isDark ? 0.48 + glow * 0.18 : 0.28 + glow * 0.12)
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, 7 + glow * 5);
     canvas.drawPath(path, glowPaint);
 
@@ -274,15 +356,18 @@ class _LiquidGlassHeartPainter extends CustomPainter {
     canvas.save();
     canvas.clipPath(path);
     final sheen = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          Colors.white.withValues(alpha: 0.78),
-          Colors.white.withValues(alpha: 0),
-        ],
-      ).createShader(Rect.fromCircle(
-        center: Offset(size.width * 0.30, size.height * 0.24),
-        radius: size.width * 0.45,
-      ));
+      ..shader =
+          RadialGradient(
+            colors: [
+              Colors.white.withValues(alpha: 0.78),
+              Colors.white.withValues(alpha: 0),
+            ],
+          ).createShader(
+            Rect.fromCircle(
+              center: Offset(size.width * 0.30, size.height * 0.24),
+              radius: size.width * 0.45,
+            ),
+          );
     canvas.drawRect(rect, sheen);
 
     final glint = Paint()
@@ -315,11 +400,7 @@ class _LiquidGlassHeartPainter extends CustomPainter {
                 const Color(0xFFFFB5DF).withValues(alpha: 0.88),
                 Colors.white.withValues(alpha: 0.72),
               ]
-            : const [
-                Color(0xFFFFE2EF),
-                Color(0xFF9E174D),
-                Color(0xFFFFC1DA),
-              ],
+            : const [Color(0xFFFFE2EF), Color(0xFF9E174D), Color(0xFFFFC1DA)],
       ).createShader(rect)
       ..isAntiAlias = true;
     canvas.drawPath(path, rim);

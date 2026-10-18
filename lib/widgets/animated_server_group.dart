@@ -17,8 +17,11 @@ class AnimatedServerGroup extends StatefulWidget {
     required this.expandedBorderColor,
   });
 
-  static const duration = Duration(milliseconds: 320);
-  static const curve = Curves.easeOutCubic;
+  /// A longer opening gives the frame and its lazy contents time to unfold
+  /// without looking like a sudden resize. Closing can remain snappy.
+  static const openingDuration = Duration(milliseconds: 640);
+  static const closingDuration = Duration(milliseconds: 260);
+  static const curve = Curves.easeInOutCubic;
 
   final bool expanded;
   final Widget header;
@@ -36,20 +39,41 @@ class _AnimatedServerGroupState extends State<AnimatedServerGroup>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: AnimatedServerGroup.duration,
+    duration: widget.expanded
+        ? AnimatedServerGroup.openingDuration
+        : AnimatedServerGroup.closingDuration,
     value: widget.expanded ? 1 : 0,
   );
   late final Animation<double> _animation = _controller.drive(
     CurveTween(curve: AnimatedServerGroup.curve),
   );
+  bool _disableAnimations = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final disableAnimations = MediaQuery.disableAnimationsOf(context);
+    if (_disableAnimations == disableAnimations) return;
+    _disableAnimations = disableAnimations;
+    if (disableAnimations) {
+      _controller.stop();
+      _controller.value = widget.expanded ? 1 : 0;
+    }
+  }
 
   @override
   void didUpdateWidget(covariant AnimatedServerGroup oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.expanded != oldWidget.expanded) {
+      if (_disableAnimations) {
+        _controller.value = widget.expanded ? 1 : 0;
+        return;
+      }
       if (widget.expanded) {
+        _controller.duration = AnimatedServerGroup.openingDuration;
         _controller.forward();
       } else {
+        _controller.duration = AnimatedServerGroup.closingDuration;
         _controller.reverse();
       }
     }
@@ -88,9 +112,14 @@ class _AnimatedServerGroupState extends State<AnimatedServerGroup>
               if (_animation.value > 0)
                 _SliverReveal(
                   factor: _animation.value,
-                  child: SliverList.builder(
-                    itemCount: widget.itemCount,
-                    itemBuilder: widget.itemBuilder,
+                  child: SliverOpacity(
+                    // A restrained fade keeps the rows from appearing as a
+                    // hard-edged block while preserving normal row geometry.
+                    opacity: _animation.value,
+                    sliver: SliverList.builder(
+                      itemCount: widget.itemCount,
+                      itemBuilder: widget.itemBuilder,
+                    ),
                   ),
                 ),
             ],

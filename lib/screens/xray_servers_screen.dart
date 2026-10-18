@@ -909,7 +909,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               tooltip: expanded ? 'Collapse' : 'Expand',
               icon: AnimatedRotation(
                 turns: expanded ? 0.5 : 0,
-                duration: AnimatedServerGroup.duration,
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : expanded
+                    ? AnimatedServerGroup.openingDuration
+                    : AnimatedServerGroup.closingDuration,
                 curve: AnimatedServerGroup.curve,
                 child: Icon(
                   Icons.keyboard_arrow_down,

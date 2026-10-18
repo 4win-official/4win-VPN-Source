@@ -8,26 +8,30 @@ void main() {
     required bool expanded,
     int count = 3,
     ValueChanged<int>? built,
+    bool disableAnimations = false,
   }) {
     return MaterialApp(
-      home: Scaffold(
-        body: CustomScrollView(
-          slivers: [
-            AnimatedServerGroup(
-              key: const ValueKey('group'),
-              expanded: expanded,
-              backgroundColor: Colors.black12,
-              collapsedBorderColor: Colors.amber,
-              expandedBorderColor: Colors.amber,
-              header: const SizedBox(height: 80, child: Text('Group')),
-              itemCount: count,
-              itemBuilder: (context, index) {
-                built?.call(index);
-                return SizedBox(height: 60, child: Text('Server $index'));
-              },
-            ),
-            const SliverToBoxAdapter(child: Text('Next group')),
-          ],
+      home: MediaQuery(
+        data: MediaQueryData(disableAnimations: disableAnimations),
+        child: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              AnimatedServerGroup(
+                key: const ValueKey('group'),
+                expanded: expanded,
+                backgroundColor: Colors.black12,
+                collapsedBorderColor: Colors.amber,
+                expandedBorderColor: Colors.amber,
+                header: const SizedBox(height: 80, child: Text('Group')),
+                itemCount: count,
+                itemBuilder: (context, index) {
+                  built?.call(index);
+                  return SizedBox(height: 60, child: Text('Server $index'));
+                },
+              ),
+              const SliverToBoxAdapter(child: Text('Next group')),
+            ],
+          ),
         ),
       ),
     );
@@ -37,6 +41,31 @@ void main() {
       .renderObject<RenderSliver>(find.byType(DecoratedSliver))
       .geometry!
       .scrollExtent;
+
+  testWidgets('opening unfolds over the refined 640ms timing', (tester) async {
+    await tester.pumpWidget(harness(expanded: false));
+    await tester.pumpWidget(harness(expanded: true));
+    await tester.pump(const Duration(milliseconds: 320));
+    expect(frameExtent(tester), greaterThan(80));
+    expect(frameExtent(tester), lessThan(260));
+
+    await tester.pump(const Duration(milliseconds: 320));
+    expect(frameExtent(tester), closeTo(260, 0.01));
+  });
+
+  testWidgets('reduced motion jumps directly to the requested state', (
+    tester,
+  ) async {
+    await tester.pumpWidget(harness(expanded: false, disableAnimations: true));
+    await tester.pumpWidget(harness(expanded: true, disableAnimations: true));
+    expect(frameExtent(tester), 260);
+    expect(find.text('Server 0'), findsOneWidget);
+
+    await tester.pumpWidget(harness(expanded: false, disableAnimations: true));
+    expect(frameExtent(tester), 80);
+    expect(find.text('Server 0'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('one frame follows the rows in both directions', (tester) async {
     await tester.pumpWidget(harness(expanded: false));
