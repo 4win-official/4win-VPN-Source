@@ -8,6 +8,7 @@ import '../providers/vpn_provider.dart';
 import '../widgets/four_win_loader.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/snow_animation.dart';
+import '../widgets/snow_button_surface.dart';
 import '../widgets/pixel_effect.dart';
 import '../widgets/rain_animation.dart';
 import '../widgets/autumn_animation.dart';
@@ -760,6 +761,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         color: Colors.black.withValues(alpha: 0.5),
                                       ),
                                     ]
+                                  : isSnowTheme ? const [
+                                      BoxShadow(
+                                        color: Color(0x407AC9E8),
+                                        blurRadius: 32,
+                                        spreadRadius: 3,
+                                      ),
+                                      BoxShadow(
+                                        color: Color(0x1FBAEFFF),
+                                        blurRadius: 64,
+                                        spreadRadius: 8,
+                                      ),
+                                    ]
                                   : isDark ? [
                                       // نئون گلو در dark mode
                                       BoxShadow(
@@ -780,17 +793,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       ),
                                     ],
                             ),
-                            child: Center(
-                              child: provider.isConnecting
-                                  ? FourWinLoader(
-                                      color: isDark ? Colors.black87 : Colors.white,
-                                      strokeWidth: 3,
-                                    )
-                                  : Icon(
-                                      _getButtonIcon(provider.status),
-                                      size: 80,
-                                      color: isDark ? Colors.black87 : Colors.white,
-                                    ),
+                            child: SnowButtonSurface(
+                              enabled: isSnowTheme,
+                              tint: _getButtonColor(provider.status, isDark),
+                              child: Center(
+                                child: provider.isConnecting
+                                    ? FourWinLoader(
+                                        color: isDark ? Colors.black87 : Colors.white,
+                                        strokeWidth: 3,
+                                      )
+                                    : Icon(
+                                        _getButtonIcon(provider.status),
+                                        size: 80,
+                                        color: isDark ? Colors.black87 : Colors.white,
+                                      ),
+                              ),
                             ),
                           ),
                         ),
