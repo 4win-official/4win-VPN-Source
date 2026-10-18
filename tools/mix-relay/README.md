@@ -1,10 +1,10 @@
 # 4Win UDP-over-TLS relay
 
-This is the optional remote half of Mix's UDP compatibility bridge. A running public server is **not bundled or automatically deployed**. Use your own VPS, domain and trusted TLS certificate. The service accepts authenticated UDP frames over TLS; it is not a general SOCKS proxy.
+This is the optional remote half of Mix's UDP compatibility bridge for TCP-only proxies such as HTTP CONNECT and SOCKS4. **Psiphon does not need this service:** its Mix adapter uses Psiphon's native authenticated packet tunnel and existing servers for both TCP and UDP. WARP likewise uses Cloudflare's own servers. A public compatibility relay is not bundled, required for those native blocks, or automatically deployed. If you explicitly choose this advanced proxy feature, provide its endpoint and trusted TLS certificate. The service accepts authenticated UDP frames over TLS; it is not a general SOCKS proxy.
 
 ## What changes in the traffic path
 
-TCP still leaves through the selected protocol. UDP is carried through that same protocol's TCP tunnel to this additional relay, then sent to its destination. For `Psiphon → WARP`, the relay forwards encrypted WireGuard datagrams and WARP remains the final internet exit. If Psiphon or HTTP is the final block, UDP exits from this relay while TCP exits from Psiphon/HTTP. The relay is an additional trust boundary: TLS protects the transport to it, not traffic beyond it; application and inner-tunnel encryption remain independent.
+For a proxy block explicitly wrapped by this feature, TCP still leaves through the selected proxy. UDP is carried through that proxy's TCP tunnel to this additional relay, then sent to its destination. For `HTTP → WARP`, the relay forwards encrypted WireGuard datagrams and WARP remains the final internet exit. If the wrapped HTTP/SOCKS proxy is the final block, UDP exits from this relay while TCP exits from that proxy. Native Psiphon blocks are not wrapped. The relay is an additional trust boundary: TLS protects the transport to it, not traffic beyond it; application and inner-tunnel encryption remain independent.
 
 Do not configure a random public relay or disable certificate verification. The app checks a system-trusted certificate against the configured TLS server name. The dial host can be an IP while the TLS server name is the certificate's DNS name.
 

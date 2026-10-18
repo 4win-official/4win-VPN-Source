@@ -351,7 +351,9 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                       initiallyExpanded: _relayEnabled,
                       leading: const Icon(Icons.security_outlined),
                       title: const Text('Optional UDP-over-TLS relay'),
-                      subtitle: const Text('For UDP behind Psiphon or HTTP'),
+                      subtitle: const Text(
+                        'Advanced: TCP-only proxy compatibility',
+                      ),
                       children: [
                         SwitchListTile(
                           title: const Text('Enable UDP relay'),
@@ -364,7 +366,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                           child: Align(
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              'Requires your own running relay server with a trusted TLS certificate. UDP crosses the selected tunnel to this additional server; if the final block is Psiphon or HTTP, UDP exits from the relay, while TCP still exits from that block. Standalone protocols are unchanged.',
+                              'Not required for Psiphon: its native packet tunnel carries TCP and UDP using Psiphon servers. This optional compatibility feature is only for TCP-only proxies such as HTTP/SOCKS4 and requires your own trusted TLS relay. For wrapped proxy blocks, UDP exits from that relay while TCP still exits from the selected proxy. No relay or hidden protocol is added automatically. Standalone protocols are unchanged.',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey,

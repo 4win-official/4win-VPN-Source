@@ -2,72 +2,63 @@ package com.forwin.vpn.mix
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.ParcelFileDescriptor
 import ca.psiphon.PsiphonTunnel
 import gi.Seq
 import org.json.JSONObject
+import psi.Psi
 import java.io.File
 import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
-/**
- * Psiphon as a Mix hop. This class deliberately does not use VpnService, a
- * ParcelFileDescriptor, or Psiphon's VPN mode: its only externally useful
- * endpoint is the local SOCKS listener.
- *
- * Psiphon callbacks are delivered by native threads, so all state transitions
- * are generation-checked and serialized. In particular, a callback racing
- * with stop() cannot publish readiness to the next chain.
+/** Raw IP is carried by Psiphon's authenticated packet-tunnel SSH channel.
+ * A private datagram socketpair replaces the device TUN: MixPacketStack supplies
+ * the local SOCKS5 TCP/UDP endpoint. No second Android VPN, external UDP relay,
+ * guessed UDPGW address, or direct UDP fallback is involved.
  */
 class PsiphonMixAdapter : MixAdapter {
     companion object {
         private const val NATIVE_LIBRARY = "psiphon-gojni"
         private const val CONNECT_TIMEOUT_SECONDS = 120L
     }
-
     private val lock = Any()
-    private val worker = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "psiphon-mix").apply { isDaemon = true }
+    // Native stop can join callback threads. Never acquire this while holding
+    // the callback lock; callbacks only schedule resource cleanup.
+    private val nativeLock = Any()
+    private val worker = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "psiphon-mix").apply { isDaemon = true }
     }
-
     @Volatile private var stopped = false
     private var started = false
     private var generation = 0L
-    private var tunnel: PsiphonTunnel? = null
     private var connected = false
-    private var socksPort = 0
     private var readySent = false
     private var failureSent = false
-    private var timeout: ScheduledFuture<*>? = null
-    private var timeoutExecutor: java.util.concurrent.ScheduledExecutorService? = null
+    private var timer: ScheduledExecutorService? = null
+    private var tunnel: PsiphonTunnel? = null // nativeLock ownership
+    @Volatile private var packetStack: MixPacketStack? = null
+    private var packetPair: Pair<ParcelFileDescriptor, ParcelFileDescriptor>? = null
 
     override fun start(config: JSONObject, environment: MixAdapterEnvironment) {
-        val token: Long
-        synchronized(lock) {
+        val token = synchronized(lock) {
             if (started || stopped) return
             started = true
-            token = ++generation
+            ++generation
         }
         worker.execute {
-            try {
-                startNative(config, environment, token)
-            } catch (t: Throwable) {
-                fail(token, environment, "Psiphon start failed: ${t.message ?: "native initialization error"}")
+            try { synchronized(nativeLock) { startNative(config, environment, token) } }
+            catch (failure: Throwable) {
+                fail(token, environment, "Psiphon packet tunnel failed: ${failure.message ?: "initialization error"}")
             }
         }
     }
 
     private fun startNative(config: JSONObject, environment: MixAdapterEnvironment, token: Long) {
         if (!isLive(token)) return
-
-        // The build relocates Psiphon's gomobile bridge from go.* to gi.* and
-        // its library to libpsiphon-gojni.so. This process contains no Xray
-        // runtime, but explicitly initializing it keeps this adapter usable
-        // when the generic worker service has no ContentProvider initializer.
         Seq.setContext(environment.context.applicationContext)
         System.loadLibrary(NATIVE_LIBRARY)
-
-        require(environment.listenPort in 1..65535) { "invalid Mix SOCKS listen port" }
+        require(environment.listenPort in 1..65535) { "Invalid Mix SOCKS listen port" }
         val root = MixPsiphonConfig.root(environment.context.filesDir, environment.hopId)
         listOf(root, File(root, "tunnel-core"), File(root, "legacy"), File(root, "cache"),
             File(root, "no-backup")).forEach {
@@ -84,33 +75,30 @@ class PsiphonMixAdapter : MixAdapter {
         }
         val bootstrap = environment.context.assets.open("mix_psiphon_bootstrap.json")
             .bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-        val psiphonConfig = MixPsiphonConfig.build(config, root,
-            environment.listenPort, environment.upstreamSocksUrl, bootstrap)
-
-        val hostService = object : PsiphonTunnel.HostService {
+        val pair = MixPacketStack.createPacketPair()
+        packetPair = pair
+        // Psiphon explicitly permits arbitrary local IPs and rewrites them at
+        // the authenticated server; these are local stack addresses, not peers.
+        val mtu = Psi.getPacketTunnelMTU().toInt()
+        require(mtu in 576..65535) { "Invalid Psiphon packet-tunnel MTU" }
+        packetStack = MixPacketStack.start(pair.first, "10.0.0.3", "fd00::3", mtu, environment.listenPort)
+        val effective = MixPsiphonConfig.packet(config, root, environment.listenPort,
+            environment.upstreamSocksUrl, bootstrap, pair.second.fd)
+        val host = object : PsiphonTunnel.HostService {
             override fun getContext(): Context = privateContext
-            override fun getPsiphonConfig(): String = psiphonConfig.toString()
+            override fun getPsiphonConfig(): String = effective.toString()
             override fun loadLibrary(library: String) {
-                if (library == "gojni") System.loadLibrary(NATIVE_LIBRARY)
-                else System.loadLibrary(library)
+                System.loadLibrary(if (library == "gojni") NATIVE_LIBRARY else library)
             }
-
-            // This is a normal Service, not a VpnService. There is no TUN fd
-            // to protect; the worker process is excluded from the outer VPN by
-            // the coordinator. Leaving the socket on the normal network is
-            // intentional and avoids an unsafe VpnService cast.
+            // The coordinator excludes its own package from the final TUN.
+            // Every non-entry Psiphon connection uses UpstreamProxyURL instead.
             override fun bindToDevice(fileDescriptor: Long) = Unit
-
             override fun onConnecting() {
                 synchronized(lock) {
-                    // A published prefix must not silently disappear while the
-                    // rest of the chain continues to advertise a working VPN.
-                    if (readySent && isLiveLocked(token)) {
-                        failLocked(token, environment, "Psiphon stage lost its tunnel")
-                    }
+                    if (readySent && isLiveLocked(token))
+                        failLocked(token, environment, "Psiphon stage lost its packet tunnel")
                 }
             }
-
             override fun onConnected() {
                 synchronized(lock) {
                     if (!isLiveLocked(token)) return
@@ -118,111 +106,95 @@ class PsiphonMixAdapter : MixAdapter {
                     publishReadyLocked(token, environment)
                 }
             }
-
-            override fun onListeningSocksProxyPort(port: Int) {
-                synchronized(lock) {
-                    if (!isLiveLocked(token)) return
-                    if (port != environment.listenPort) {
-                        failLocked(token, environment, "Psiphon did not bind the assigned Mix SOCKS port")
-                        return
-                    }
-                    socksPort = port
-                    publishReadyLocked(token, environment)
-                }
-            }
-
+            // Both built-in proxies are disabled; the SOCKS port belongs only
+            // to MixPacketStack, not Psiphon's TCP-only local proxy.
+            override fun onListeningSocksProxyPort(port: Int) = Unit
             override fun onListeningHttpProxyPort(port: Int) = Unit
             override fun onBytesTransferred(sent: Long, received: Long) = Unit
             override fun onAvailableEgressRegions(regions: MutableList<String>?) = Unit
             override fun onSplitTunnelRegions(regions: MutableList<String>?) = Unit
-
             override fun onUpstreamProxyError(message: String?) {
                 fail(token, environment, "Psiphon upstream proxy failed")
             }
-
             override fun onStartedWaitingForNetworkConnectivity() = Unit
             override fun onStoppedWaitingForNetworkConnectivity() = Unit
             override fun onDiagnosticMessage(message: String?) = Unit
         }
-
-        val created = PsiphonTunnel.newPsiphonTunnel(hostService)
-        created.setVpnMode(false)
+        if (!isLive(token)) { closeNativeResources(); return }
+        val created = PsiphonTunnel.newPsiphonTunnel(host)
+        tunnel = created
+        created.setVpnMode(false) // The private packet FD is already in JSON.
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CONNECT_TIMEOUT_SECONDS)
         synchronized(lock) {
-            if (!isLiveLocked(token)) {
-                try { created.stop() } catch (_: Throwable) {}
-                return
-            }
-            tunnel = created
-            timeoutExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-                Thread(runnable, "psiphon-mix-timeout").apply { isDaemon = true }
-            }
-            timeout = timeoutExecutor!!.let { timer ->
-                val future = timer.schedule({
-                    fail(token, environment, "Psiphon connection timed out")
-                    timer.shutdown()
-                }, CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                future
+            if (!isLiveLocked(token)) return
+            timer = Executors.newSingleThreadScheduledExecutor { task ->
+                Thread(task, "psiphon-mix-monitor").apply { isDaemon = true }
+            }.also { monitor ->
+                monitor.scheduleAtFixedRate({
+                    try {
+                        synchronized(lock) {
+                            if (!isLiveLocked(token)) return@scheduleAtFixedRate
+                            val stack = packetStack
+                            if (readySent && stack?.ready != true)
+                                failLocked(token, environment, stack?.error ?: "Psiphon packet stack closed")
+                            else if (!readySent && System.nanoTime() >= deadline)
+                                failLocked(token, environment, "Psiphon packet tunnel connection timed out")
+                            else publishReadyLocked(token, environment)
+                        }
+                    } catch (error: Throwable) {
+                        fail(token, environment, error.message ?: "Psiphon packet stack failed")
+                    }
+                }, 100, 250, TimeUnit.MILLISECONDS)
             }
         }
-        // The existing service supplies its bootstrap/license through the
-        // HostService config and starts with an empty runtime argument. Keep
-        // that behavior so encoded bootstrap/license fields in config remain
-        // untouched and are not emitted in logs.
         created.startTunneling("")
     }
 
     private fun publishReadyLocked(token: Long, environment: MixAdapterEnvironment) {
-        if (!connected || socksPort == 0 || readySent || !isLiveLocked(token)) return
+        if (!connected || packetStack?.ready != true || readySent || !isLiveLocked(token)) return
         readySent = true
-        timeout?.cancel(false)
-        timeout = null
-        try {
-            environment.onReady(false)
-        } catch (_: Throwable) {
-            // The chain owner is external to the native callback thread.
-        }
+        // This is a full packet tunnel, including UDP. The coordinator still
+        // validates actual traffic through the complete chain before its TUN.
+        try { environment.onReady(true) } catch (_: Throwable) { }
     }
-
     private fun fail(token: Long, environment: MixAdapterEnvironment, reason: String) {
         synchronized(lock) { failLocked(token, environment, reason) }
     }
-
     private fun failLocked(token: Long, environment: MixAdapterEnvironment, reason: String) {
         if (!isLiveLocked(token) || failureSent) return
         failureSent = true
-        timeout?.cancel(false)
-        timeout = null
-        timeoutExecutor?.shutdownNow()
-        timeoutExecutor = null
-        val failedTunnel = tunnel
-        tunnel = null
-        // Psiphon invokes us on native threads. stop() may join those same
-        // threads; never call it from a callback or while holding this lock.
-        if (failedTunnel != null) Thread({
-            runCatching { failedTunnel.stop() }
-        }, "psiphon-mix-failed-stop").apply { isDaemon = true; start() }
-        try { environment.onFailure(reason) } catch (_: Throwable) {}
+        timer?.shutdownNow()
+        timer = null
+        Thread({ synchronized(nativeLock) { closeNativeResources() } }, "psiphon-mix-failed-stop")
+            .apply { isDaemon = true; start() }
+        try { environment.onFailure(reason) } catch (_: Throwable) { }
     }
-
     private fun isLive(token: Long): Boolean = synchronized(lock) { isLiveLocked(token) }
-
     private fun isLiveLocked(token: Long): Boolean =
         !stopped && started && generation == token && !failureSent
 
+    /** Called under nativeLock, outside callback lock; idempotent. */
+    private fun closeNativeResources() {
+        val current = tunnel
+        tunnel = null
+        runCatching { current?.stop() }
+        val stack = packetStack
+        packetStack = null
+        runCatching { stack?.close() }
+        val pair = packetPair
+        packetPair = null
+        runCatching { pair?.first?.close() }
+        runCatching { pair?.second?.close() }
+    }
     override fun stop() {
-        val toStop: PsiphonTunnel?
         synchronized(lock) {
             if (stopped) return
             stopped = true
             ++generation
-            timeout?.cancel(true)
-            timeout = null
-            timeoutExecutor?.shutdownNow()
-            timeoutExecutor = null
-            toStop = tunnel
-            tunnel = null
+            timer?.shutdownNow()
+            timer = null
         }
-        try { toStop?.stop() } catch (_: Throwable) {}
+        synchronized(nativeLock) { closeNativeResources() }
         worker.shutdownNow()
     }
 }

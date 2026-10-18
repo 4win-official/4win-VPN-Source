@@ -32,4 +32,23 @@ internal object MixPsiphonConfig {
         else result.put("UpstreamProxyURL", upstream)
         return result
     }
+
+    /** Same authenticated server transport as Psiphon's native VPN, but the
+     * supplied descriptor is one endpoint of a private raw-IP socketpair.
+     * The Mix packet stack, not Psiphon's built-in proxy, owns [port].
+     */
+    fun packet(config: JSONObject, root: File, port: Int, upstream: String?,
+        bootstrap: JSONObject, packetFd: Int): JSONObject {
+        require(packetFd > 0) { "Invalid Psiphon packet descriptor" }
+        return build(config, root, port, upstream, bootstrap)
+            .put("PacketTunnelTunFileDescriptor", packetFd)
+            .put("TunnelPoolSize", 1)
+            .put("DisableLocalSocksProxy", true)
+            .put("DisableLocalHTTPProxy", true)
+            .put("LocalSocksProxyPort", 0)
+            .put("LocalHttpProxyPort", 0)
+            .put("DisableTunnels", false)
+            .put("EnableLightProxyFallback", false)
+            .put("EnablePersonalLightProxyTunnels", false)
+    }
 }

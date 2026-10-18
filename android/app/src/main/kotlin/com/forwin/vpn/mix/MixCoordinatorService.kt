@@ -237,7 +237,7 @@ class MixCoordinatorService : VpnService() {
                 continue
             }
             require(i == 0 || supportsUdp || protocol != "warp") {
-                "Stage ${i + 1}: WARP needs UDP; configure the Mix UDP relay for a TCP-only preceding stage"
+                "Stage ${i + 1}: WARP needs a UDP-capable preceding path; HTTP CONNECT and SOCKS4 do not carry UDP by themselves. No direct-network fallback is allowed"
             }
             showNotification("Connecting stage ${i + 1} of ${hops.length()}")
             val intent = Intent(this, MixWorkerService.CLASSES[worker.slot])

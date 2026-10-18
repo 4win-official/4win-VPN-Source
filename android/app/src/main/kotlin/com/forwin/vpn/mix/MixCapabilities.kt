@@ -6,7 +6,9 @@ import org.json.JSONObject
  * For example SSTP/OpenVPN-TCP/VLESS can carry UDP over a TCP-only underlay.
  */
 internal object MixCapabilities {
-    fun needsRelay(hop: JSONObject): Boolean = hop.optString("protocol") == "psiphon" ||
+    // Psiphon workers use the authenticated native packet-tunnel channel;
+    // their UDP is supplied by Psiphon's own server, not an external relay.
+    fun needsRelay(hop: JSONObject): Boolean =
         (hop.optString("protocol") in setOf("xray", "proxy") &&
             (hop.has("socks4") || hop.getJSONObject("outbound").optString("protocol") in setOf("http", "socks")))
 

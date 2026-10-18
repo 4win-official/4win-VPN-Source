@@ -208,12 +208,30 @@ class MixProtocolMatrixTest {
         assertFalse(MixCapabilities.afterXray(http, true))
         assertTrue(MixCapabilities.afterXray(vless, false))
         assertTrue(MixCapabilities.needsRelay(http))
-        assertTrue(MixCapabilities.needsRelay(psiphon))
+        assertFalse(MixCapabilities.needsRelay(psiphon))
         assertFalse(MixCapabilities.needsRelay(sstp))
         assertEquals(true, MixCapabilities.afterXray(shadowsocks, true))
         assertEquals(false, MixCapabilities.afterXray(shadowsocks, false))
         assertEquals(true, MixCapabilities.afterXray(socks, true))
         assertEquals(false, MixCapabilities.afterXray(socks, false))
+    }
+
+    @Test
+    fun psiphonPacketTunnelBetweenTcpProxyAndWarpAddsNoExternalRelayOrHiddenHop() {
+        val input = plan("proxy", "psiphon", "warp")
+        input.getJSONArray("hops").put(0, hop("proxy", "http"))
+        assertFalse(MixCapabilities.afterXray(input.getJSONArray("hops").getJSONObject(0), true))
+        assertFalse(MixCapabilities.needsRelay(input.getJSONArray("hops").getJSONObject(1)))
+        val result = sidecar(input)
+        assertEquals(3, result.getJSONArray("outbounds").length())
+        assertEquals(3, result.getJSONArray("inbounds").length())
+        val outbounds = (0 until 3).map { result.getJSONArray("outbounds").getJSONObject(it) }
+            .associateBy { it.getString("tag") }
+        assertEquals(22001, outbounds.getValue("mix-stage-1").getJSONObject("settings")
+            .getJSONArray("servers").getJSONObject(0).getInt("port"))
+        assertEquals(22002, outbounds.getValue("mix-stage-2").getJSONObject("settings")
+            .getJSONArray("servers").getJSONObject(0).getInt("port"))
+        assertFalse(result.toString().contains("mix-underlay"))
     }
 
     private fun <T : Throwable> assertThrows(type: Class<T>, body: () -> Unit) {

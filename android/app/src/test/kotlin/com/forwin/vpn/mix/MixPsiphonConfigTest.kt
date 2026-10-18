@@ -6,6 +6,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MixPsiphonConfigTest {
+    @Test fun packetModeOwnsNoAndroidVpnOrBuiltInProxyAndKeepsEveryHopIsolated() {
+        val original = JSONObject().put("EgressRegion", "DE").put("TunnelPoolSize", 3)
+            .put("PacketTunnelTunFileDescriptor", 999).put("LocalSocksProxyPort", 18080)
+            .put("EnableLightProxyFallback", true).put("DisableTunnels", true)
+        val before = original.toString()
+        val bootstrap = JSONObject().put("SponsorId", "public-bootstrap")
+        val first = MixPsiphonConfig.packet(original, File("/mix/0"), 20001,
+            "socks5://127.0.0.1:19999", bootstrap, 41)
+        val second = MixPsiphonConfig.packet(original, File("/mix/1"), 20002, null, bootstrap, 43)
+        assertEquals(before, original.toString())
+        assertEquals(41, first.getInt("PacketTunnelTunFileDescriptor"))
+        assertEquals(43, second.getInt("PacketTunnelTunFileDescriptor"))
+        assertEquals(1, first.getInt("TunnelPoolSize"))
+        assertEquals("DE", first.getString("EgressRegion"))
+        assertTrue(first.getBoolean("DisableLocalSocksProxy"))
+        assertTrue(first.getBoolean("DisableLocalHTTPProxy"))
+        assertEquals(0, first.getInt("LocalSocksProxyPort"))
+        assertEquals(0, first.getInt("LocalHttpProxyPort"))
+        assertFalse(first.getBoolean("DisableTunnels"))
+        assertFalse(first.getBoolean("EnableLightProxyFallback"))
+        assertFalse(first.getBoolean("EnablePersonalLightProxyTunnels"))
+        assertEquals("socks5://127.0.0.1:19999", first.getString("UpstreamProxyURL"))
+        assertFalse(second.has("UpstreamProxyURL"))
+        assertNotEquals(first.getString("DataRootDirectory"), second.getString("DataRootDirectory"))
+        for (fd in listOf(-1, 0)) assertThrows(IllegalArgumentException::class.java) {
+            MixPsiphonConfig.packet(original, File("/mix/0"), 20001, null, bootstrap, fd)
+        }
+    }
+
     @Test fun packagedBootstrapHasCoreRequirementsAndSignedHttpsListWithoutChangingStandalone() {
         val asset = generateSequence(File("").absoluteFile) { it.parentFile }
             .map { File(it, "android/app/src/main/assets/mix_psiphon_bootstrap.json") }
