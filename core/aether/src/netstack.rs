@@ -334,9 +334,21 @@ impl UdpSender {
 #[derive(Clone)]
 pub struct StackHandle {
     cmd_tx: mpsc::Sender<Cmd>,
+    dns_servers: Option<Vec<SocketAddr>>,
 }
 
 impl StackHandle {
+    /// Return a handle that uses exactly `servers` for plain UDP DNS lookups.
+    /// `None` (the default) retains the process-wide resolver behavior.
+    pub fn with_dns_servers(mut self, servers: Vec<SocketAddr>) -> Self {
+        self.dns_servers = Some(servers);
+        self
+    }
+
+    pub(crate) fn dns_servers(&self) -> Option<&[SocketAddr]> {
+        self.dns_servers.as_deref()
+    }
+
     pub async fn open_tcp(&self, dst: SocketAddr) -> Result<TcpConn> {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.cmd_tx
@@ -543,7 +555,10 @@ pub fn spawn(
 
     tokio::spawn(run(stack, cmd_rx, data_in_rx, inbound_rx, outbound_tx));
 
-    Ok(StackHandle { cmd_tx })
+    Ok(StackHandle {
+        cmd_tx,
+        dns_servers: None,
+    })
 }
 
 fn alloc_port(p: &mut u16) -> u16 {
@@ -1398,5 +1413,23 @@ mod tests {
             "everything past the channel capacity is dropped"
         );
         assert_eq!(outbound_rx.len(), 2, "the channel keeps what fits");
+    }
+
+    #[test]
+    fn stack_handle_dns_overrides_are_instance_local() {
+        let (cmd_tx, _cmd_rx) = mpsc::channel(1);
+        let default = StackHandle {
+            cmd_tx: cmd_tx.clone(),
+            dns_servers: None,
+        };
+        let first = default
+            .clone()
+            .with_dns_servers(vec!["10.0.0.2:53".parse().unwrap()]);
+        let second = default
+            .clone()
+            .with_dns_servers(vec!["10.0.0.3:53".parse().unwrap()]);
+        assert_eq!(first.dns_servers(), Some(["10.0.0.2:53".parse().unwrap()].as_slice()));
+        assert_eq!(second.dns_servers(), Some(["10.0.0.3:53".parse().unwrap()].as_slice()));
+        assert!(default.dns_servers().is_none());
     }
 }

@@ -262,6 +262,15 @@ impl WgTunnel {
                                 drop(sent);
                                 if let Some(raw) = sock_w.direct() {
                                     aethernoize::apply_obfuscation(raw, peer, &aethernoize).await;
+                                } else {
+                                    let sock_obf = sock_w.clone();
+                                    aethernoize::apply_obfuscation_with_sender(
+                                        move |pkt| {
+                                            let sock_obf = sock_obf.clone();
+                                            async move { let _ = sock_obf.send(&pkt).await; }
+                                        },
+                                        &aethernoize,
+                                    ).await;
                                 }
                             }
                         }
@@ -277,6 +286,14 @@ impl WgTunnel {
                                 if let Some(raw) = sock_clone.direct() {
                                     aethernoize::send_post_handshake_junk(raw, peer, &cfg_clone)
                                         .await;
+                                } else {
+                                    aethernoize::send_post_handshake_junk_with_sender(
+                                        move |pkt| {
+                                            let sock_clone = sock_clone.clone();
+                                            async move { let _ = sock_clone.send(&pkt).await; }
+                                        },
+                                        &cfg_clone,
+                                    ).await;
                                 }
                             });
                         }
@@ -307,6 +324,17 @@ impl WgTunnel {
                         tokio::spawn(async move {
                             if let Some(raw) = sock_j.direct() {
                                 aethernoize::send_keepalive_junk(raw, &cfg_j).await;
+                            } else {
+                                aethernoize::send_keepalive_junk_with_sender(
+                                    {
+                                        let sock_j = sock_j.clone();
+                                        move |pkt| {
+                                            let sock_j = sock_j.clone();
+                                            async move { let _ = sock_j.send(&pkt).await; }
+                                        }
+                                    },
+                                    &cfg_j,
+                                ).await;
                             }
                             let _ = sock_j.send(&pkt_vec).await;
                         });
@@ -808,6 +836,12 @@ pub async fn verify_endpoint_keep_session(
     if aethernoize.is_enabled() {
         if let Some(raw) = sock.direct() {
             aethernoize::apply_obfuscation(raw, peer, aethernoize).await;
+        } else {
+            let sock_obf = &sock;
+            aethernoize::apply_obfuscation_with_sender(
+                |pkt| async move { let _ = sock_obf.send(&pkt).await; },
+                aethernoize,
+            ).await;
         }
     }
 

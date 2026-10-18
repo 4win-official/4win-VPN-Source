@@ -21,11 +21,14 @@ class MixPacketStack private constructor(private var handle: Long) : AutoCloseab
 
         /** Starts asynchronously; [ready] becomes true only after the local SOCKS bind succeeds. */
         @JvmStatic
-        fun start(packetFd: ParcelFileDescriptor, ipv4: String, ipv6: String, mtu: Int, listenPort: Int): MixPacketStack {
+        fun start(packetFd: ParcelFileDescriptor, ipv4: String, ipv6: String, mtu: Int, listenPort: Int,
+                  dnsServers: List<String>? = null): MixPacketStack {
             require(listenPort in 1..65535) { "listenPort out of range" }
-            val json = "{\"ipv4\":${quote(ipv4)},\"ipv6\":${quote(ipv6)},\"mtu\":$mtu,\"listen\":\"127.0.0.1:$listenPort\"}"
+            val json = org.json.JSONObject().put("ipv4", ipv4).put("ipv6", ipv6)
+                .put("mtu", mtu).put("listen", "127.0.0.1:$listenPort")
+            if (dnsServers != null) json.put("dns", org.json.JSONArray(dnsServers))
             // Native dup()s this descriptor; the caller retains and owns its descriptor.
-            val h = nativeCreate(json, packetFd.fd)
+            val h = nativeCreate(json.toString(), packetFd.fd)
             if (h <= 0) throw IllegalStateException(nativeCreateError(h))
             return MixPacketStack(h)
         }
@@ -42,7 +45,6 @@ class MixPacketStack private constructor(private var handle: Long) : AutoCloseab
                 catch (failure: Throwable) { ownedLeft.close(); throw failure }
             } finally { Os.close(left); Os.close(right) }
         }
-        private fun quote(value: String): String = org.json.JSONObject.quote(value)
         private external fun nativeCreate(json: String, fd: Int): Long
         private external fun nativeCreateError(code: Long): String
         private external fun nativeIsReady(handle: Long): Boolean

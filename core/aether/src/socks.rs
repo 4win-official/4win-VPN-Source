@@ -367,6 +367,24 @@ async fn resolve(stack: &StackHandle, target: Target) -> Result<IpAddr> {
 }
 
 pub(crate) async fn dns_resolve(stack: &StackHandle, name: &str) -> Result<IpAddr> {
+    // A stack-specific list is deliberately an exclusive override: do not
+    // consult encrypted/global resolvers or append public fallback resolvers.
+    if let Some(servers) = stack.dns_servers() {
+        let udp = stack.open_udp().await?;
+        let (sender, mut from_stack) = udp.into_split();
+        let mut outcome = Err(AetherError::Other("dns resolver list is empty".into()));
+        // UDP can lose a query while the authenticated packet channel warms up.
+        // Retry only this instance's exact resolvers, never the physical network.
+        for _ in 0..3 {
+            outcome = dns_exchange_servers(
+                &sender, &mut from_stack, name, servers, Duration::from_millis(1800),
+            ).await;
+            if outcome.is_ok() || servers.is_empty() { break; }
+        }
+        sender.close().await;
+        return outcome;
+    }
+
     // Announce the resolver set once per process so a log that shows no
     // `doh …` or `dot …` lines is unambiguous: either no encrypted resolver
     // was configured, or it was configured but never got a lookup. Without
@@ -561,9 +579,21 @@ pub(crate) async fn dns_exchange_with(
     name: &str,
     per_server_timeout: Duration,
 ) -> Result<IpAddr> {
+    dns_exchange_servers(sender, from_stack, name, &resolver_addresses(), per_server_timeout).await
+}
+
+/// Exchange a DNS query against exactly `servers`, in order, without adding
+/// process-wide or public fallback resolvers.
+pub(crate) async fn dns_exchange_servers(
+    sender: &UdpSender,
+    from_stack: &mut mpsc::Receiver<(SocketAddr, Vec<u8>)>,
+    name: &str,
+    servers: &[SocketAddr],
+    per_server_timeout: Duration,
+) -> Result<IpAddr> {
     let mut last = AetherError::Other("dns timeout".into());
 
-    for server in resolver_addresses() {
+    for &server in servers {
         let (query, id) = build_dns_query(name, QTYPE_A);
         if let Err(error) = sender.send_to(server, query).await {
             last = error;
@@ -1454,6 +1484,66 @@ mod tests {
         let defaults = resolver_addresses();
         assert!(defaults.len() >= 2);
         assert_eq!(defaults[0].port(), 53);
+    }
+
+    fn dns_answer(query: &[u8], address: [u8; 4]) -> Vec<u8> {
+        let mut answer = query.to_vec();
+        answer[2] = 0x81;
+        answer[3] = 0x80;
+        answer[6..8].copy_from_slice(&1u16.to_be_bytes());
+        answer.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1]);
+        answer.extend_from_slice(&300u32.to_be_bytes());
+        answer.extend_from_slice(&4u16.to_be_bytes());
+        answer.extend_from_slice(&address);
+        answer
+    }
+
+    fn ipv4_udp_packet(src: SocketAddr, dst: SocketAddr, payload: &[u8]) -> Vec<u8> {
+        let total = 20 + 8 + payload.len();
+        let mut packet = vec![0u8; total];
+        packet[0] = 0x45;
+        packet[2..4].copy_from_slice(&(total as u16).to_be_bytes());
+        packet[8] = 64;
+        packet[9] = 17;
+        packet[12..16].copy_from_slice(&match src.ip() { IpAddr::V4(ip) => ip.octets(), _ => panic!() });
+        packet[16..20].copy_from_slice(&match dst.ip() { IpAddr::V4(ip) => ip.octets(), _ => panic!() });
+        packet[20..22].copy_from_slice(&src.port().to_be_bytes());
+        packet[22..24].copy_from_slice(&dst.port().to_be_bytes());
+        packet[24..26].copy_from_slice(&((8 + payload.len()) as u16).to_be_bytes());
+        packet[28..].copy_from_slice(payload);
+        packet
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dns_resolve_uses_only_the_stack_override_and_accepts_raw_udp_answer() {
+        let (inbound_tx, inbound_rx) = mpsc::channel(16);
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(16);
+        let stack = crate::netstack::spawn("198.18.0.1", "fc00::1", 1400, inbound_rx, outbound_tx)
+            .unwrap()
+            .with_dns_servers(vec!["10.0.0.2:53".parse().unwrap()]);
+        let lookup = tokio::spawn({
+            let stack = stack.clone();
+            async move { dns_resolve(&stack, "example.com").await }
+        });
+        let packet = tokio::time::timeout(Duration::from_secs(2), outbound_rx.recv()).await.unwrap().unwrap();
+        assert_eq!(&packet[16..20], &[10, 0, 0, 2]);
+        assert_eq!(u16::from_be_bytes([packet[22], packet[23]]), 53);
+        let ihl = ((packet[0] & 0x0f) as usize) * 4;
+        let query = &packet[ihl + 8..];
+        let src = "10.0.0.2:53".parse().unwrap();
+        let dst = SocketAddr::new("198.18.0.1".parse().unwrap(), u16::from_be_bytes([packet[ihl], packet[ihl + 1]]));
+        inbound_tx.send(ipv4_udp_packet(src, dst, &dns_answer(query, [203, 0, 113, 7]))).await.unwrap();
+        assert_eq!(lookup.await.unwrap().unwrap(), "203.0.113.7".parse::<IpAddr>().unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn empty_dns_override_fails_without_emitting_a_public_query() {
+        let (_inbound_tx, inbound_rx) = mpsc::channel(16);
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(16);
+        let stack = crate::netstack::spawn("198.18.0.1", "fc00::1", 1400, inbound_rx, outbound_tx)
+            .unwrap().with_dns_servers(Vec::new());
+        assert!(dns_resolve(&stack, "example.com").await.is_err());
+        assert!(outbound_rx.try_recv().is_err());
     }
 
     fn reply(id: u16, name: &str, qtype: u16, qr: bool) -> Vec<u8> {

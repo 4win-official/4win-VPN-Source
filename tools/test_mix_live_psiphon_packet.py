@@ -62,10 +62,11 @@ def udp_associate(port):
     p=struct.unpack('!H',exact(c,2))[0]; u=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); u.settimeout(8)
     return c,u,("127.0.0.1",p)
 
-def dns_query(port):
+def dns_query(port, resolver='10.0.0.2'):
     c,u,b=udp_associate(port); tid=os.urandom(2); q=tid+b'\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'+b'\x07example\x03com\x00\x00\x01\x00\x01'
-    # RSV, FRAG, ATYP=IPv4, 1.1.1.1:53
-    u.sendto(b'\x00\x00\x00\x01'+socket.inet_aton('1.1.1.1')+struct.pack('!H',53)+q,b)
+    # Psiphon's documented transparent resolver. Public resolver replies may
+    # be rewritten to this address, so directly querying their IPs is unreliable.
+    u.sendto(b'\x00\x00\x00\x01'+socket.inet_aton(resolver)+struct.pack('!H',53)+q,b)
     x,_=u.recvfrom(4096); c.close(); u.close()
     if len(x)<22 or x[10:12]!=tid: raise RuntimeError('invalid DNS response through packet SOCKS')
     flags, questions, answers = struct.unpack('!HHH',x[12:18])
@@ -94,7 +95,9 @@ def stop(p):
     except subprocess.TimeoutExpired:p.kill();p.wait(3)
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument('--psiphon',default='/tmp/psiphon-run/psiphon-tunnel-core-x86_64'); ap.add_argument('--server-list',default=''); ap.add_argument('--native-lib',default=str(ROOT/'core/aether/target/debug/libaether.so')); ap.add_argument('--classpath',default='/tmp/mix-routing-classpath'); ap.add_argument('--account',default='/tmp/mix-live-warp/account.toml'); ap.add_argument('--timeout',type=float,default=180); ap.add_argument('--keep-temp',action='store_true'); ap.add_argument('--region',default=''); ap.add_argument('--peer',default='162.159.192.1:2408'); a=ap.parse_args()
+    ap=argparse.ArgumentParser(); ap.add_argument('--psiphon',default='/tmp/psiphon-run/psiphon-tunnel-core-x86_64'); ap.add_argument('--server-list',default=''); ap.add_argument('--native-lib',default=str(ROOT/'core/aether/target/debug/libaether.so')); ap.add_argument('--classpath',default='/tmp/mix-routing-classpath'); ap.add_argument('--account',default='/tmp/mix-live-warp/account.toml'); ap.add_argument('--timeout',type=float,default=180); ap.add_argument('--keep-temp',action='store_true'); ap.add_argument('--region',default=''); ap.add_argument('--peer',default='162.159.192.1:2408')
+    ap.add_argument('--fresh-warp', action='store_true', help='Provision a new private WARP identity through Psiphon instead of using the account copy')
+    a=ap.parse_args()
     psi=Path(a.psiphon); libp=Path(a.native_lib); account=Path(a.account)
     server_list=Path(a.server_list) if a.server_list else None
     for p in (psi,libp,account):
@@ -116,7 +119,7 @@ def main():
         ps=subprocess.Popen(cmd,pass_fds=(right.fileno(),),stdout=lf,stderr=subprocess.STDOUT,text=True); procs.append(ps); right.close(); right=None
         # Native create is asynchronous; readiness means SOCKS listener + stack packet pump.
         l=ctypes.CDLL(str(libp)); l.aether_mix_packet_create.argtypes=[ctypes.c_char_p,ctypes.c_int]; l.aether_mix_packet_create.restype=ctypes.c_longlong; l.aether_mix_packet_is_ready.argtypes=[ctypes.c_longlong]; l.aether_mix_packet_is_ready.restype=ctypes.c_int; l.aether_mix_packet_stop.argtypes=[ctypes.c_longlong]
-        native_cfg=json.dumps({'ipv4':'10.0.0.3','ipv6':'fd00::3','mtu':1500,'listen':f'127.0.0.1:{free_port()}'}).encode(); hid=l.aether_mix_packet_create(native_cfg,left.fileno())
+        native_cfg=json.dumps({'ipv4':'10.0.0.3','ipv6':'fd00::3','mtu':1500,'listen':f'127.0.0.1:{free_port()}', 'dns':['10.0.0.2:53']}).encode(); hid=l.aether_mix_packet_create(native_cfg,left.fileno())
         if hid<1: raise RuntimeError('aether_mix_packet_create rejected config/fd')
         for _ in range(200):
             if l.aether_mix_packet_is_ready(hid): break
@@ -141,7 +144,12 @@ def main():
         t1=trace(port); d1=dns_query(port)
         # The real WARP engine sends its WireGuard UDP through that exact packet
         # SOCKS endpoint. No Xray/TLS relay or third-party gateway is involved.
-        account_copy=td/'aether-warp.toml'; shutil.copyfile(account,account_copy); account_copy.chmod(0o600)
+        account_copy=td/'aether-warp.toml'
+        if not a.fresh_warp:
+            shutil.copyfile(account,account_copy); account_copy.chmod(0o600)
+        # With --fresh-warp this stage-private path deliberately does not exist:
+        # Aether provisions it through upstream_proxy, matching per-stage app
+        # identities without altering the original account or global config.
         classpath=Path(a.classpath).read_text().strip()
         fresh=ROOT/'build/app/tmp/kotlin-classes/debug'
         classpath=str(fresh)+os.pathsep+classpath+os.pathsep+str(td)

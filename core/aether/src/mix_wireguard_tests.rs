@@ -197,3 +197,82 @@ async fn mix_wg_data_plane_round_trips_through_socks_udp_and_real_peer() {
     tunnel_task.abort();
     proxy.abort();
 }
+
+/// Obfuscation sent via WgUdpSocket must stay inside the SOCKS UDP
+/// association; the observer must never see raw, unframed payloads.
+#[tokio::test]
+async fn aethernoize_profiles_use_socks_udp_association() {
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    let peer: SocketAddr = "127.0.0.1:51820".parse().unwrap();
+    let balanced = aethernoize::AetherNoizeConfig::balanced();
+    let light = aethernoize::AetherNoizeConfig::light();
+    let count_prelude = |cfg: &aethernoize::AetherNoizeConfig| {
+        usize::from(cfg.i1.is_some()) + cfg.jc_after_i1 + cfg.jc_before_hs
+            + [&cfg.i2, &cfg.i3, &cfg.i4, &cfg.i5].iter().filter(|s| s.is_some()).count()
+    };
+    let balanced_count = count_prelude(&balanced);
+    let expected_count = balanced_count + count_prelude(&light);
+    let (seen_tx, seen_rx) = oneshot::channel::<Vec<Vec<u8>>>();
+    let proxy = tokio::spawn(async move {
+        let (mut control, _) = proxy_listener.accept().await.unwrap();
+        let mut greeting = [0u8; 3];
+        control.read_exact(&mut greeting).await.unwrap();
+        assert_eq!(greeting, [5, 1, 0]);
+        control.write_all(&[5, 0]).await.unwrap();
+        let mut associate = [0u8; 10];
+        control.read_exact(&mut associate).await.unwrap();
+        assert_eq!(associate, [5, 3, 0, 1, 0, 0, 0, 0, 0, 0]);
+        let relay = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let relay_addr = relay.local_addr().unwrap();
+        let mut reply = vec![5, 0, 0, 1, 127, 0, 0, 1];
+        reply.extend_from_slice(&relay_addr.port().to_be_bytes());
+        control.write_all(&reply).await.unwrap();
+        let mut frames = Vec::new();
+        let mut buf = vec![0u8; 2048];
+        while frames.len() < expected_count {
+            let (n, _) = relay.recv_from(&mut buf).await.unwrap();
+            frames.push(buf[..n].to_vec());
+        }
+        seen_tx.send(frames).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    });
+    let mut off_packets = Vec::new();
+    aethernoize::apply_obfuscation_with_sender(
+        |packet| {
+            off_packets.push(packet);
+            async {}
+        },
+        &aethernoize::AetherNoizeConfig::off(),
+    )
+    .await;
+    assert!(off_packets.is_empty(), "off profile emitted obfuscation");
+    let proxy_url = format!("socks5://{proxy_addr}");
+    let sock = Arc::new(WgUdpSocket::bind(peer, Some(&proxy_url)).await.unwrap());
+    let balanced_sock = sock.clone();
+    aethernoize::apply_obfuscation_with_sender(
+        move |packet| {
+            let sock = balanced_sock.clone();
+            async move { let _ = sock.send(&packet).await; }
+        },
+        &balanced,
+    ).await;
+    let light_sock = sock.clone();
+    aethernoize::apply_obfuscation_with_sender(
+        move |packet| {
+            let sock = light_sock.clone();
+            async move { let _ = sock.send(&packet).await; }
+        },
+        &light,
+    ).await;
+    let frames = tokio::time::timeout(Duration::from_secs(2), seen_rx)
+        .await.unwrap().unwrap();
+    assert_eq!(frames.len(), expected_count, "one profile's packets were missing");
+    assert!(frames[balanced_count].len() > 10, "light prelude was not received");
+    assert!(frames.iter().all(|frame| {
+        frame.len() >= 10 && frame[..3] == [0, 0, 0] && frame[3] == 1
+            && frame[4..8] == [127, 0, 0, 1]
+            && frame[8..10] == peer.port().to_be_bytes()
+    }));
+    proxy.abort();
+}

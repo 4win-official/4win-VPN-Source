@@ -208,6 +208,9 @@ class MixProtocolMatrixTest {
         assertFalse(MixCapabilities.afterXray(http, true))
         assertTrue(MixCapabilities.afterXray(vless, false))
         assertTrue(MixCapabilities.needsRelay(http))
+        // Shadowsocks cannot carry UDP across a TCP-only preceding hop;
+        // with a configured relay it must be wrapped rather than rejected.
+        assertTrue(MixCapabilities.needsRelay(shadowsocks))
         assertFalse(MixCapabilities.needsRelay(psiphon))
         assertFalse(MixCapabilities.needsRelay(sstp))
         assertEquals(true, MixCapabilities.afterXray(shadowsocks, true))

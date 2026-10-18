@@ -20,6 +20,8 @@ struct Config {
     ipv6: String,
     mtu: usize,
     listen: String,
+    #[serde(default)]
+    dns: Option<Vec<SocketAddr>>,
 }
 struct FdGuard(RawFd);
 impl Drop for FdGuard {
@@ -84,6 +86,11 @@ fn parse(c: &Config) -> Result<SocketAddr, String> {
     if !listen.ip().is_loopback() {
         return Err("listen must be loopback".into());
     }
+    if let Some(servers) = &c.dns {
+        if servers.is_empty() || servers.len() > 8 || servers.iter().any(|s| s.port() == 0 || s.ip().is_unspecified()) {
+            return Err("dns must contain 1 to 8 numeric resolver addresses with nonzero ports".into());
+        }
+    }
     Ok(listen)
 }
 fn set_nonblocking(fd: RawFd) -> Result<(), String> {
@@ -98,17 +105,71 @@ fn set_nonblocking(fd: RawFd) -> Result<(), String> {
 }
 async fn pump(
     fd: RawFd,
-    mut inbound: mpsc::Sender<Vec<u8>>,
-    mut outbound: mpsc::Receiver<Vec<u8>>,
+    inbound: mpsc::Sender<Vec<u8>>,
+    outbound: mpsc::Receiver<Vec<u8>>,
 ) -> Result<(), String> {
-    let afd = AsyncFd::new(fd).map_err(|e| e.to_string())?;
-    let mut buf = vec![0u8; 65535];
-    loop {
-        tokio::select! {
-            r = afd.readable() => { let mut guard = r.map_err(|e| e.to_string())?; loop { let n = unsafe { libc::recv(fd, buf.as_mut_ptr().cast(), buf.len(), libc::MSG_DONTWAIT) }; if n < 0 { let e=std::io::Error::last_os_error(); if e.kind()==std::io::ErrorKind::WouldBlock { break; } return Err(e.to_string()); } if n==0 { return Ok(()); } if inbound.send(buf[..n as usize].to_vec()).await.is_err() { return Ok(()); } } guard.clear_ready(); }
-            Some(pkt) = outbound.recv() => { let mut guard = afd.writable().await.map_err(|e| e.to_string())?; let n = unsafe { libc::send(fd, pkt.as_ptr().cast(), pkt.len(), libc::MSG_DONTWAIT) }; if n < 0 { let e=std::io::Error::last_os_error(); if e.kind()==std::io::ErrorKind::WouldBlock { guard.clear_ready(); continue; } return Err(e.to_string()); } if n as usize != pkt.len() { return Err("packet fd performed a partial datagram write".into()); } guard.clear_ready(); }
-            else => return Ok(()),
+    // A separate registration/fd lets a blocked inbound channel never prevent
+    // the writer from retrying the same datagram.  The duplicate is closed by
+    // the guard when the write future is cancelled.
+    let write_fd = unsafe { libc::dup(fd) };
+    if write_fd < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    let _write_fd = FdGuard(write_fd);
+    let read = async {
+        let afd = AsyncFd::new(fd).map_err(|e| e.to_string())?;
+        let mut buf = vec![0u8; 65535];
+        loop {
+            let mut guard = afd.readable().await.map_err(|e| e.to_string())?;
+            let n =
+                unsafe { libc::recv(fd, buf.as_mut_ptr().cast(), buf.len(), libc::MSG_DONTWAIT) };
+            if n < 0 {
+                let error = std::io::Error::last_os_error();
+                guard.clear_ready();
+                if error.kind() == std::io::ErrorKind::WouldBlock {
+                    continue;
+                }
+                return Err(error.to_string());
+            }
+            // Keep readiness until recv returns WouldBlock; clearing it after
+            // one packet can strand the rest of an edge-triggered receive burst.
+            drop(guard);
+            if n == 0 {
+                return Ok(());
+            }
+            if inbound.send(buf[..n as usize].to_vec()).await.is_err() {
+                return Ok(());
+            }
         }
+    };
+    let write = async {
+        let afd = AsyncFd::new(write_fd).map_err(|e| e.to_string())?;
+        let mut outbound = outbound;
+        while let Some(pkt) = outbound.recv().await {
+            loop {
+                let mut guard = afd.writable().await.map_err(|e| e.to_string())?;
+                let n = unsafe {
+                    libc::send(write_fd, pkt.as_ptr().cast(), pkt.len(), libc::MSG_DONTWAIT)
+                };
+                if n < 0 {
+                    let error = std::io::Error::last_os_error();
+                    if error.kind() == std::io::ErrorKind::WouldBlock {
+                        guard.clear_ready();
+                        continue;
+                    }
+                    return Err(error.to_string());
+                }
+                if n as usize != pkt.len() {
+                    return Err("packet fd performed a partial datagram write".into());
+                }
+                break;
+            }
+        }
+        Ok(())
+    };
+    tokio::select! {
+        result = read => result,
+        result = write => result,
     }
 }
 fn start_thread(
@@ -137,6 +198,10 @@ fn start_thread(
             let stack = match crate::netstack::spawn(&c.ipv4, &c.ipv6, c.mtu, in_rx, out_tx) {
                 Ok(stack) => stack,
                 Err(error) => { set_error(&inst, error); return; }
+            };
+            let stack = match c.dns {
+                Some(servers) => stack.with_dns_servers(servers),
+                None => stack,
             };
             let (stop_tx, mut stop_rx) = oneshot::channel();
             {
@@ -315,13 +380,17 @@ mod tests {
 
     #[cfg(unix)]
     fn read_exact_timeout(stream: &mut TcpStream, buf: &mut [u8]) {
-        stream.read_exact(buf).expect("SOCKS response within timeout");
+        stream
+            .read_exact(buf)
+            .expect("SOCKS response within timeout");
     }
 
     #[cfg(unix)]
     fn read_udp_frame(socket: &UdpSocket) -> Vec<u8> {
         let mut frame = vec![0u8; 2048];
-        let n = socket.recv(&mut frame).expect("SOCKS UDP reply within timeout");
+        let n = socket
+            .recv(&mut frame)
+            .expect("SOCKS UDP reply within timeout");
         frame.truncate(n);
         frame
     }
@@ -332,23 +401,41 @@ mod tests {
             ipv4: "bad".into(),
             ipv6: "".into(),
             mtu: 1500,
-            listen: "127.0.0.1:1".into()
+            listen: "127.0.0.1:1".into(),
+            dns: None,
         })
         .is_err());
         assert!(parse(&Config {
             ipv4: "10.0.0.2/24".into(),
             ipv6: "".into(),
             mtu: 1500,
-            listen: "127.0.0.1:1".into()
+            listen: "127.0.0.1:1".into(),
+            dns: None,
         })
         .is_ok());
         assert!(parse(&Config {
             ipv4: "::1".into(),
             ipv6: "".into(),
             mtu: 1500,
-            listen: "127.0.0.1:1".into()
+            listen: "127.0.0.1:1".into(),
+            dns: None,
         })
         .is_err());
+    }
+
+    #[test]
+    fn per_instance_dns_config_is_optional_and_strict() {
+        let base = r#"{"ipv4":"10.0.0.3","ipv6":"","mtu":1500,"listen":"127.0.0.1:1080"}"#;
+        let mut config: Config = serde_json::from_str(base).unwrap();
+        assert!(config.dns.is_none());
+        config.dns = Some(vec!["10.0.0.2:53".parse().unwrap()]);
+        assert!(parse(&config).is_ok());
+        config.dns = Some(Vec::new());
+        assert!(parse(&config).is_err());
+        config.dns = Some(vec!["10.0.0.2:0".parse().unwrap()]);
+        assert!(parse(&config).is_err());
+        let invalid = base.replace("1500", "1500,\"dns\":[\"resolver.example:53\"]");
+        assert!(serde_json::from_str::<Config>(&invalid).is_err());
     }
 
     /// Exercises the real native packet bridge, rather than only validating its JSON.
@@ -361,7 +448,8 @@ mod tests {
             eprintln!("mix_packet integration iteration {iteration}: create");
             let (peer, bridge) = UnixDatagram::pair().expect("AF_UNIX datagram pair");
             peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-            peer.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+            peer.set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
 
             let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
             let listen = reservation.local_addr().unwrap();
@@ -378,14 +466,21 @@ mod tests {
 
             let deadline = Instant::now() + Duration::from_secs(5);
             while aether_mix_packet_is_ready(id) == 0 {
-                assert!(Instant::now() < deadline, "iteration {iteration}: bridge not ready");
+                assert!(
+                    Instant::now() < deadline,
+                    "iteration {iteration}: bridge not ready"
+                );
                 std::thread::sleep(Duration::from_millis(10));
             }
             eprintln!("mix_packet integration iteration {iteration}: ready");
 
             let mut control = TcpStream::connect(listen).expect("real SOCKS listener");
-            control.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-            control.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+            control
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            control
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
             control.write_all(&[5, 1, 0]).unwrap();
             let mut method = [0u8; 2];
             read_exact_timeout(&mut control, &mut method);
@@ -452,6 +547,60 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pump_retries_saturated_unix_datagram_without_reordering_or_loss() {
+        let (peer, bridge) = UnixDatagram::pair().unwrap();
+        // Keep the kernel queue below the total payload volume so the writer
+        // necessarily observes EAGAIN before the reader is started.
+        let sndbuf: libc::c_int = 2048;
+        let result = unsafe {
+            libc::setsockopt(
+                bridge.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                (&sndbuf as *const libc::c_int).cast(),
+                std::mem::size_of_val(&sndbuf) as libc::socklen_t,
+            )
+        };
+        assert_eq!(result, 0, "SO_SNDBUF: {}", std::io::Error::last_os_error());
+
+        let (in_tx, _in_rx) = mpsc::channel(1);
+        let (out_tx, out_rx) = mpsc::channel(256);
+        let worker = tokio::spawn(pump(bridge.as_raw_fd(), in_tx, out_rx));
+        let packets: Vec<Vec<u8>> = (0..64)
+            .map(|n| {
+                let mut packet = vec![0u8; 512];
+                packet[..8].copy_from_slice(&(n as u64).to_be_bytes());
+                packet[8..].fill(n as u8);
+                packet
+            })
+            .collect();
+        for packet in &packets {
+            out_tx.send(packet.clone()).await.unwrap();
+        }
+        // Do not read until the sender has had time to fill the deliberately
+        // tiny queue and hit WouldBlock.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(out_tx);
+
+        let expected = packets.clone();
+        let received = tokio::task::spawn_blocking(move || {
+            peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut received = Vec::with_capacity(expected.len());
+            let mut buf = vec![0u8; 1024];
+            while received.len() < expected.len() {
+                let n = peer.recv(&mut buf).expect("queued datagram within timeout");
+                received.push(buf[..n].to_vec());
+            }
+            received
+        })
+        .await
+        .unwrap();
+        assert_eq!(received, packets);
+        assert!(worker.await.unwrap().is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn cancellation_before_ready_and_packet_worker_exit_are_drained() {
         for iteration in 0..17 {
@@ -461,7 +610,8 @@ mod tests {
             drop(reservation);
             let json = CString::new(format!(
                 r#"{{"ipv4":"10.0.0.2","ipv6":"","mtu":1280,"listen":"{listen}"}}"#
-            )).unwrap();
+            ))
+            .unwrap();
             let id = unsafe { aether_mix_packet_create(json.as_ptr(), bridge.as_raw_fd()) };
             assert!(id > 0);
             let mut guard = HandleGuard(id);

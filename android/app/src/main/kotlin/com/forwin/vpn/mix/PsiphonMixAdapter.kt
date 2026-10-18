@@ -81,7 +81,11 @@ class PsiphonMixAdapter : MixAdapter {
         // the authenticated server; these are local stack addresses, not peers.
         val mtu = Psi.getPacketTunnelMTU().toInt()
         require(mtu in 576..65535) { "Invalid Psiphon packet-tunnel MTU" }
-        packetStack = MixPacketStack.start(pair.first, "10.0.0.3", "fd00::3", mtu, environment.listenPort)
+        // Psiphon rewrites replies from its configured public resolvers to this
+        // documented transparent address. Querying those public IPs directly
+        // loses their replies; keep bootstrap DNS local to this packet stack.
+        packetStack = MixPacketStack.start(pair.first, "10.0.0.3", "fd00::3", mtu,
+            environment.listenPort, listOf("10.0.0.2:53"))
         val effective = MixPsiphonConfig.packet(config, root, environment.listenPort,
             environment.upstreamSocksUrl, bootstrap, pair.second.fd)
         val host = object : PsiphonTunnel.HostService {

@@ -102,7 +102,7 @@ def main() -> None:
         lib = ctypes.CDLL(str(native)); lib.aether_mix_packet_create.argtypes = [ctypes.c_char_p, ctypes.c_int]; lib.aether_mix_packet_create.restype = ctypes.c_longlong
         lib.aether_mix_packet_is_ready.argtypes = [ctypes.c_longlong]; lib.aether_mix_packet_is_ready.restype = ctypes.c_int
         lib.aether_mix_packet_stop.argtypes = [ctypes.c_longlong]
-        packet_cfg = json.dumps({"ipv4": "10.0.0.3", "ipv6": "fd00::3", "mtu": 1500, "listen": f"127.0.0.1:{packet_listen}"}).encode()
+        packet_cfg = json.dumps({"ipv4": "10.0.0.3", "ipv6": "fd00::3", "mtu": 1500, "listen": f"127.0.0.1:{packet_listen}", "dns": ["10.0.0.2:53"]}).encode()
         hid = lib.aether_mix_packet_create(packet_cfg, left.fileno())
         if hid < 1: raise RuntimeError("aether_mix_packet_create rejected raw packet socket")
         ready_end = time.monotonic() + min(25.0, a.timeout)

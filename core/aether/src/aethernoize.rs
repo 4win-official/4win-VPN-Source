@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -328,48 +329,69 @@ async fn send_connected(sock: &UdpSocket, pkt: &[u8]) {
     let _ = sock.send(pkt).await;
 }
 
-pub async fn apply_obfuscation(sock: &UdpSocket, _peer: SocketAddr, cfg: &AetherNoizeConfig) {
+/// Apply pre-handshake noise through an arbitrary transport. The callback is
+/// invoked serially so callers can keep all packets on one association.
+pub async fn apply_obfuscation_with_sender<F, Fut>(
+    mut send: F,
+    cfg: &AetherNoizeConfig,
+) where
+    F: FnMut(Vec<u8>) -> Fut,
+    Fut: Future<Output = ()>,
+{
     if !cfg.is_enabled() {
         return;
     }
-
     if let Some(ref i1) = cfg.i1 {
         let payload = parse_cps(i1);
         if !payload.is_empty() {
             let framed = wrap_ikev2(&payload);
-            send_connected(sock, &framed).await;
+            send(framed).await;
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
     }
-
     for _ in 0..cfg.jc_after_i1 {
-        let junk = generate_junk(cfg);
-        send_connected(sock, &junk).await;
+        send(generate_junk(cfg)).await;
         if !cfg.junk_interval.is_zero() {
             tokio::time::sleep(cfg.junk_interval).await;
         }
     }
-
     for _ in 0..cfg.jc_before_hs {
-        let junk = generate_junk(cfg);
-        send_connected(sock, &junk).await;
+        send(generate_junk(cfg)).await;
         if !cfg.junk_interval.is_zero() {
             tokio::time::sleep(cfg.junk_interval).await;
         }
     }
-
     for sig in [&cfg.i2, &cfg.i3, &cfg.i4, &cfg.i5].iter() {
         if let Some(s) = sig {
             let pkt = parse_cps(s);
             if !pkt.is_empty() {
-                send_connected(sock, &pkt).await;
+                send(pkt).await;
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         }
     }
-
     if !cfg.handshake_delay.is_zero() {
         tokio::time::sleep(cfg.handshake_delay).await;
+    }
+}
+
+pub async fn apply_obfuscation(sock: &UdpSocket, _peer: SocketAddr, cfg: &AetherNoizeConfig) {
+    apply_obfuscation_with_sender(|pkt| async move { send_connected(sock, &pkt).await }, cfg).await;
+}
+
+/// Send post-handshake noise through an arbitrary transport.
+pub async fn send_post_handshake_junk_with_sender<F, Fut>(
+    mut send: F,
+    cfg: &AetherNoizeConfig,
+) where
+    F: FnMut(Vec<u8>) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    for _ in 0..cfg.jc_after_hs {
+        send(generate_junk(cfg)).await;
+        if !cfg.junk_interval.is_zero() {
+            tokio::time::sleep(cfg.junk_interval).await;
+        }
     }
 }
 
@@ -378,24 +400,24 @@ pub async fn send_post_handshake_junk(
     _peer: SocketAddr,
     cfg: &AetherNoizeConfig,
 ) {
-    for _ in 0..cfg.jc_after_hs {
-        let junk = generate_junk(cfg);
-        send_connected(sock, &junk).await;
-        if !cfg.junk_interval.is_zero() {
-            tokio::time::sleep(cfg.junk_interval).await;
-        }
-    }
+    send_post_handshake_junk_with_sender(|pkt| async move { send_connected(sock, &pkt).await }, cfg)
+        .await;
 }
 
-pub async fn send_keepalive_junk(sock: &UdpSocket, cfg: &AetherNoizeConfig) {
+/// Send keepalive noise through an arbitrary transport.
+pub async fn send_keepalive_junk_with_sender<F, Fut>(
+    mut send: F,
+    cfg: &AetherNoizeConfig,
+) where
+    F: FnMut(Vec<u8>) -> Fut,
+    Fut: Future<Output = ()>,
+{
     if !cfg.is_enabled() {
         return;
     }
-
     let base = cfg.jc_before_hs.max(1);
     let extra = rand::rng().random_range(0..=base);
     let count = base + extra;
-
     for _ in 0..count {
         let mut junk = generate_junk(cfg);
         if let Some(first) = junk.first_mut() {
@@ -403,14 +425,17 @@ pub async fn send_keepalive_junk(sock: &UdpSocket, cfg: &AetherNoizeConfig) {
                 *first = first.wrapping_add(0x40);
             }
         }
-        send_connected(sock, &junk).await;
-
+        send(junk).await;
         let jitter = rand::rng().random_range(0..=8);
         let gap = cfg.junk_interval + Duration::from_millis(jitter);
         if !gap.is_zero() {
             tokio::time::sleep(gap).await;
         }
     }
+}
+
+pub async fn send_keepalive_junk(sock: &UdpSocket, cfg: &AetherNoizeConfig) {
+    send_keepalive_junk_with_sender(|pkt| async move { send_connected(sock, &pkt).await }, cfg).await;
 }
 
 #[cfg(test)]

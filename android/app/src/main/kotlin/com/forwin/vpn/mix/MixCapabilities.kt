@@ -10,7 +10,8 @@ internal object MixCapabilities {
     // their UDP is supplied by Psiphon's own server, not an external relay.
     fun needsRelay(hop: JSONObject): Boolean =
         (hop.optString("protocol") in setOf("xray", "proxy") &&
-            (hop.has("socks4") || hop.getJSONObject("outbound").optString("protocol") in setOf("http", "socks")))
+            (hop.has("socks4") || hop.getJSONObject("outbound").optString("protocol") in
+                setOf("http", "socks", "shadowsocks")))
 
     fun afterXray(hop: JSONObject, upstreamUdp: Boolean): Boolean =
         if (hop.has("socks4")) false else when (hop.getJSONObject("outbound").getString("protocol")) {
