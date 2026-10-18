@@ -11,6 +11,7 @@ import '../widgets/snow_animation.dart';
 import '../widgets/snow_button_surface.dart';
 import '../widgets/pixel_effect.dart';
 import '../widgets/rain_animation.dart';
+import '../widgets/rain_button_surface.dart';
 import '../widgets/autumn_animation.dart';
 import '../widgets/summer_animation.dart';
 import '../widgets/heart_burst.dart';
@@ -39,6 +40,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final UpdateService _updateService = UpdateService();
+  final GlobalKey _powerButtonKey = GlobalKey();
 
   // Pink-theme heart burst: incremented each time the VPN transitions to
   // "connected" so the HeartBurst widget plays a fresh one-shot animation.
@@ -451,12 +453,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     child: RepaintBoundary(child: PixelEffect()),
                   ),
 
-                // انیمیشن باران (فقط در تم بارانی)
-                if (isRainTheme)
-                  const Positioned.fill(
-                    child: RepaintBoundary(child: RainAnimation()),
-                  ),
-
                 // انیمیشن خورشید تابستانی (فقط لایت مود)
                 if (isSummerTheme)
                   const Positioned.fill(
@@ -738,6 +734,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           onTap: () => _handleConnectTap(context, provider),
                           onLongPress: () => _handleLongPress(context),
                           child: Container(
+                            key: _powerButtonKey,
                             width: 200,
                             height: 200,
                             decoration: BoxDecoration(
@@ -793,20 +790,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       ),
                                     ],
                             ),
-                            child: SnowButtonSurface(
-                              enabled: isSnowTheme,
-                              tint: _getButtonColor(provider.status, isDark),
-                              child: Center(
-                                child: provider.isConnecting
-                                    ? FourWinLoader(
-                                        color: isDark ? Colors.black87 : Colors.white,
-                                        strokeWidth: 3,
-                                      )
-                                    : Icon(
-                                        _getButtonIcon(provider.status),
-                                        size: 80,
-                                        color: isDark ? Colors.black87 : Colors.white,
-                                      ),
+                            child: RainButtonSurface(
+                              enabled: isRainTheme,
+                              child: SnowButtonSurface(
+                                enabled: isSnowTheme,
+                                tint: _getButtonColor(provider.status, isDark),
+                                child: Center(
+                                  child: provider.isConnecting
+                                      ? FourWinLoader(
+                                          color: isDark ? Colors.black87 : Colors.white,
+                                          strokeWidth: 3,
+                                        )
+                                      : Icon(
+                                          _getButtonIcon(provider.status),
+                                          size: 80,
+                                          color: isDark ? Colors.black87 : Colors.white,
+                                        ),
+                                ),
                               ),
                             ),
                           ),
@@ -1236,6 +1236,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
                   ],
                 ),
+                // Airborne rain stays above the glow. The solid button masks
+                // it, with RainButtonSurface painting impacts/runoff instead.
+                // IgnorePointer preserves all controls underneath this layer.
+                if (isRainTheme)
+                  Positioned.fill(
+                    child: RepaintBoundary(
+                      child: RainAnimation(obstacleKey: _powerButtonKey),
+                    ),
+                  ),
               ],
             );
           },

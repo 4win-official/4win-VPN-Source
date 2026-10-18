@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -163,6 +164,87 @@ void main() {
       rain.dispose();
     });
   });
+
+  test(
+    'rain has visible contrast on both the backdrop and power button',
+    () async {
+      const size = Size(120, 120);
+      final rain = RainSimulation(random: Random(42), dropCount: 1);
+      rain.resize(size);
+      final drop = rain.drops.single;
+      drop.x = 60;
+      drop.y = 70;
+
+      for (final background in [Colors.black, Colors.white]) {
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder);
+        canvas.drawColor(background, BlendMode.src);
+        RainPainter(rain).paint(canvas, size);
+        final picture = recorder.endRecording();
+        final image = await picture.toImage(120, 120);
+        final pixels = (await image.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        ))!;
+        final baseline = background == Colors.black ? 0 : 255;
+        var visiblePixels = 0;
+        for (var offset = 0; offset < pixels.lengthInBytes; offset += 4) {
+          if ((pixels.getUint8(offset) - baseline).abs() >= 20 ||
+              (pixels.getUint8(offset + 1) - baseline).abs() >= 20 ||
+              (pixels.getUint8(offset + 2) - baseline).abs() >= 20) {
+            visiblePixels++;
+          }
+        }
+        expect(
+          visiblePixels,
+          greaterThan(12),
+          reason: 'background: $background',
+        );
+        image.dispose();
+        picture.dispose();
+      }
+      rain.dispose();
+    },
+  );
+
+  test(
+    'solid button masks airborne drops but leaves surrounding rain visible',
+    () async {
+      final rain = RainSimulation(random: Random(42), dropCount: 2);
+      rain.resize(const Size(120, 120));
+      rain.drops[0].x = 60;
+      rain.drops[0].y = 70;
+      rain.drops[1].x = 10;
+      rain.drops[1].y = 70;
+      final recorder = ui.PictureRecorder();
+      RainPainter(
+        rain,
+        obstacleBounds: () => const Rect.fromLTWH(30, 30, 60, 60),
+      ).paint(Canvas(recorder), const Size(120, 120));
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(120, 120);
+      final pixels = (await image.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      ))!;
+      var outsidePixels = 0;
+      for (var y = 40; y < 80; y++) {
+        for (var x = 0; x < 80; x++) {
+          final alpha = pixels.getUint8((y * 120 + x) * 4 + 3);
+          if (x >= 45 && x <= 75 && y >= 45 && y <= 75) {
+            expect(
+              alpha,
+              0,
+              reason: 'airborne rain inside the button at $x,$y',
+            );
+          }
+          if (x < 25 && alpha > 0) outsidePixels++;
+        }
+      }
+      expect(outsidePixels, greaterThan(12));
+      image.dispose();
+      picture.dispose();
+      rain.dispose();
+    },
+  );
 
   group('RainAnimation widget', () {
     Future<void> pumpRain(

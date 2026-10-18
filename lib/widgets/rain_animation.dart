@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 class RainAnimation extends StatefulWidget {
-  const RainAnimation({super.key});
+  const RainAnimation({super.key, this.obstacleKey});
+
+  /// The solid button blocks airborne rain; its surface paints runoff instead.
+  final GlobalKey? obstacleKey;
 
   @override
   State<RainAnimation> createState() => _RainAnimationState();
@@ -16,6 +19,21 @@ class _RainAnimationState extends State<RainAnimation>
   late final RainSimulation _rain;
   late final Ticker _ticker;
   Duration? _lastFrame;
+  final GlobalKey _canvasKey = GlobalKey();
+
+  Rect? _obstacleBounds() {
+    final button = widget.obstacleKey?.currentContext?.findRenderObject();
+    final surface = _canvasKey.currentContext?.findRenderObject();
+    if (button is! RenderBox ||
+        surface is! RenderBox ||
+        !button.attached ||
+        !surface.attached ||
+        !button.hasSize) {
+      return null;
+    }
+    return surface.globalToLocal(button.localToGlobal(Offset.zero)) &
+        button.size;
+  }
 
   @override
   void initState() {
@@ -59,7 +77,11 @@ class _RainAnimationState extends State<RainAnimation>
       child: LayoutBuilder(
         builder: (context, constraints) {
           _rain.resize(constraints.biggest);
-          return CustomPaint(painter: RainPainter(_rain), size: Size.infinite);
+          return CustomPaint(
+            key: _canvasKey,
+            painter: RainPainter(_rain, obstacleBounds: _obstacleBounds),
+            size: Size.infinite,
+          );
         },
       ),
     );
@@ -69,16 +91,16 @@ class _RainAnimationState extends State<RainAnimation>
 /// Positions are integrated in logical pixels/second, not a repeating animation
 /// fraction. A completed controller cycle can therefore never rewind the rain.
 class RainSimulation extends ChangeNotifier {
-  RainSimulation({Random? random, int dropCount = 96})
+  RainSimulation({Random? random, int dropCount = 112})
     : _random = random ?? Random() {
     drops = List.generate(dropCount, (_) {
       final depth = _random.nextDouble();
       return RainDrop(
         depth: depth,
         speed: 310 + depth * 510 + _random.nextDouble() * 90,
-        length: 5 + depth * 19 + _random.nextDouble() * 5,
-        thickness: 0.45 + depth * 1.05,
-        opacity: 0.10 + depth * 0.26,
+        length: 9 + depth * 21 + _random.nextDouble() * 5,
+        thickness: 0.8 + depth * 1.2,
+        opacity: 0.28 + depth * 0.38,
         phase: _random.nextDouble() * pi * 2,
       );
     });
@@ -175,9 +197,10 @@ class RainDrop {
 }
 
 class RainPainter extends CustomPainter {
-  RainPainter(this.rain) : super(repaint: rain);
+  RainPainter(this.rain, {this.obstacleBounds}) : super(repaint: rain);
 
   final RainSimulation rain;
+  final Rect? Function()? obstacleBounds;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -191,7 +214,22 @@ class RainPainter extends CustomPainter {
           ..color = Colors.blueGrey.shade100.withValues(alpha: rain.lightning),
       );
     }
+    final obstacle = obstacleBounds?.call();
+    if (obstacle != null && !obstacle.isEmpty) {
+      canvas.clipPath(
+        Path()
+          ..fillType = PathFillType.evenOdd
+          ..addRect(Offset.zero & size)
+          ..addOval(obstacle),
+      );
+    }
     final paint = Paint()..isAntiAlias = true;
+    // A cool dark rim keeps the water visible over the disconnected button's
+    // white surface; the bright core remains visible on the black backdrop.
+    final rimPaint = Paint()
+      ..isAntiAlias = true
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8;
     for (final drop in rain.drops) {
       final head = Offset(drop.x, drop.y);
       final velocity = Offset(drop.velocityX, drop.speed);
@@ -223,13 +261,18 @@ class RainPainter extends CustomPainter {
           tail.dy,
         )
         ..close();
+      rimPaint.shader = ui.Gradient.linear(tail, head, [
+        const Color(0xFF164E70).withValues(alpha: 0),
+        const Color(0xFF164E70).withValues(alpha: drop.opacity * 0.8),
+      ]);
+      canvas.drawPath(path, rimPaint);
       paint.shader = ui.Gradient.linear(
         tail,
         head,
         [
           const Color(0xFF8CAFC4).withValues(alpha: 0),
-          const Color(0xFF9EBACB).withValues(alpha: drop.opacity * 0.55),
-          const Color(0xFFD6E5ED).withValues(alpha: drop.opacity),
+          const Color(0xFFADD8F0).withValues(alpha: drop.opacity * 0.75),
+          const Color(0xFFE0F4FF).withValues(alpha: drop.opacity),
         ],
         [0, 0.65, 1],
       );
@@ -245,5 +288,5 @@ class RainPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant RainPainter oldDelegate) =>
-      oldDelegate.rain != rain;
+      oldDelegate.rain != rain || oldDelegate.obstacleBounds != obstacleBounds;
 }
