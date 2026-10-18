@@ -608,7 +608,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               ),
                                               const SizedBox(width: 12),
                                               Text(
-                                                'Protocol: ${vpnProvider.selectedProtocol == "mix" ? "Mix · میکس" : vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : vpnProvider.selectedProtocol == "proxy" ? "Proxy" : vpnProvider.selectedProtocol == "psiphon" ? "Psiphon" : vpnProvider.selectedProtocol == "warp" ? "WARP" : "DNS changer"}',
+                                                'Protocol: ${vpnProvider.selectedProtocol == "mix" ? "Mix" : vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : vpnProvider.selectedProtocol == "proxy" ? "Proxy" : vpnProvider.selectedProtocol == "psiphon" ? "Psiphon" : vpnProvider.selectedProtocol == "warp" ? "WARP" : "DNS changer"}',
                                                 style: TextStyle(
                                                   fontSize: 14,
                                                   color: isDark ? Colors.white : Colors.black87,
@@ -908,7 +908,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           width: double.infinity,
                           child: OutlinedButton.icon(
                             icon: const Icon(Icons.account_tree),
-                            label: const Text('استراتژی · Strategy'),
+                            label: const Text('Strategy'),
                             onPressed: () => Navigator.push(context,
                               MaterialPageRoute(builder: (_) => const MixStrategiesScreen())),
                             style: OutlinedButton.styleFrom(

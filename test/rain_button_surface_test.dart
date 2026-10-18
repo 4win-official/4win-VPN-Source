@@ -169,4 +169,62 @@ void main() {
     expect(selectedSurface, isNot(earlySurface));
     expect(selectedBelow, greaterThan(0));
   });
+
+  test('runoff stays on the rim and clear of the power glyph', () {
+    for (var i = 0; i < RainButtonPainter.streamCount; i++) {
+      for (var step = 0; step < 48; step++) {
+        final sample = RainButtonPainter.sampleRunoff(i, step / 100);
+        expect(
+          (sample.position - const Offset(100, 100)).distance,
+          closeTo(96, 0.4),
+        );
+        expect(sample.detached, isFalse);
+      }
+    }
+  });
+
+  test(
+    'water gathers, pinches off continuously, and accelerates downwards',
+    () {
+      for (var i = 0; i < RainButtonPainter.streamCount; i++) {
+        final start = RainButtonPainter.sampleRunoff(i, 0.48);
+        final middle = RainButtonPainter.sampleRunoff(i, 0.63);
+        final before = RainButtonPainter.sampleRunoff(i, 0.78 - 1e-7);
+        final detached = RainButtonPainter.sampleRunoff(i, 0.78);
+        final falling = RainButtonPainter.sampleRunoff(i, 0.83);
+        final later = RainButtonPainter.sampleRunoff(i, 0.88);
+        final end = RainButtonPainter.sampleRunoff(i, 1);
+        expect(middle.radius, greaterThan(start.radius));
+        expect(before.radius, greaterThan(middle.radius));
+        expect(middle.neck, greaterThan(before.neck));
+        expect(before.detached, isFalse);
+        expect(detached.detached, isTrue);
+        expect((detached.position - before.position).distance, lessThan(0.001));
+        expect(detached.stretch, closeTo(before.stretch, 0.001));
+        expect(
+          later.position.dy - falling.position.dy,
+          greaterThan(falling.position.dy - detached.position.dy),
+        );
+        expect(later.stretch, lessThan(detached.stretch));
+        expect(end.opacity, closeTo(0, 1e-12));
+        expect(end.position.dy, greaterThan(200));
+      }
+    },
+  );
+
+  testWidgets('enabled water does not consume tap or long press', (
+    tester,
+  ) async {
+    var taps = 0;
+    var holds = 0;
+    await tester.pumpWidget(
+      host(onTap: () => taps++, onLongPress: () => holds++),
+    );
+    final target = find.byKey(const ValueKey('gesture'));
+    await tester.tap(target);
+    await tester.longPress(target);
+    expect(taps, 1);
+    expect(holds, 1);
+    expect(tester.takeException(), isNull);
+  });
 }

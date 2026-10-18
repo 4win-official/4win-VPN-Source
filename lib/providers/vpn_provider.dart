@@ -803,7 +803,7 @@ class VpnProvider with ChangeNotifier {
       // حذف خطا - فقط Connecting نمایش داده شود
       _errorMessage = null;
       if (kDebugMode) {
-        debugPrint('⚠️ خطا در بارگیری سرورها - دوباره تلاش می‌شود');
+        debugPrint('⚠️ Failed to load servers; retrying.');
       }
     } finally {
       _isLoadingServers = false;
@@ -859,7 +859,7 @@ class VpnProvider with ChangeNotifier {
       // حذف خطا - فقط Connecting نمایش داده شود
       _errorMessage = null;
       if (kDebugMode) {
-        debugPrint('⚠️ خطا در تست سرورها - دوباره تلاش می‌شود');
+        debugPrint('⚠️ Failed to test servers; retrying.');
       }
       // حتی با خطا، اگه سرور داریم ادامه بده
       if (_servers.isNotEmpty) {

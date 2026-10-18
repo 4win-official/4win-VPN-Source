@@ -3,8 +3,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-/// Button-local water: incoming drops hit its upper edge, run down its curved
-/// face, then detach at the lower edge. The child retains layout and gestures.
+/// Clear water clings to the rim, gathers under it and falls under gravity.
+/// The child retains its original layout, semantics and gestures.
 class RainButtonSurface extends StatefulWidget {
   const RainButtonSurface({
     super.key,
@@ -29,7 +29,7 @@ class _RainButtonSurfaceState extends State<RainButtonSurface>
     super.initState();
     _water = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 3200),
+      duration: const Duration(seconds: 12),
     );
   }
 
@@ -70,8 +70,7 @@ class _RainButtonSurfaceState extends State<RainButtonSurface>
       clipBehavior: Clip.none,
       children: [
         widget.child,
-        // Give airborne splashes and detached drops real paint bounds, while
-        // keeping the button's layout and hit target exactly the same size.
+        // Real paint bounds for detached drops, without enlarging the hit area.
         Positioned(
           top: -24,
           bottom: -48,
@@ -96,6 +95,52 @@ class _RainButtonSurfaceState extends State<RainButtonSurface>
   }
 }
 
+/// One small stream follows the circumference, not a stripe across the glyph.
+/// Integer cycle counts make every stream continuous at the controller wrap.
+class _RimStream {
+  _RimStream(this.start, this.end, this.cycles, this.offset, this.radius)
+    : track =
+          (Path()..addArc(
+                const Rect.fromLTWH(4, 4, 192, 192),
+                start,
+                end - start,
+              ))
+              .computeMetrics()
+              .single;
+
+  final double start;
+  final double end;
+  final int cycles;
+  final double offset;
+  final double radius;
+  final ui.PathMetric track;
+
+  Offset get lip => track.getTangentForOffset(track.length)!.position;
+}
+
+/// Exposed as geometry so detachment and gravity can be regression-tested
+/// without relying on device-specific antialiasing in a golden image.
+@immutable
+class RainRunoffSample {
+  const RainRunoffSample({
+    required this.phase,
+    required this.position,
+    required this.radius,
+    required this.stretch,
+    required this.opacity,
+    required this.detached,
+    required this.neck,
+  });
+
+  final double phase;
+  final Offset position;
+  final double radius;
+  final double stretch;
+  final double opacity;
+  final bool detached;
+  final double neck;
+}
+
 class RainButtonPainter extends CustomPainter {
   RainButtonPainter(this.progress, {this.topInset = 0, this.bottomInset = 0})
     : super(repaint: progress);
@@ -104,145 +149,263 @@ class RainButtonPainter extends CustomPainter {
   final double topInset;
   final double bottomInset;
 
-  // Geometry is cached, not rebuilt on every frame. Each path starts on the
-  // upper circumference and finishes exactly on the lower circumference.
-  static final List<ui.PathMetric> _tracks = [
-    for (final x in [-0.82, -0.58, -0.31, 0.12, 0.4, 0.67, 0.86])
-      _track(x).computeMetrics().single,
+  static final _streams = [
+    _RimStream(-2.27, -4.48, 3, 0.03, 2.8),
+    _RimStream(-0.91, 1.39, 2, 0.43, 3.4),
+    _RimStream(-2.85, -4.20, 4, 0.67, 2.1),
+    _RimStream(-0.30, 1.13, 3, 0.27, 2.5),
+    _RimStream(1.85, 1.59, 2, 0.81, 3.1),
   ];
 
-  static Path _track(double x) {
-    final endX = x * 0.68;
-    final side = x.sign;
-    return Path()
-      ..moveTo(100 + x * 98, 100 - math.sqrt(1 - x * x) * 98)
-      ..cubicTo(
-        100 + (x + side * 0.19) * 98,
-        83,
-        100 + (endX + side * 0.26) * 98,
-        151,
-        100 + endX * 98,
-        100 + math.sqrt(1 - endX * endX) * 98,
+  @visibleForTesting
+  static int get streamCount => _streams.length;
+
+  // Fixed seeds: no random allocations or jittering positions during paint.
+  static const _dew = <(double, double, double)>[
+    (38, 49, 1.35),
+    (63, 23, 1.05),
+    (94, 12, 1.15),
+    (132, 24, 1.6),
+    (161, 48, 1.1),
+    (17, 83, 1.45),
+    (182, 91, 1.2),
+    (25, 126, 1.0),
+    (172, 140, 1.5),
+    (49, 165, 1.1),
+    (145, 169, 1.25),
+    (87, 183, 0.9),
+  ];
+
+  @visibleForTesting
+  static RainRunoffSample sampleRunoff(int index, double phase) {
+    final stream = _streams[index];
+    final p = phase.clamp(0.0, 1.0);
+    if (p < 0.48) {
+      final slide = p / 0.48;
+      // Slow adhesion at first, then a faster slip around the curved edge.
+      final distance = stream.track.length * math.pow(slide, 1.7);
+      return RainRunoffSample(
+        phase: p,
+        position: stream.track
+            .getTangentForOffset(distance.toDouble())!
+            .position,
+        radius: stream.radius * (0.38 + 0.22 * slide),
+        stretch: 1.15 - 0.15 * slide,
+        opacity: (slide / 0.12).clamp(0.0, 0.65),
+        detached: false,
+        neck: 0,
       );
+    }
+    if (p < 0.78) {
+      final gather = (p - 0.48) / 0.30;
+      final radius = stream.radius * (0.60 + 0.40 * gather);
+      // Surface tension holds the drop until its neck becomes too thin.
+      final stretch = 1.0 + 0.50 * gather * gather;
+      return RainRunoffSample(
+        phase: p,
+        position: stream.lip + Offset(0, gather * radius * 1.5),
+        radius: radius,
+        stretch: stretch,
+        opacity: 0.65,
+        detached: false,
+        neck: math.sin(gather * math.pi) * radius * 0.48,
+      );
+    }
+    final fall = (p - 0.78) / 0.22;
+    return RainRunoffSample(
+      phase: p,
+      position:
+          stream.lip +
+          Offset(
+            (index.isEven ? -1 : 1) * 1.7 * fall,
+            stream.radius * 1.5 + 4 * fall + 40 * fall * fall,
+          ),
+      radius: stream.radius,
+      // A falling water drop rounds off after the initial neck recoil.
+      stretch: 1.0 + 0.50 * math.exp(-fall * 7),
+      opacity: 0.65 * (1 - ((fall - 0.55) / 0.45).clamp(0.0, 1.0)),
+      detached: true,
+      neck: 0,
+    );
   }
 
-  void _bead(
+  /// A transparent lens: subdued refracted shadow, clear centre and a narrow
+  /// off-axis glint. No solid blue fill, glow or cartoon teardrop silhouette.
+  void _lens(
     Canvas canvas,
     Offset point,
     double radius,
     double stretch, {
     double opacity = 1,
   }) {
+    if (opacity <= 0 || radius <= 0) return;
     final rect = Rect.fromCenter(
       center: point,
       width: radius * 2,
       height: radius * 2 * stretch,
     );
     canvas.drawOval(
-      rect.inflate(0.55),
-      Paint()..color = Color.fromRGBO(22, 78, 112, 0.65 * opacity),
+      rect.shift(const Offset(0.25, 0.6)).inflate(0.3),
+      Paint()..color = Color.fromRGBO(8, 29, 40, 0.22 * opacity),
     );
     canvas.drawOval(
       rect,
-      Paint()..color = Color.fromRGBO(157, 223, 255, 0.72 * opacity),
+      Paint()
+        ..shader = ui.Gradient.radial(
+          point + Offset(-radius * 0.35, -radius * 0.45),
+          radius * 2.2,
+          [
+            Color.fromRGBO(239, 252, 255, 0.35 * opacity),
+            Color.fromRGBO(200, 232, 240, 0.035 * opacity),
+            Color.fromRGBO(22, 62, 76, 0.34 * opacity),
+            Color.fromRGBO(222, 248, 255, 0.62 * opacity),
+          ],
+          const [0, 0.40, 0.79, 1],
+        ),
     );
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: point + Offset(-radius * 0.25, -radius * 0.35),
-        width: radius * 0.75,
-        height: radius * stretch,
-      ),
-      Paint()..color = Color.fromRGBO(238, 251, 255, 0.9 * opacity),
+    canvas.drawArc(
+      rect.deflate(radius * 0.20),
+      math.pi * 1.03,
+      math.pi * 0.46,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 0.65
+        ..color = Color.fromRGBO(246, 254, 255, 0.85 * opacity),
     );
+    canvas.drawArc(
+      rect.deflate(0.15),
+      0.14,
+      0.78,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.4
+        ..color = Color.fromRGBO(211, 240, 248, 0.40 * opacity),
+    );
+  }
+
+  void _drawStream(Canvas canvas, int index, double phase) {
+    final stream = _streams[index];
+    final drop = sampleRunoff(index, phase);
+    if (phase < 0.48) {
+      final distance = stream.track.length * math.pow(phase / 0.48, 1.7);
+      final trail = stream.track.extractPath(
+        math.max(0, distance - 9).toDouble(),
+        distance.toDouble(),
+      );
+      canvas.drawPath(
+        trail,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.65
+          ..strokeCap = StrokeCap.round
+          ..color = Color.fromRGBO(225, 248, 255, 0.25 * drop.opacity),
+      );
+    } else if (!drop.detached && drop.neck > 0.02) {
+      final lip = stream.lip;
+      final shoulderY = drop.position.dy - drop.radius * 0.45;
+      final neck = Path()
+        ..moveTo(lip.dx - drop.neck, lip.dy - 0.5)
+        ..cubicTo(
+          lip.dx - drop.neck * 0.45,
+          shoulderY,
+          drop.position.dx - drop.radius * 0.7,
+          shoulderY,
+          drop.position.dx - drop.radius * 0.7,
+          drop.position.dy,
+        )
+        ..lineTo(drop.position.dx + drop.radius * 0.7, drop.position.dy)
+        ..cubicTo(
+          drop.position.dx + drop.radius * 0.7,
+          shoulderY,
+          lip.dx + drop.neck * 0.45,
+          shoulderY,
+          lip.dx + drop.neck,
+          lip.dy - 0.5,
+        )
+        ..close();
+      canvas.drawPath(
+        neck,
+        Paint()..color = const Color.fromRGBO(216, 242, 250, 0.20),
+      );
+    }
+    _lens(
+      canvas,
+      drop.position,
+      drop.radius,
+      drop.stretch,
+      opacity: drop.opacity,
+    );
+    if (drop.detached) {
+      // A shrinking meniscus remains on the rim after the main bead releases.
+      final recoil = (1 - (phase - 0.78) / 0.10).clamp(0.0, 1.0);
+      _lens(
+        canvas,
+        stream.lip,
+        stream.radius * 0.52 * recoil,
+        0.65,
+        opacity: 0.45 * recoil,
+      );
+    }
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (size.isEmpty || size.height <= topInset + bottomInset) return;
+    if (size.isEmpty ||
+        size.width <= 0 ||
+        size.height <= topInset + bottomInset) {
+      return;
+    }
     canvas.save();
     canvas.translate(0, topInset);
     canvas.scale(
       size.width / 200,
       (size.height - topInset - bottomInset) / 200,
     );
-    // A restrained wet highlight, not an opaque layer over the power glyph.
-    canvas.drawArc(
-      const Rect.fromLTWH(3, 3, 194, 194),
-      math.pi * 1.13,
-      math.pi * 0.74,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = const Color(0x709EDFFF),
-    );
-    for (var i = 0; i < _tracks.length; i++) {
-      final phase = (progress.value + i * 0.137) % 1;
-      final track = _tracks[i];
-      final impact = track.getTangentForOffset(0)!.position;
-      final radius = 1.6 + (i % 3) * 0.35;
 
-      if (phase < 0.1) {
-        // The incoming bead meets the upper edge before turning into runoff.
-        final approach = phase / 0.1;
-        _bead(
-          canvas,
-          impact - Offset(2 * (1 - approach), 20 * (1 - approach)),
-          radius,
-          1.8,
-        );
-      }
-      if (phase >= 0.1 && phase < 0.23) {
-        final splash = (phase - 0.1) / 0.13;
-        final paint = Paint()
-          ..color = Color.fromRGBO(194, 235, 255, (1 - splash) * 0.8)
-          ..strokeWidth = 1.2
-          ..strokeCap = StrokeCap.round;
-        for (final side in [-1.0, 1.0]) {
-          final tip =
-              impact +
-              Offset(side * (3 + splash * 8), -math.sin(splash * math.pi) * 7);
-          canvas.drawLine(tip, tip + Offset(side * 2, -2), paint);
-        }
-      }
-      if (phase >= 0.1 && phase < 0.8) {
-        final slide = (phase - 0.1) / 0.7;
-        // Water accelerates down the face, with a short trailing rivulet.
-        final distance = track.length * math.pow(slide, 1.35).toDouble();
-        final trail = track.extractPath(math.max(0, distance - 24), distance);
-        canvas.drawPath(
-          trail,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeCap = StrokeCap.round
-            ..strokeWidth = 2.8
-            ..color = const Color(0x70164E70),
-        );
-        canvas.drawPath(
-          trail,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeCap = StrokeCap.round
-            ..strokeWidth = 1.25
-            ..color = const Color(0xA6C7EDFF),
-        );
-        _bead(
-          canvas,
-          track.getTangentForOffset(distance)!.position,
-          radius,
-          1.35,
-        );
-      } else if (phase >= 0.8) {
-        final fall = (phase - 0.8) / 0.2;
-        final edge = track.getTangentForOffset(track.length)!.position;
-        _bead(
-          canvas,
-          edge + Offset(fall * 3, 44 * fall * fall),
-          radius,
-          1.4 + fall,
-          opacity: 1 - fall,
-        );
-      }
+    // Discontinuous hairline reflections read as a wet surface, not a neon ring.
+    final rim = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 0.75;
+    for (final arc in <(double, double, double)>[
+      (-2.52, 0.46, 0.30),
+      (-1.82, 0.29, 0.18),
+      (-1.22, 0.34, 0.24),
+      (0.32, 0.26, 0.15),
+      (1.29, 0.42, 0.25),
+      (2.47, 0.23, 0.16),
+    ]) {
+      canvas.drawArc(
+        const Rect.fromLTWH(3.4, 3.4, 193.2, 193.2),
+        arc.$1,
+        arc.$2,
+        false,
+        rim..color = Color.fromRGBO(232, 250, 255, arc.$3),
+      );
+    }
+    for (var i = 0; i < _dew.length; i++) {
+      final bead = _dew[i];
+      // Barely perceptible changing reflections, never blinking water beads.
+      final reflection =
+          0.48 + 0.08 * math.sin(progress.value * math.pi * 2 + i * 2.4);
+      _lens(
+        canvas,
+        Offset(bead.$1, bead.$2),
+        bead.$3,
+        1.08,
+        opacity: reflection,
+      );
+    }
+    for (var i = 0; i < _streams.length; i++) {
+      final stream = _streams[i];
+      _drawStream(
+        canvas,
+        i,
+        (progress.value * stream.cycles + stream.offset) % 1,
+      );
     }
     canvas.restore();
   }

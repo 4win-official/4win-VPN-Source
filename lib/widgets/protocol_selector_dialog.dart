@@ -245,7 +245,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'mix',
-                                  title: 'Mix · میکس',
+                                  title: 'Mix',
                                   subtitle: 'Ordered, real multi-hop strategies',
                                   icon: Icons.account_tree,
                                   accent: Colors.cyan,
