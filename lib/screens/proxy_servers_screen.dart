@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
+import '../widgets/four_win_loader.dart';
 import '../models/proxy_server.dart';
 import '../services/proxy_service.dart';
 
@@ -304,7 +305,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
           Consumer<VpnProvider>(
             builder: (context, p, _) => IconButton(
               icon: p.proxyRefreshing
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(width: 18, height: 18, child: FourWinLoader(strokeWidth: 2))
                   : const Icon(Icons.cloud_download_outlined),
               tooltip: 'Update subscriptions',
               onPressed: p.proxyRefreshing ? null : _refreshAll,
@@ -313,7 +314,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
           Consumer<VpnProvider>(
             builder: (context, p, _) => IconButton(
               icon: p.proxyGroupTesting
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(width: 18, height: 18, child: FourWinLoader(strokeWidth: 2))
                   : const Icon(Icons.speed),
               tooltip: 'Test all',
               onPressed: p.proxyGroupTesting ? null : () {
@@ -425,7 +426,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(icon: Icon(Icons.copy, color: accent, size: 18), tooltip: 'Copy link', onPressed: () async { await Clipboard.setData(ClipboardData(text: s.exportLink)); _toast('Link copied'); }),
-          IconButton(icon: testing ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.network_ping, color: accent, size: 20), tooltip: 'Ping test', onPressed: testing ? null : () => provider.pingProxyServer(s)),
+          IconButton(icon: testing ? const SizedBox(width: 18, height: 18, child: FourWinLoader(strokeWidth: 2)) : Icon(Icons.network_ping, color: accent, size: 20), tooltip: 'Ping test', onPressed: testing ? null : () => provider.pingProxyServer(s)),
           IconButton(icon: Icon(Icons.public, color: accent, size: 20), tooltip: 'Open-site test', onPressed: testing ? null : () => provider.openSiteTestProxyServer(s)),
           Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked, color: selected ? accent : Colors.grey),
           if (s.group.isEmpty || s.group == ProxyServerService.userLinksGroup)

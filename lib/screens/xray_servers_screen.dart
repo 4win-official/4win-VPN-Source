@@ -6,6 +6,7 @@ import '../providers/vpn_provider.dart';
 import '../models/xray_server.dart';
 import '../services/xray_service.dart';
 import '../widgets/animated_server_group.dart';
+import '../widgets/four_win_loader.dart';
 
 /// Server list screen for the Xray protocol (real Xray core / v2rayNG).
 /// Servers are shown in collapsible groups: the locked free subscription
@@ -509,7 +510,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: FourWinLoader(strokeWidth: 2),
                     )
                   : const Icon(Icons.cloud_download_outlined),
               tooltip: 'Update free servers',
@@ -522,7 +523,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: FourWinLoader(strokeWidth: 2),
                     )
                   : const Icon(Icons.speed),
               tooltip: 'Test all groups',
@@ -770,7 +771,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                               SizedBox(
                                 width: 12,
                                 height: 12,
-                                child: CircularProgressIndicator(
+                                child: FourWinLoader(
                                   strokeWidth: 1.8,
                                   color: accent,
                                 ),
@@ -862,7 +863,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: FourWinLoader(strokeWidth: 2),
                           )
                         : const Icon(Icons.speed),
                     title: const Text('URL ping all'),
@@ -877,7 +878,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: FourWinLoader(strokeWidth: 2),
                           )
                         : const Icon(Icons.cable),
                     title: const Text('TCP ping all'),
@@ -1059,7 +1060,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: FourWinLoader(strokeWidth: 2),
                         )
                       : const Icon(Icons.speed),
                   title: const Text('URL ping'),
@@ -1074,7 +1075,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: FourWinLoader(strokeWidth: 2),
                         )
                       : const Icon(Icons.cable),
                   title: const Text('TCP ping'),
@@ -1129,7 +1130,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           const SizedBox(
             width: 12,
             height: 12,
-            child: CircularProgressIndicator(strokeWidth: 1.8),
+            child: FourWinLoader(strokeWidth: 1.8),
           ),
           const SizedBox(width: 5),
           Text(

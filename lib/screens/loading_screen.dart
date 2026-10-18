@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../providers/vpn_provider.dart';
+import '../widgets/four_win_loader.dart';
 import '../main.dart' show markHomeReady;
 import 'home_screen.dart';
 
@@ -134,17 +135,7 @@ class _LoadingScreenState extends State<LoadingScreen> {
                   const SizedBox(height: 48),
                   
                   // Loading Indicator
-                  SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        isDark ? Colors.white70 : Colors.black87,
-                      ),
-                      strokeWidth: 3,
-                    ),
-                  ),
-                  
+                  const FourWinLoader(size: 52),
                   const SizedBox(height: 24),
                   
                   // Loading Text

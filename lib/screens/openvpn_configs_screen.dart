@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:async';
 import 'dart:io';
 import '../providers/vpn_provider.dart';
+import '../widgets/four_win_loader.dart';
 import '../models/openvpn_config.dart';
 import '../services/openvpn_service.dart';
 
@@ -509,7 +510,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(),
+            FourWinLoader(),
             SizedBox(height: 16),
             Text('Testing connection...'),
           ],
@@ -752,7 +753,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: FourWinLoader())
           : _configs.isEmpty
               ? Center(
                   child: Column(

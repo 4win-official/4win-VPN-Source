@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/vpn_provider.dart';
+import '../widgets/four_win_loader.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/snow_animation.dart';
 import '../widgets/pixel_effect.dart';
@@ -351,9 +352,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ? SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(
+                        child: FourWinLoader(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(iconColor),
+                          color: iconColor,
                         ),
                       )
                     : Icon(Icons.refresh, color: iconColor),
@@ -506,9 +507,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       return Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.white70 : Colors.black87),
-                          ),
+                          const FourWinLoader(),
                           const SizedBox(height: 24),
                           Text(
                             'Loading servers...',
@@ -783,10 +782,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ),
                             child: Center(
                               child: provider.isConnecting
-                                  ? CircularProgressIndicator(
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        isDark ? Colors.black87 : Colors.white
-                                      ),
+                                  ? FourWinLoader(
+                                      color: isDark ? Colors.black87 : Colors.white,
                                       strokeWidth: 3,
                                     )
                                   : Icon(
@@ -1311,10 +1308,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             SizedBox(
               width: 14,
               height: 14,
-              child: CircularProgressIndicator(
+              child: FourWinLoader(
                 strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation(
-                    isDark ? const Color(0xFF00FF88) : Colors.blue),
+                color: isDark ? const Color(0xFF00FF88) : Colors.blue,
               ),
             ),
             const SizedBox(width: 6),

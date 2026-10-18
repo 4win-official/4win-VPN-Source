@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/dns_server.dart';
 import '../providers/vpn_provider.dart';
+import '../widgets/four_win_loader.dart';
 
 class DnsServersScreen extends StatefulWidget {
   const DnsServersScreen({super.key});
@@ -185,7 +186,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const CircularProgressIndicator(),
+                  const FourWinLoader(),
                   const SizedBox(height: 16),
                   Text(
                     'Testing DNS servers...',

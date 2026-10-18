@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
+import '../widgets/four_win_loader.dart';
 
 class ServersScreen extends StatefulWidget {
   const ServersScreen({super.key});
@@ -39,9 +40,9 @@ class _ServersScreenState extends State<ServersScreen> {
                 child: SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(
+                  child: FourWinLoader(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.black54),
+                    color: Colors.black54,
                   ),
                 ),
               ),
@@ -58,8 +59,8 @@ class _ServersScreenState extends State<ServersScreen> {
         builder: (context, provider, _) {
           if (provider.isLoadingServers) {
             return const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.black87),
+              child: FourWinLoader(
+                color: Colors.black87,
               ),
             );
           }

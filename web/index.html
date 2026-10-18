@@ -31,8 +31,113 @@
 
   <title>4win VPN</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    #fourwin-bootstrap-loader {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      display: grid;
+      place-items: center;
+      background: #f5fbf8;
+      color: #143b32;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      pointer-events: none;
+    }
+
+    #fourwin-bootstrap-loader .fourwin-loader-content {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+    }
+
+    #fourwin-bootstrap-loader svg {
+      width: 52px;
+      height: 52px;
+      overflow: visible;
+    }
+
+    #fourwin-bootstrap-loader .fourwin-shield {
+      fill: #168653;
+      opacity: 0.11;
+      stroke: #078799;
+      stroke-width: 2;
+    }
+
+    #fourwin-bootstrap-loader .fourwin-four {
+      fill: none;
+      stroke: url("#fourwin-loader-gradient");
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 7;
+    }
+
+    #fourwin-bootstrap-loader .fourwin-highlight {
+      fill: none;
+      stroke: url("#fourwin-loader-gradient");
+      stroke-linecap: round;
+      stroke-width: 3;
+      stroke-dasharray: 18 82;
+      stroke-dashoffset: 100;
+      animation: fourwin-loader-travel 1.8s linear infinite;
+      opacity: 0.95;
+    }
+
+    #fourwin-bootstrap-loader .fourwin-loader-label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    @keyframes fourwin-loader-travel {
+      to { stroke-dashoffset: 0; }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      #fourwin-bootstrap-loader {
+        background: #0d1b1b;
+        color: #d8f8ea;
+      }
+
+      #fourwin-bootstrap-loader .fourwin-shield {
+        fill: #69E69B;
+        opacity: 0.14;
+        stroke: #22CED0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #fourwin-bootstrap-loader .fourwin-highlight {
+        animation: none;
+        stroke-dashoffset: 82;
+      }
+    }
+  </style>
 </head>
 <body>
+  <div id="fourwin-bootstrap-loader" role="status" aria-label="Loading 4win VPN">
+    <div class="fourwin-loader-content">
+      <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="fourwin-loader-gradient" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stop-color="#168653" />
+            <stop offset="55%" stop-color="#69E69B" />
+            <stop offset="100%" stop-color="#22CED0" />
+          </linearGradient>
+        </defs>
+        <path class="fourwin-shield" d="M50 8 C61 17 75 21 88 22 L88 49 C88 69 73 84 50 94 C27 84 12 69 12 49 L12 22 C25 21 39 17 50 8 Z" />
+        <path class="fourwin-highlight" pathLength="100" d="M50 8 C61 17 75 21 88 22 L88 49 C88 69 73 84 50 94 C27 84 12 69 12 49 L12 22 C25 21 39 17 50 8 Z" />
+        <path class="fourwin-four" d="M56 29 L33 57 L66 57 M56 29 L56 76" />
+      </svg>
+      <span class="fourwin-loader-label">4win VPN</span>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function removeFourwinLoader() {
+      var loader = document.getElementById('fourwin-bootstrap-loader');
+      if (loader) loader.remove();
+      window.removeEventListener('flutter-first-frame', removeFourwinLoader);
+    }, { once: true });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

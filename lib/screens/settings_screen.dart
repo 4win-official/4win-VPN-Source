@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
+import '../widgets/four_win_loader.dart';
 import '../models/dns_server.dart';
 import '../services/psiphon_service.dart';
 import '../services/update_service.dart';
@@ -2100,10 +2101,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(
+                                  child: FourWinLoader(
                                     strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.black),
+                                    color: Colors.black,
                                   ),
                                 )
                               : const Icon(Icons.system_update),
@@ -2339,7 +2339,7 @@ class _PsiphonServerCountCardState extends State<_PsiphonServerCountCard> {
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: FourWinLoader(strokeWidth: 2),
                       )
                     : const Icon(Icons.refresh, size: 20),
                 color: isDark ? Colors.white70 : Colors.black54,

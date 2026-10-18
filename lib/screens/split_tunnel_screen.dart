@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/four_win_loader.dart';
 
 /// Split Tunneling: choose which apps go through the VPN (include mode) or which
 /// apps bypass it (exclude mode). The selection + mode are persisted via
@@ -73,7 +74,7 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Split Tunneling')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: FourWinLoader())
           : Column(
               children: [
                 Padding(
