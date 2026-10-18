@@ -1,8 +1,8 @@
 // Protocol order: Xray, Psiphon, WARP, OpenVPN, SSTP, DNS changer, Proxy, Slow DNS.
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
+import 'protocol_glass_surface.dart';
 import '../screens/settings_screen.dart';
 import '../screens/mix_strategies_screen.dart';
 
@@ -11,9 +11,10 @@ class ProtocolSelectorDialog extends StatelessWidget {
 
   void _openProtocolSettings(BuildContext context, String protocol) {
     if (protocol == 'mix') {
-      Navigator.push(context, MaterialPageRoute(
-        builder: (_) => const MixStrategiesScreen(),
-      ));
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const MixStrategiesScreen()),
+      );
       return;
     }
     Navigator.push(
@@ -123,9 +124,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: accent.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: accent.withValues(alpha: 0.6),
-                    ),
+                    border: Border.all(color: accent.withValues(alpha: 0.6)),
                   ),
                   child: Text(
                     badge,
@@ -164,7 +163,14 @@ class ProtocolSelectorDialog extends StatelessWidget {
             Navigator.pop(context);
           },
         ),
-        if (divider) const Divider(height: 20),
+        if (divider)
+          Divider(
+            height: 20,
+            thickness: 0.6,
+            color: (isDark ? Colors.white : Colors.black).withValues(
+              alpha: 0.10,
+            ),
+          ),
       ],
     );
   }
@@ -180,6 +186,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
       builder: (context, vpnProvider, _) {
         return Dialog(
           backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 24,
@@ -187,159 +195,142 @@ class ProtocolSelectorDialog extends StatelessWidget {
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1A1A1A).withValues(alpha: 0.7)
-                        : Colors.white.withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.2)
-                          : Colors.black.withValues(alpha: 0.1),
-                      width: 1.5,
-                    ),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          const SizedBox(width: 34),
-                          Expanded(
-                            child: Text(
-                              'Select Protocol',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: isDark
-                                    ? Colors.white
-                                    : Colors.black87,
-                              ),
-                            ),
-                          ),
-                          _gearButton(
-                            context,
-                            isDark: isDark,
-                            tooltip: 'General settings (all protocols)',
-                            color: isDark ? Colors.white : Colors.black87,
-                            onTap: () => _openGlobalSettings(context),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: Scrollbar(
-                          thumbVisibility: true,
-                          child: SingleChildScrollView(
-                            physics: const BouncingScrollPhysics(),
-                            child: Column(
-                              children: [
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'mix',
-                                  title: 'Mix',
-                                  subtitle: 'Ordered, real multi-hop strategies',
-                                  icon: Icons.account_tree,
-                                  accent: Colors.cyan,
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'xray',
-                                  title: 'Xray',
-                                  subtitle: 'Real Xray core + TLS fragment',
-                                  icon: Icons.rocket_launch,
-                                  accent: Colors.tealAccent.shade700,
-                                  badge: 'Default',
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'psiphon',
-                                  title: 'Psiphon',
-                                  subtitle: 'Automatic server selection',
-                                  icon: Icons.public,
-                                  accent: Colors.deepPurple,
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'warp',
-                                  title: 'WARP',
-                                  subtitle: 'Cloudflare WireGuard tunnel',
-                                  icon: Icons.cloud_done,
-                                  accent: const Color(0xFFF38020),
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'openvpn',
-                                  title: 'OpenVPN',
-                                  subtitle: 'Custom config support',
-                                  icon: Icons.shield,
-                                  accent: Colors.purple,
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'sstp',
-                                  title: 'SSTP',
-                                  subtitle: 'Automatic server selection',
-                                  icon: Icons.vpn_key,
-                                  accent: Colors.green,
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'direct_dns',
-                                  title: 'DNS changer',
-                                  subtitle: 'Connect via DNS servers',
-                                  icon: Icons.dns,
-                                  accent: Colors.blue,
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'proxy',
-                                  title: 'Proxy',
-                                  subtitle: 'SOCKS4 / SOCKS5 / HTTP proxy',
-                                  icon: Icons.swap_horiz,
-                                  accent: Colors.tealAccent.shade700,
-                                ),
-                                _protocolTile(
-                                  context,
-                                  provider: vpnProvider,
-                                  isDark: isDark,
-                                  protocol: 'slowdns',
-                                  title: 'Slow DNS',
-                                  subtitle: 'DNS Tunneling for heavy censorship',
-                                  icon: Icons.cloud_queue,
-                                  accent: Colors.orange,
-                                  divider: false,
-                                  badge: 'Beta',
-                                ),
-                              ],
+            child: ProtocolGlassSurface(
+              isDark: isDark,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const SizedBox(width: 34),
+                        Expanded(
+                          child: Text(
+                            'Select Protocol',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                         ),
+                        _gearButton(
+                          context,
+                          isDark: isDark,
+                          tooltip: 'General settings (all protocols)',
+                          color: isDark ? Colors.white : Colors.black87,
+                          onTap: () => _openGlobalSettings(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: Scrollbar(
+                        thumbVisibility: true,
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          child: Column(
+                            children: [
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'mix',
+                                title: 'Mix',
+                                subtitle: 'Ordered, real multi-hop strategies',
+                                icon: Icons.account_tree,
+                                accent: Colors.cyan,
+                              ),
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'xray',
+                                title: 'Xray',
+                                subtitle: 'Real Xray core + TLS fragment',
+                                icon: Icons.rocket_launch,
+                                accent: Colors.tealAccent.shade700,
+                                badge: 'Default',
+                              ),
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'psiphon',
+                                title: 'Psiphon',
+                                subtitle: 'Automatic server selection',
+                                icon: Icons.public,
+                                accent: Colors.deepPurple,
+                              ),
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'warp',
+                                title: 'WARP',
+                                subtitle: 'Cloudflare WireGuard tunnel',
+                                icon: Icons.cloud_done,
+                                accent: const Color(0xFFF38020),
+                              ),
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'openvpn',
+                                title: 'OpenVPN',
+                                subtitle: 'Custom config support',
+                                icon: Icons.shield,
+                                accent: Colors.purple,
+                              ),
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'sstp',
+                                title: 'SSTP',
+                                subtitle: 'Automatic server selection',
+                                icon: Icons.vpn_key,
+                                accent: Colors.green,
+                              ),
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'direct_dns',
+                                title: 'DNS changer',
+                                subtitle: 'Connect via DNS servers',
+                                icon: Icons.dns,
+                                accent: Colors.blue,
+                              ),
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'proxy',
+                                title: 'Proxy',
+                                subtitle: 'SOCKS4 / SOCKS5 / HTTP proxy',
+                                icon: Icons.swap_horiz,
+                                accent: Colors.tealAccent.shade700,
+                              ),
+                              _protocolTile(
+                                context,
+                                provider: vpnProvider,
+                                isDark: isDark,
+                                protocol: 'slowdns',
+                                title: 'Slow DNS',
+                                subtitle: 'DNS Tunneling for heavy censorship',
+                                icon: Icons.cloud_queue,
+                                accent: Colors.orange,
+                                divider: false,
+                                badge: 'Beta',
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),

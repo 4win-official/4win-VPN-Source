@@ -546,6 +546,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     onTap: () {
                                       showDialog(
                                         context: context,
+                                        // Keep the real backdrop visible through the glass.
+                                        barrierColor: Colors.black.withValues(
+                                          alpha: isDark ? 0.22 : 0.16,
+                                        ),
                                         builder: (context) => const ProtocolSelectorDialog(),
                                       );
                                     },
