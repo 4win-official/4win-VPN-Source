@@ -19,6 +19,7 @@ import libv2ray.Libv2ray
 import org.json.JSONObject
 import java.net.ServerSocket
 import java.util.UUID
+import java.util.LinkedHashMap
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -36,6 +37,7 @@ class MixCoordinatorService : VpnService() {
     private val workers = ConcurrentHashMap<String, Worker>()
     private var router: CoreController? = null
     private var finalCore: CoreController? = null
+    private val resolverCores = LinkedHashMap<Int, CoreController>()
     private var tun: ParcelFileDescriptor? = null
     private var request: Request? = null
     private var receiverRegistered = false
@@ -157,7 +159,7 @@ class MixCoordinatorService : VpnService() {
         val plan = current.plan
         require(plan.getInt("version") == 1) { "Unsupported Mix plan version" }
         val hops = plan.getJSONArray("hops")
-        require(hops.length() in 1..16) { "Mix supports 1 to 16 tunnel stages" }
+        require(hops.length() in 1..50) { "Mix supports 1 to 50 blocks" }
         val heldPorts = ArrayList<ServerSocket>()
         fun reservePort(): Int {
             val socket = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
@@ -166,14 +168,22 @@ class MixCoordinatorService : VpnService() {
         }
         val prefixPorts = List(hops.length()) { reservePort() }
         val workerPorts = HashMap<Int, Int>()
+        val dnsPorts = HashMap<Int, Int>()
+        val rawPrefixPorts = HashMap<Int, Int>()
         var slot = 0
         for (i in 0 until hops.length()) {
-            if (hops.getJSONObject(i).getString("protocol") in MixRouting.nativeProtocols) {
-                workerPorts[i] = reservePort()
-                workers[i.toString()] = Worker(slot++, i)
+            when (hops.getJSONObject(i).getString("protocol")) {
+                in MixRouting.nativeProtocols -> {
+                    workerPorts[i] = reservePort()
+                    workers[i.toString()] = Worker(slot++, i)
+                }
+                "direct_dns" -> {
+                    dnsPorts[i] = reservePort()
+                    if (i > 0) rawPrefixPorts[i - 1] = reservePort()
+                }
             }
         }
-        val routerConfig = try { MixRouting.sidecar(plan, prefixPorts, workerPorts) }
+        val routerConfig = try { MixRouting.sidecar(plan, prefixPorts, workerPorts, dnsPorts, rawPrefixPorts) }
             finally { heldPorts.forEach { runCatching { it.close() } } }
         // Workers and router must bind themselves. Ports are randomized and a
         // stage cannot become ready if its actual bind fails.
@@ -189,8 +199,18 @@ class MixCoordinatorService : VpnService() {
             val hop = hops.getJSONObject(i)
             val protocol = hop.getString("protocol")
             val worker = workers[i.toString()]
+            if (protocol == "direct_dns") {
+                val address = hop.optString("address").trim()
+                val resolver = newController(current)
+                resolverCores[i] = resolver
+                resolver.startLoop(MixRouting.resolver(address, dnsPorts.getValue(i),
+                    if (i == 0) null else rawPrefixPorts.getValue(i - 1)).toString(), -1)
+                continue
+            }
             if (worker == null) {
-                if (hop.getJSONObject("outbound").optString("protocol") == "http") supportsUdp = false
+                if (hop.optString("protocol") == "xray" || hop.optString("protocol") == "proxy") {
+                    if (hop.getJSONObject("outbound").optString("protocol") == "http") supportsUdp = false
+                }
                 continue
             }
             require(i == 0 || supportsUdp || protocol != "warp") {
@@ -211,7 +231,11 @@ class MixCoordinatorService : VpnService() {
         }
         ensureLive(current)
         showNotification("Testing the complete chain")
-        val probe = MixRouting.vpn(plan, prefixPorts.last(), supportsUdp, probe = true)
+        val dnsPrefixPort = (0 until hops.length()).lastOrNull {
+            hops.getJSONObject(it).optString("protocol") == "direct_dns"
+        }?.let { prefixPorts[it] } ?: prefixPorts.last()
+        val probe = MixRouting.vpn(plan, prefixPorts.last(), supportsUdp, probe = true,
+            dnsExitPort = dnsPrefixPort)
         val delay = Libv2ray.measureOutboundDelay(probe.toString(), "https://www.gstatic.com/generate_204")
         require(delay >= 0) { "The complete chain failed its connection test; no system tunnel was started" }
         ensureLive(current)
@@ -226,7 +250,8 @@ class MixCoordinatorService : VpnService() {
         tun = builder.establish() ?: error("Android refused the Mix VPN interface")
         ensureLive(current)
         finalCore = newController(current)
-        finalCore!!.startLoop(MixRouting.vpn(plan, prefixPorts.last(), supportsUdp).toString(), tun!!.fd)
+        finalCore!!.startLoop(MixRouting.vpn(plan, prefixPorts.last(), supportsUdp,
+            dnsExitPort = dnsPrefixPort).toString(), tun!!.fd)
         ensureLive(current)
         statsCore = finalCore
         uplink = 0L
@@ -279,6 +304,12 @@ class MixCoordinatorService : VpnService() {
         finalCore = null
         runCatching { tun?.close() }
         tun = null
+        // Resolver cores depend on prefixes, so stop them in reverse stage order
+        // before stopping workers and the router that owns those prefixes.
+        resolverCores.values.toList().asReversed().forEach { resolver ->
+            runCatching { resolver.stopLoop() }
+        }
+        resolverCores.clear()
         // Tear down from the exit towards the physical entry, keeping every
         // previous prefix available while its dependent engine is stopped.
         workers.values.filter { it.started }.sortedByDescending { it.hop }.forEach { worker ->

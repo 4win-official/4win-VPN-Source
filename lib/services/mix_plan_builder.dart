@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import '../models/dns_server.dart';
 import '../models/mix_strategy.dart';
@@ -27,7 +28,11 @@ class MixPlanBuilder {
     for (final hop in strategy.hops) {
       switch (hop.protocol) {
         case 'direct_dns':
-          _findDns(hop, dnsServers);
+          final resolver = _findDns(hop, dnsServers);
+          if (InternetAddress.tryParse(resolver.primaryDns) == null) {
+            throw const FormatException('Mix DNS must be an IP address.');
+          }
+          hops.add({'protocol': 'direct_dns', 'address': resolver.primaryDns});
           break;
         case 'xray':
           final s = _choose(
@@ -144,7 +149,7 @@ class MixPlanBuilder {
         .toList();
     final dns = dnsHop.isEmpty
         ? '1.1.1.1'
-        : (dnsHop.first.serverId ?? '1.1.1.1');
+        : (dnsHop.last.serverId ?? '1.1.1.1');
     return {'version': 1, 'hops': hops, 'dns': dns, 'baseConfig': base};
   }
 

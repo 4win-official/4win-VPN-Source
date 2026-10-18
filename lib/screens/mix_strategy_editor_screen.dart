@@ -44,6 +44,12 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
       MixStrategy(id: _id, name: _name.text, hops: _hops);
 
   void _append(String protocol) {
+    if (_hops.length >= MixStrategy.maxBlocks) {
+      setState(
+        () => _error = 'At most ${MixStrategy.maxBlocks} blocks are supported.',
+      );
+      return;
+    }
     setState(() => _hops.add(MixHop(protocol: protocol)));
     _chooseReference(_hops.length - 1);
   }
@@ -335,8 +341,8 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                       ),
                     ),
                   const SizedBox(height: 16),
-                  const Text(
-                    'ADD PROTOCOL BLOCK',
+                  Text(
+                    'ADD PROTOCOL BLOCK  (${_hops.length}/${MixStrategy.maxBlocks})',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -348,7 +354,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                     spacing: 8,
                     runSpacing: 8,
                     children: MixStrategy.protocols.entries.map((entry) {
-                      const locked = false;
+                      final locked = _hops.length >= MixStrategy.maxBlocks;
                       return Draggable<String>(
                         data: entry.key,
                         feedback: Material(
@@ -375,7 +381,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                   ),
                   const SizedBox(height: 10),
                   const Text(
-                    'Tap or drag a chip to append; hold a block to reorder. Every protocol is a real native chain hop. References are stored without credentials; the complete plan is resolved and validated immediately before connecting.',
+                    'Tap or drag a chip to append; hold a block to reorder. DNS is a resolver at the selected position, not a tunnel: DNS first resolves on the physical link; multiple DNS blocks are allowed, and the last DNS is effective for app queries. DNS does not have to be last; tunnel order and scoped prefixes stay intact.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
@@ -403,7 +409,10 @@ class _GridCanvas extends StatelessWidget {
   final void Function(int, int) onReorder;
   @override
   Widget build(BuildContext context) => DragTarget<String>(
-    onAcceptWithDetails: (d) => onAppend(d.data),
+    onWillAcceptWithDetails: (_) => hops.length < MixStrategy.maxBlocks,
+    onAcceptWithDetails: (d) {
+      if (hops.length < MixStrategy.maxBlocks) onAppend(d.data);
+    },
     builder: (context, candidates, _) => Container(
       constraints: const BoxConstraints(minHeight: 270),
       padding: const EdgeInsets.all(14),
@@ -632,15 +641,7 @@ class _PaletteChip extends StatelessWidget {
     label: Text(label),
     onPressed: locked
         ? () => ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                MixStrategy.unavailableReason(
-                  MixStrategy.protocols.entries
-                      .firstWhere((e) => e.value == label)
-                      .key,
-                )!,
-              ),
-            ),
+            const SnackBar(content: Text('Maximum 50 blocks reached.')),
           )
         : onTap,
   );

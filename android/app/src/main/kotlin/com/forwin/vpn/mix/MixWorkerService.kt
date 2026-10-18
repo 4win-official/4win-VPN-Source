@@ -112,10 +112,57 @@ open class MixWorkerService : Service() {
         private const val CHANNEL = "MixWorker"
         private const val NOTIFICATION = 40
         val CLASSES = arrayOf(
-            MixWorker0::class.java, MixWorker1::class.java, MixWorker2::class.java, MixWorker3::class.java,
-            MixWorker4::class.java, MixWorker5::class.java, MixWorker6::class.java, MixWorker7::class.java,
-            MixWorker8::class.java, MixWorker9::class.java, MixWorker10::class.java, MixWorker11::class.java,
-            MixWorker12::class.java, MixWorker13::class.java, MixWorker14::class.java, MixWorker15::class.java)
+            MixWorker0::class.java,
+            MixWorker1::class.java,
+            MixWorker2::class.java,
+            MixWorker3::class.java,
+            MixWorker4::class.java,
+            MixWorker5::class.java,
+            MixWorker6::class.java,
+            MixWorker7::class.java,
+            MixWorker8::class.java,
+            MixWorker9::class.java,
+            MixWorker10::class.java,
+            MixWorker11::class.java,
+            MixWorker12::class.java,
+            MixWorker13::class.java,
+            MixWorker14::class.java,
+            MixWorker15::class.java,
+            MixWorker16::class.java,
+            MixWorker17::class.java,
+            MixWorker18::class.java,
+            MixWorker19::class.java,
+            MixWorker20::class.java,
+            MixWorker21::class.java,
+            MixWorker22::class.java,
+            MixWorker23::class.java,
+            MixWorker24::class.java,
+            MixWorker25::class.java,
+            MixWorker26::class.java,
+            MixWorker27::class.java,
+            MixWorker28::class.java,
+            MixWorker29::class.java,
+            MixWorker30::class.java,
+            MixWorker31::class.java,
+            MixWorker32::class.java,
+            MixWorker33::class.java,
+            MixWorker34::class.java,
+            MixWorker35::class.java,
+            MixWorker36::class.java,
+            MixWorker37::class.java,
+            MixWorker38::class.java,
+            MixWorker39::class.java,
+            MixWorker40::class.java,
+            MixWorker41::class.java,
+            MixWorker42::class.java,
+            MixWorker43::class.java,
+            MixWorker44::class.java,
+            MixWorker45::class.java,
+            MixWorker46::class.java,
+            MixWorker47::class.java,
+            MixWorker48::class.java,
+            MixWorker49::class.java
+        )
     }
 }
 
@@ -135,3 +182,37 @@ class MixWorker12 : MixWorkerService()
 class MixWorker13 : MixWorkerService()
 class MixWorker14 : MixWorkerService()
 class MixWorker15 : MixWorkerService()
+class MixWorker16 : MixWorkerService()
+class MixWorker17 : MixWorkerService()
+class MixWorker18 : MixWorkerService()
+class MixWorker19 : MixWorkerService()
+class MixWorker20 : MixWorkerService()
+class MixWorker21 : MixWorkerService()
+class MixWorker22 : MixWorkerService()
+class MixWorker23 : MixWorkerService()
+class MixWorker24 : MixWorkerService()
+class MixWorker25 : MixWorkerService()
+class MixWorker26 : MixWorkerService()
+class MixWorker27 : MixWorkerService()
+class MixWorker28 : MixWorkerService()
+class MixWorker29 : MixWorkerService()
+class MixWorker30 : MixWorkerService()
+class MixWorker31 : MixWorkerService()
+class MixWorker32 : MixWorkerService()
+class MixWorker33 : MixWorkerService()
+class MixWorker34 : MixWorkerService()
+class MixWorker35 : MixWorkerService()
+class MixWorker36 : MixWorkerService()
+class MixWorker37 : MixWorkerService()
+class MixWorker38 : MixWorkerService()
+class MixWorker39 : MixWorkerService()
+class MixWorker40 : MixWorkerService()
+class MixWorker41 : MixWorkerService()
+class MixWorker42 : MixWorkerService()
+class MixWorker43 : MixWorkerService()
+class MixWorker44 : MixWorkerService()
+class MixWorker45 : MixWorkerService()
+class MixWorker46 : MixWorkerService()
+class MixWorker47 : MixWorkerService()
+class MixWorker48 : MixWorkerService()
+class MixWorker49 : MixWorkerService()

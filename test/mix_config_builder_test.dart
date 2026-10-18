@@ -89,7 +89,7 @@ void main() {
       }
     },
   );
-  test('DNS is resolver policy at the end, not a standalone tunnel', () {
+  test('DNS may occupy any position but is not a standalone tunnel', () {
     final dnsHop = MixHop(protocol: 'direct_dns', serverId: dns.primaryDns);
     expect(strategy([dnsHop]).validationError, isNotNull);
     expect(
@@ -97,7 +97,7 @@ void main() {
         dnsHop,
         MixHop(protocol: 'xray', serverId: first.id),
       ]).validationError,
-      isNotNull,
+      isNull,
     );
     expect(
       strategy([
@@ -163,15 +163,90 @@ void main() {
       (outbound) => outbound['tag'] == 'mix-dns',
     );
     expect(dnsOutbound['protocol'], 'dns');
-    expect(dnsOutbound['settings']['rewriteNetwork'], 'tcp');
-    expect(dnsOutbound['settings']['rewriteAddress'], dns.primaryDns);
-    expect(dnsOutbound['settings']['rules'], [
-      {'action': 'direct'},
-    ]);
+    expect(dnsOutbound['settings']['network'], 'tcp');
+    expect(dnsOutbound['settings']['address'], dns.primaryDns);
+    expect(dnsOutbound['settings']['nonIPQuery'], 'skip');
     expect(dnsOutbound['streamSettings']['sockopt']['dialerProxy'], 'proxy');
     expect(config['dns']['servers'], ['tcp://9.9.9.9']);
-    expect(config['routing']['rules'].first['outboundTag'], 'mix-dns');
+    expect(config['routing']['rules'][1]['outboundTag'], 'mix-dns');
+    expect(config['routing']['rules'].first['inboundTag'], ['mix-resolver']);
     expect(jsonEncode(config['dns']), isNot(contains('localhost')));
+  });
+  test('DNS in the middle exits through only its preceding tunnel prefix', () {
+    final config = compile([
+      MixHop(protocol: 'xray', serverId: first.id),
+      MixHop(protocol: 'direct_dns', serverId: dns.primaryDns),
+      MixHop(protocol: 'proxy', serverId: proxy.id),
+      MixHop(protocol: 'xray', serverId: second.id),
+    ]);
+    final outbounds = config['outbounds'] as List;
+    final resolver = outbounds.singleWhere((o) => o['tag'] == 'mix-dns');
+    expect(resolver['streamSettings']['sockopt']['dialerProxy'], 'mix-hop-0');
+    expect(
+      outbounds.singleWhere(
+        (o) => o['tag'] == 'mix-dns-transport',
+      )['streamSettings']['sockopt']['dialerProxy'],
+      'mix-hop-0',
+    );
+    expect(
+      outbounds.first['streamSettings']['sockopt']['dialerProxy'],
+      'mix-hop-1',
+    );
+    expect(
+      outbounds.singleWhere(
+        (o) => o['tag'] == 'mix-hop-1',
+      )['streamSettings']['sockopt']['dialerProxy'],
+      'mix-hop-0',
+    );
+  });
+  test('DNS first intentionally resolves before the first tunnel', () {
+    final config = compile([
+      MixHop(protocol: 'direct_dns', serverId: dns.primaryDns),
+      MixHop(protocol: 'xray', serverId: first.id),
+    ]);
+    final resolver = (config['outbounds'] as List).singleWhere(
+      (o) => o['tag'] == 'mix-dns',
+    );
+    expect(
+      resolver['streamSettings']['sockopt'].containsKey('dialerProxy'),
+      isFalse,
+    );
+    expect(config['outbounds'].first['protocol'], 'vless');
+  });
+  test('repeated DNS policies retain their own selected prefixes', () {
+    final config = compile([
+      MixHop(protocol: 'direct_dns', serverId: dns.primaryDns),
+      MixHop(protocol: 'xray', serverId: first.id),
+      MixHop(protocol: 'direct_dns', serverId: dns.primaryDns),
+      MixHop(protocol: 'proxy', serverId: proxy.id),
+    ]);
+    final policies = (config['outbounds'] as List)
+        .where((o) => o['protocol'] == 'dns')
+        .toList();
+    expect(policies, hasLength(2));
+    expect(policies.first['streamSettings']['sockopt']['dialerProxy'], isNull);
+    expect(
+      policies.last['streamSettings']['sockopt']['dialerProxy'],
+      'mix-hop-0',
+    );
+    expect(config['routing']['rules'][1]['outboundTag'], 'mix-dns');
+    expect(config['routing']['rules'].first['inboundTag'], ['mix-resolver']);
+  });
+  test('50 ordered tunnel blocks compile, 51 are rejected', () {
+    final blocks = List.generate(
+      50,
+      (_) => MixHop(protocol: 'proxy', serverId: proxy.id),
+    );
+    final config = compile(blocks);
+    expect(
+      (config['outbounds'] as List).where((o) => o['protocol'] == 'socks'),
+      hasLength(50),
+    );
+    expect(
+      config['outbounds'].first['streamSettings']['sockopt']['dialerProxy'],
+      'mix-hop-48',
+    );
+    expect(() => compile([...blocks, blocks.first]), throwsFormatException);
   });
   test('HTTP chain blocks unsupported UDP rather than bypassing any hop', () {
     final config = compile([
@@ -179,9 +254,10 @@ void main() {
       MixHop(protocol: 'xray', serverId: first.id),
     ]);
     final rules = config['routing']['rules'] as List;
-    expect(rules[0]['outboundTag'], 'mix-dns');
-    expect(rules[1]['network'], 'udp');
-    expect(rules[1]['outboundTag'], 'mix-udp-block');
+    expect(rules[0]['outboundTag'], 'mix-dns-transport');
+    expect(rules[1]['outboundTag'], 'mix-dns');
+    expect(rules[2]['network'], 'udp');
+    expect(rules[2]['outboundTag'], 'mix-udp-block');
     expect(
       (config['outbounds'] as List).singleWhere(
         (outbound) => outbound['tag'] == 'mix-udp-block',

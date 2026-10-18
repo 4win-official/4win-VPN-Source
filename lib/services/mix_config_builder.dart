@@ -21,16 +21,26 @@ class MixConfigBuilder {
     final error = strategy.validationError;
     if (error != null) throw FormatException(error);
     final tunnels = <Map<String, dynamic>>[];
-    DnsServer? resolver;
+    // A resolver is a boundary in the ordered plan, not a VPN transport.
+    // Each boundary retains its preceding tunnel prefix. The last policy is
+    // effective for app DNS; earlier policies remain scoped to their prefixes.
+    final dnsPolicies = <({String address, int prefixLength})>[];
     Map<String, dynamic>? base;
     var tcpOnly = false;
     for (final hop in strategy.hops) {
       if (hop.protocol == 'direct_dns') {
-        resolver = _choose<DnsServer>(
+        final resolver = _choose<DnsServer>(
           dnsServers,
           (server) => server.primaryDns == hop.serverId,
           'The selected DNS server was removed. Edit this strategy.',
         );
+        if (InternetAddress.tryParse(resolver.primaryDns) == null) {
+          throw const FormatException('Mix DNS must be an IP address.');
+        }
+        dnsPolicies.add((
+          address: resolver.primaryDns,
+          prefixLength: tunnels.length,
+        ));
         continue;
       }
       late String standalone;
@@ -107,26 +117,55 @@ class MixConfigBuilder {
       tunnels.last,
       ...tunnels.take(tunnels.length - 1),
     ];
-    final dnsAddress = resolver?.primaryDns ?? '1.1.1.1';
+    if (dnsPolicies.isEmpty) {
+      dnsPolicies.add((address: '1.1.1.1', prefixLength: tunnels.length));
+    }
+    final dnsAddress = dnsPolicies.last.address;
     final address = InternetAddress.tryParse(dnsAddress);
     if (address == null) {
       throw const FormatException('Mix DNS must be an IP address.');
     }
+    for (var i = 0; i < dnsPolicies.length; i++) {
+      final policy = dnsPolicies[i];
+      final prefix = policy.prefixLength;
+      outbounds.add({
+        'tag': i == dnsPolicies.length - 1 ? 'mix-dns' : 'mix-dns-policy-$i',
+        'protocol': 'dns',
+        // DNS leaves at its selected boundary, not at the final tunnel.
+        // A DNS block before every tunnel intentionally uses the physical link.
+        'settings': {
+          'network': 'tcp',
+          'address': policy.address,
+          'port': 53,
+          'nonIPQuery': 'skip',
+        },
+        'streamSettings': {
+          'sockopt': {
+            if (prefix > 0)
+              'dialerProxy': prefix == tunnels.length
+                  ? 'proxy'
+                  : 'mix-hop-${prefix - 1}',
+            'domainStrategy': 'AsIs',
+          },
+        },
+      });
+    }
+    // A/AAAA are resolved by Xray's global DNS client, not by the DNS
+    // outbound's address. Route that client's own queries explicitly to the
+    // selected boundary; otherwise the default exit would move DNS to the end.
+    final dnsPrefix = dnsPolicies.last.prefixLength;
     outbounds.add({
-      'tag': 'mix-dns',
-      'protocol': 'dns',
-      // All query types are forwarded, not just A/AAAA. UDP DNS from apps is
-      // framed as TCP before entering the exit, so HTTP hops also carry DNS.
-      'settings': {
-        'rewriteNetwork': 'tcp',
-        'rewriteAddress': dnsAddress,
-        'rewritePort': 53,
-        'rules': [
-          {'action': 'direct'},
-        ],
-      },
+      'tag': 'mix-dns-transport',
+      'protocol': 'freedom',
+      'settings': {},
       'streamSettings': {
-        'sockopt': {'dialerProxy': 'proxy', 'domainStrategy': 'AsIs'},
+        'sockopt': {
+          if (dnsPrefix > 0)
+            'dialerProxy': dnsPrefix == tunnels.length
+                ? 'proxy'
+                : 'mix-hop-${dnsPrefix - 1}',
+          'domainStrategy': 'AsIs',
+        },
       },
     });
     if (tcpOnly) {
@@ -142,6 +181,11 @@ class MixConfigBuilder {
     base['routing'] = {
       'domainStrategy': 'AsIs',
       'rules': [
+        {
+          'type': 'field',
+          'inboundTag': ['mix-resolver'],
+          'outboundTag': 'mix-dns-transport',
+        },
         {
           'type': 'field',
           'port': '53',

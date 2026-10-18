@@ -312,6 +312,210 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <service android:name=".mix.MixWorker16" android:exported="false" android:process=":mixworker16" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService16" android:exported="false" android:process=":mixworker16" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker17" android:exported="false" android:process=":mixworker17" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService17" android:exported="false" android:process=":mixworker17" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker18" android:exported="false" android:process=":mixworker18" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService18" android:exported="false" android:process=":mixworker18" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker19" android:exported="false" android:process=":mixworker19" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService19" android:exported="false" android:process=":mixworker19" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker20" android:exported="false" android:process=":mixworker20" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService20" android:exported="false" android:process=":mixworker20" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker21" android:exported="false" android:process=":mixworker21" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService21" android:exported="false" android:process=":mixworker21" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker22" android:exported="false" android:process=":mixworker22" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService22" android:exported="false" android:process=":mixworker22" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker23" android:exported="false" android:process=":mixworker23" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService23" android:exported="false" android:process=":mixworker23" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker24" android:exported="false" android:process=":mixworker24" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService24" android:exported="false" android:process=":mixworker24" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker25" android:exported="false" android:process=":mixworker25" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService25" android:exported="false" android:process=":mixworker25" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker26" android:exported="false" android:process=":mixworker26" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService26" android:exported="false" android:process=":mixworker26" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker27" android:exported="false" android:process=":mixworker27" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService27" android:exported="false" android:process=":mixworker27" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker28" android:exported="false" android:process=":mixworker28" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService28" android:exported="false" android:process=":mixworker28" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker29" android:exported="false" android:process=":mixworker29" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService29" android:exported="false" android:process=":mixworker29" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker30" android:exported="false" android:process=":mixworker30" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService30" android:exported="false" android:process=":mixworker30" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker31" android:exported="false" android:process=":mixworker31" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService31" android:exported="false" android:process=":mixworker31" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker32" android:exported="false" android:process=":mixworker32" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService32" android:exported="false" android:process=":mixworker32" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker33" android:exported="false" android:process=":mixworker33" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService33" android:exported="false" android:process=":mixworker33" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker34" android:exported="false" android:process=":mixworker34" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService34" android:exported="false" android:process=":mixworker34" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker35" android:exported="false" android:process=":mixworker35" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService35" android:exported="false" android:process=":mixworker35" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker36" android:exported="false" android:process=":mixworker36" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService36" android:exported="false" android:process=":mixworker36" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker37" android:exported="false" android:process=":mixworker37" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService37" android:exported="false" android:process=":mixworker37" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker38" android:exported="false" android:process=":mixworker38" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService38" android:exported="false" android:process=":mixworker38" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker39" android:exported="false" android:process=":mixworker39" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService39" android:exported="false" android:process=":mixworker39" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker40" android:exported="false" android:process=":mixworker40" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService40" android:exported="false" android:process=":mixworker40" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker41" android:exported="false" android:process=":mixworker41" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService41" android:exported="false" android:process=":mixworker41" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker42" android:exported="false" android:process=":mixworker42" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService42" android:exported="false" android:process=":mixworker42" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker43" android:exported="false" android:process=":mixworker43" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService43" android:exported="false" android:process=":mixworker43" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker44" android:exported="false" android:process=":mixworker44" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService44" android:exported="false" android:process=":mixworker44" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker45" android:exported="false" android:process=":mixworker45" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService45" android:exported="false" android:process=":mixworker45" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker46" android:exported="false" android:process=":mixworker46" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService46" android:exported="false" android:process=":mixworker46" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker47" android:exported="false" android:process=":mixworker47" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService47" android:exported="false" android:process=":mixworker47" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker48" android:exported="false" android:process=":mixworker48" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService48" android:exported="false" android:process=":mixworker48" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
+        <service android:name=".mix.MixWorker49" android:exported="false" android:process=":mixworker49" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix isolated protocol engine" />
+        </service>
+        <service android:name=".mix.openvpn.OpenVpnMixService49" android:exported="false" android:process=":mixworker49" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Mix OpenVPN packet engine" />
+        </service>
     </application>
 
     <!-- Required to query activities that can process text, see:

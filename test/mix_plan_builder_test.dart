@@ -6,14 +6,20 @@ import 'package:vpn_swift/services/mix_plan_builder.dart';
 
 void main() {
   final proxy = ProxyServer(
-    id: 'p1', remark: 'proxy', link: 'socks5://127.0.0.1:1080',
-    protocol: 'socks5', address: '127.0.0.1', port: 1080,
+    id: 'p1',
+    remark: 'proxy',
+    link: 'socks5://127.0.0.1:1080',
+    protocol: 'socks5',
+    address: '127.0.0.1',
+    port: 1080,
   );
   test('builds a logical plan without local listener ports', () {
     final plan = MixPlanBuilder.build(
-      strategy: MixStrategy(id: 'm', name: 'mix', hops: const [
-        MixHop(protocol: 'proxy', serverId: 'p1'),
-      ]),
+      strategy: MixStrategy(
+        id: 'm',
+        name: 'mix',
+        hops: const [MixHop(protocol: 'proxy', serverId: 'p1')],
+      ),
       proxyServers: [proxy],
     );
     expect(plan['version'], 1);
@@ -21,16 +27,73 @@ void main() {
     expect(plan['baseConfig'], isA<Map<String, dynamic>>());
   });
 
-  test('keeps DNS out of hops and resolves it into plan DNS', () {
+  test('retains DNS in exact block order and resolves its address', () {
     final plan = MixPlanBuilder.build(
-      strategy: MixStrategy(id: 'm', name: 'mix', hops: const [
-        MixHop(protocol: 'proxy', serverId: 'p1'),
-        MixHop(protocol: 'direct_dns', serverId: '9.9.9.9'),
-      ]),
+      strategy: MixStrategy(
+        id: 'm',
+        name: 'mix',
+        hops: const [
+          MixHop(protocol: 'proxy', serverId: 'p1'),
+          MixHop(protocol: 'direct_dns', serverId: '9.9.9.9'),
+        ],
+      ),
       proxyServers: [proxy],
-      dnsServers: [DnsServer(name: 'quad9', primaryDns: '9.9.9.9', description: '', country: '')],
+      dnsServers: [
+        DnsServer(
+          name: 'quad9',
+          primaryDns: '9.9.9.9',
+          description: '',
+          country: '',
+        ),
+      ],
     );
     expect(plan['dns'], '9.9.9.9');
-    expect((plan['hops'] as List).length, 1);
+    expect((plan['hops'] as List).map((h) => h['protocol']), [
+      'proxy',
+      'direct_dns',
+    ]);
+    expect((plan['hops'] as List).last['address'], '9.9.9.9');
+  });
+  test('DNS first, middle and repeated are never moved or dropped', () {
+    final blocks = [
+      const MixHop(protocol: 'direct_dns', serverId: '9.9.9.9'),
+      const MixHop(protocol: 'proxy', serverId: 'p1'),
+      const MixHop(protocol: 'direct_dns', serverId: '1.1.1.1'),
+      const MixHop(protocol: 'proxy', serverId: 'p1'),
+    ];
+    final plan = MixPlanBuilder.build(
+      strategy: MixStrategy(id: 'm', name: 'mix', hops: blocks),
+      proxyServers: [proxy],
+      dnsServers: ['9.9.9.9', '1.1.1.1']
+          .map(
+            (address) => DnsServer(
+              name: address,
+              primaryDns: address,
+              description: '',
+              country: '',
+            ),
+          )
+          .toList(),
+    );
+    expect(
+      (plan['hops'] as List).map((h) => h['protocol']),
+      blocks.map((h) => h.protocol),
+    );
+    expect(plan['dns'], '1.1.1.1');
+  });
+  test('plan accepts 50 blocks and rejects 51 before execution', () {
+    Map<String, dynamic> build(int length) => MixPlanBuilder.build(
+      strategy: MixStrategy(
+        id: 'm',
+        name: 'mix',
+        hops: List.generate(
+          length,
+          (_) => const MixHop(protocol: 'proxy', serverId: 'p1'),
+        ),
+      ),
+      proxyServers: [proxy],
+    );
+    expect(build(50)['hops'], hasLength(50));
+    expect(() => build(51), throwsFormatException);
   });
 }

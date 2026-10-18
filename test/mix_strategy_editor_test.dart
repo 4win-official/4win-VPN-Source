@@ -18,7 +18,7 @@ void main() {
     expect(find.text('This device'), findsOneWidget);
     expect(find.text('INTERNET'), findsOneWidget);
     expect(find.text('Drop or add a protocol block'), findsOneWidget);
-    expect(find.text('ADD PROTOCOL BLOCK'), findsOneWidget);
+    expect(find.text('ADD PROTOCOL BLOCK  (0/50)'), findsOneWidget);
     expect(find.text('Xray'), findsOneWidget);
     expect(find.text('Proxy'), findsOneWidget);
   });
@@ -43,5 +43,26 @@ void main() {
 
     expect(find.text('Enter a strategy name.'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('editor shows the hard 50-block ceiling', (tester) async {
+    final hops = List.generate(
+      MixStrategy.maxBlocks,
+      (i) => MixHop(protocol: 'xray', serverId: 'server-$i'),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MixStrategyEditorScreen(
+          existingStrategy: MixStrategy(id: 'full', name: 'Full', hops: hops),
+        ),
+      ),
+    );
+    expect(find.text('ADD PROTOCOL BLOCK  (50/50)'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'DNS is a resolver at the selected position, not a tunnel:',
+      ),
+      findsOneWidget,
+    );
   });
 }

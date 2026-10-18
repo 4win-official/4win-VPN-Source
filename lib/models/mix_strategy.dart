@@ -19,6 +19,7 @@ class MixHop {
 }
 
 class MixStrategy {
+  static const maxBlocks = 50;
   final String id;
   final String name;
   final List<MixHop> hops;
@@ -54,7 +55,9 @@ class MixStrategy {
   String? get validationError {
     if (name.trim().isEmpty) return 'Enter a strategy name.';
     if (hops.isEmpty) return 'Add at least one tunnel block after Start.';
-    if (hops.length > 16) return 'At most 16 blocks are supported.';
+    if (hops.length > maxBlocks) {
+      return 'At most $maxBlocks blocks are supported.';
+    }
     var tunnels = 0;
     for (var i = 0; i < hops.length; i++) {
       final hop = hops[i];
@@ -68,15 +71,17 @@ class MixStrategy {
         return 'Block ${i + 1} must select a server OR a group.';
       }
       if (hop.protocol == 'direct_dns') {
-        if (i != hops.length - 1 ||
-            tunnels == 0 ||
-            hop.group != null ||
-            (hop.serverId == null || hop.serverId!.isEmpty)) {
-          return 'DNS must be the last block, after a tunnel; it is a resolver, not another VPN hop.';
+        if (hop.group != null ||
+            hop.serverId == null ||
+            hop.serverId!.isEmpty) {
+          return 'DNS must use a server IP reference, not a group.';
         }
       } else {
         tunnels++;
       }
+    }
+    if (tunnels == 0) {
+      return 'Add at least one tunnel block; DNS is a resolver, not a VPN hop.';
     }
     return null;
   }
