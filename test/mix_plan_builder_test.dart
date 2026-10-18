@@ -81,6 +81,44 @@ void main() {
     );
     expect(plan['dns'], '1.1.1.1');
   });
+  test('native plan preserves an ordered 50-block chain and final DNS', () {
+    final blocks = <MixHop>[];
+    final dnsAddresses = <String>[];
+    for (var i = 0; i < 50; i++) {
+      if (i.isEven) {
+        final address = i % 4 == 0 ? '9.9.9.9' : '1.1.1.1';
+        dnsAddresses.add(address);
+        blocks.add(MixHop(protocol: 'direct_dns', serverId: address));
+      } else {
+        blocks.add(const MixHop(protocol: 'proxy', serverId: 'p1'));
+      }
+    }
+    final plan = MixPlanBuilder.build(
+      strategy: MixStrategy(id: 'ordered', name: 'Ordered', hops: blocks),
+      proxyServers: [proxy],
+      dnsServers: [
+        for (final address in {'9.9.9.9', '1.1.1.1'})
+          DnsServer(
+            name: address,
+            primaryDns: address,
+            description: '',
+            country: '',
+          ),
+      ],
+    );
+    expect(plan['hops'], hasLength(50));
+    expect(
+      (plan['hops'] as List).map((hop) => hop['protocol']),
+      blocks.map((hop) => hop.protocol),
+    );
+    expect(plan['dns'], dnsAddresses.last);
+  });
+
+  test('Slow DNS remains excluded while supported Mix protocols are listed', () {
+    expect(MixStrategy.protocols.containsKey('slowdns'), isFalse);
+    expect(MixStrategy.unavailableReason('slowdns'), isNotNull);
+  });
+
   test('plan accepts 50 blocks and rejects 51 before execution', () {
     Map<String, dynamic> build(int length) => MixPlanBuilder.build(
       strategy: MixStrategy(

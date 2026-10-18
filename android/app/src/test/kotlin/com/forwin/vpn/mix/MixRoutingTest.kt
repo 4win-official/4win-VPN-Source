@@ -193,6 +193,16 @@ class MixRoutingTest {
         }
     }
 
+    @Test fun listenerPortsMustBeDistinctAndRawPrefixMustFeedDnsStage() {
+        assertThrows(IllegalArgumentException::class.java) {
+            MixRouting.sidecar(plan("proxy"), listOf(20000), mapOf(0 to 20000), emptyMap())
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            MixRouting.sidecar(dnsPlan("direct_dns", "proxy"), listOf(20000, 20001),
+                emptyMap(), mapOf(0 to 23000), rawPrefixPorts = mapOf(1 to 24000))
+        }
+    }
+
     @Test fun udpRelayWrapsStagesWithoutCreatingADialerCycle() {
         val result = MixRouting.sidecar(
             plan("xray", "proxy"),

@@ -25,6 +25,11 @@ internal object MixRouting {
         require(udpRelayPorts.keys == relayUnderlayPorts.keys) {
             "UDP relay maps must contain the same stages"
         }
+        val listenerPorts = (prefixPorts + workerPorts.values + dnsPorts.values +
+            rawPrefixPorts.values + udpRelayPorts.values + relayUnderlayPorts.values)
+        require(listenerPorts.all { it in 1..65535 } && listenerPorts.toSet().size == listenerPorts.size) {
+            "Mix listener ports must be valid and distinct"
+        }
         udpRelayPorts.forEach { (stage, relayPort) ->
             require(stage in 0 until hops.length() && relayPort in 1..65535 &&
                 relayUnderlayPorts.getValue(stage) in 1..65535) { "Invalid UDP relay stage" }
@@ -114,7 +119,10 @@ internal object MixRouting {
         // an earlier resolver policy. Separate raw listeners avoid DNS recursion
         // and preserve the selected address when several DNS blocks are present.
         rawPrefixPorts.forEach { (stage, port) ->
-            require(stage in 0 until hops.length() && port in 1..65535) { "Invalid raw prefix" }
+            require(stage in 0 until hops.length() - 1 &&
+                hops.getJSONObject(stage + 1).getString("protocol") == "direct_dns") {
+                "Raw prefix must feed the following direct_dns stage"
+            }
             val tag = "mix-raw-prefix-$stage"
             inbounds.put(JSONObject().put("tag", tag).put("listen", "127.0.0.1")
                 .put("port", port).put("protocol", "socks")

@@ -25,6 +25,10 @@ class MixPlanBuilder {
     final validation = strategy.validationError;
     if (validation != null) throw FormatException(validation);
     final hops = <Map<String, dynamic>>[];
+    // Keep the effective resolver alongside the compiled hop. Do not derive
+    // this later from the saved reference: repeated DNS blocks must retain
+    // their order and the final plan metadata must describe the resolved hop.
+    final resolvedDnsAddresses = <String>[];
     for (final hop in strategy.hops) {
       switch (hop.protocol) {
         case 'direct_dns':
@@ -32,6 +36,7 @@ class MixPlanBuilder {
           if (InternetAddress.tryParse(resolver.primaryDns) == null) {
             throw const FormatException('Mix DNS must be an IP address.');
           }
+          resolvedDnsAddresses.add(resolver.primaryDns);
           hops.add({'protocol': 'direct_dns', 'address': resolver.primaryDns});
           break;
         case 'xray':
@@ -148,12 +153,9 @@ class MixPlanBuilder {
       port: 1,
     );
     final base = _decode(XrayConfigBuilder.buildForProxyServer(dummy));
-    final dnsHop = strategy.hops
-        .where((h) => h.protocol == 'direct_dns')
-        .toList();
-    final dns = dnsHop.isEmpty
+    final dns = resolvedDnsAddresses.isEmpty
         ? '1.1.1.1'
-        : (dnsHop.last.serverId ?? '1.1.1.1');
+        : resolvedDnsAddresses.last;
     return {
       'version': 1,
       'hops': hops,

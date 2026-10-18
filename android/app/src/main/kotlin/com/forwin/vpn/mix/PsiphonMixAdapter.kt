@@ -21,6 +21,14 @@ class PsiphonMixAdapter : MixAdapter {
     companion object {
         private const val NATIVE_LIBRARY = "psiphon-gojni"
         private const val CONNECT_TIMEOUT_SECONDS = 120L
+        /**
+         * A packet stack can fail before Psiphon reports onConnected. `ready ==
+         * false` is also normal startup, so only a non-empty native error is
+         * terminal; this avoids waiting for the full connection timeout after
+         * a deterministic local failure.
+         */
+        internal fun packetStackFailure(ready: Boolean, error: String): String? =
+            if (!ready && error.isNotBlank()) error else null
     }
     private val lock = Any()
     // Native stop can join callback threads. Never acquire this while holding
@@ -139,8 +147,11 @@ class PsiphonMixAdapter : MixAdapter {
                         synchronized(lock) {
                             if (!isLiveLocked(token)) return@scheduleAtFixedRate
                             val stack = packetStack
-                            if (readySent && stack?.ready != true)
-                                failLocked(token, environment, stack?.error ?: "Psiphon packet stack closed")
+                            val stackError = stack?.let { packetStackFailure(it.ready, it.error) }
+                            if (stackError != null)
+                                failLocked(token, environment, stackError)
+                            else if (readySent && stack?.ready != true)
+                                failLocked(token, environment, "Psiphon packet stack closed")
                             else if (!readySent && System.nanoTime() >= deadline)
                                 failLocked(token, environment, "Psiphon packet tunnel connection timed out")
                             else publishReadyLocked(token, environment)
