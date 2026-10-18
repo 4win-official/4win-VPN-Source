@@ -38,6 +38,8 @@ class MixCoordinatorService : VpnService() {
     private var router: CoreController? = null
     private var finalCore: CoreController? = null
     private val resolverCores = LinkedHashMap<Int, CoreController>()
+    private val udpRelays = LinkedHashMap<Int, MixUdpRelay>()
+    private val socks4Proxies = LinkedHashMap<Int, MixSocks4Proxy>()
     private var tun: ParcelFileDescriptor? = null
     private var request: Request? = null
     private var receiverRegistered = false
@@ -161,6 +163,7 @@ class MixCoordinatorService : VpnService() {
         val hops = plan.getJSONArray("hops")
         require(hops.length() in 1..50) { "Mix supports 1 to 50 blocks" }
         val heldPorts = ArrayList<ServerSocket>()
+        val relayConfig = plan.optJSONObject("udpRelay")?.let { MixUdpRelay.Config.fromJson(it) }
         fun reservePort(): Int {
             val socket = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
             heldPorts.add(socket)
@@ -170,8 +173,14 @@ class MixCoordinatorService : VpnService() {
         val workerPorts = HashMap<Int, Int>()
         val dnsPorts = HashMap<Int, Int>()
         val rawPrefixPorts = HashMap<Int, Int>()
+        val relayPorts = HashMap<Int, Int>()
+        val relayUnderlayPorts = HashMap<Int, Int>()
         var slot = 0
         for (i in 0 until hops.length()) {
+            if (relayConfig != null && MixCapabilities.needsRelay(hops.getJSONObject(i))) {
+                relayPorts[i] = reservePort()
+                relayUnderlayPorts[i] = reservePort()
+            }
             when (hops.getJSONObject(i).getString("protocol")) {
                 in MixRouting.nativeProtocols -> {
                     workerPorts[i] = reservePort()
@@ -181,9 +190,11 @@ class MixCoordinatorService : VpnService() {
                     dnsPorts[i] = reservePort()
                     if (i > 0) rawPrefixPorts[i - 1] = reservePort()
                 }
+                "proxy" -> if (hops.getJSONObject(i).has("socks4")) workerPorts[i] = reservePort()
             }
         }
-        val routerConfig = try { MixRouting.sidecar(plan, prefixPorts, workerPorts, dnsPorts, rawPrefixPorts) }
+        val routerConfig = try { MixRouting.sidecar(plan, prefixPorts, workerPorts, dnsPorts, rawPrefixPorts,
+            relayPorts, relayUnderlayPorts) }
             finally { heldPorts.forEach { runCatching { it.close() } } }
         // Workers and router must bind themselves. Ports are randomized and a
         // stage cannot become ready if its actual bind fails.
@@ -208,13 +219,25 @@ class MixCoordinatorService : VpnService() {
                 continue
             }
             if (worker == null) {
+                if (protocol == "proxy" && hop.has("socks4")) {
+                    val settings = hop.getJSONObject("socks4")
+                    val adapter = MixSocks4Proxy(workerPorts.getValue(i),
+                        settings.getString("host"), settings.getInt("port"),
+                        settings.optString("userId"), if (i == 0) null else prefixPorts[i - 1])
+                    socks4Proxies[i] = adapter
+                    adapter.start()
+                }
                 if (hop.optString("protocol") == "xray" || hop.optString("protocol") == "proxy") {
-                    if (hop.getJSONObject("outbound").optString("protocol") == "http") supportsUdp = false
+                    supportsUdp = MixCapabilities.afterXray(hop, supportsUdp)
+                }
+                if (relayPorts.containsKey(i)) {
+                    startRelay(i, relayConfig!!, relayPorts.getValue(i), relayUnderlayPorts.getValue(i))
+                    supportsUdp = true
                 }
                 continue
             }
             require(i == 0 || supportsUdp || protocol != "warp") {
-                "Stage ${i + 1}: WARP needs UDP from its previous stage; the selected prefix is TCP-only"
+                "Stage ${i + 1}: WARP needs UDP; configure the Mix UDP relay for a TCP-only preceding stage"
             }
             showNotification("Connecting stage ${i + 1} of ${hops.length()}")
             val intent = Intent(this, MixWorkerService.CLASSES[worker.slot])
@@ -228,7 +251,13 @@ class MixCoordinatorService : VpnService() {
             if (i > 0) intent.putExtra("upstreamSocksUrl", "socks5://127.0.0.1:${prefixPorts[i - 1]}")
             worker.started = true
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
-            supportsUdp = awaitReady(current, worker) && supportsUdp
+            // Native packet tunnels can restore UDP over TCP underlays. Their
+            // output capability must not be ANDed with the previous transport.
+            supportsUdp = awaitReady(current, worker)
+            if (relayPorts.containsKey(i)) {
+                startRelay(i, relayConfig!!, relayPorts.getValue(i), relayUnderlayPorts.getValue(i))
+                supportsUdp = true
+            }
         }
         ensureLive(current)
         showNotification("Testing the complete chain")
@@ -260,6 +289,12 @@ class MixCoordinatorService : VpnService() {
         isRunning = true
         showNotification("${hops.length()} stages active${if (supportsUdp) "" else " · TCP-only"}")
         current.connected.complete(delay)
+    }
+
+    private fun startRelay(stage: Int, config: MixUdpRelay.Config, port: Int, underlayPort: Int) {
+        val relay = MixUdpRelay(config, port, underlayPort)
+        udpRelays[stage] = relay // Register before a blocking TLS/auth handshake, for cleanup on failure.
+        relay.start()
     }
 
     private fun awaitReady(current: Request, worker: Worker): Boolean {
@@ -311,6 +346,10 @@ class MixCoordinatorService : VpnService() {
             runCatching { resolver.stopLoop() }
         }
         resolverCores.clear()
+        udpRelays.values.toList().asReversed().forEach { runCatching { it.close() } }
+        udpRelays.clear()
+        socks4Proxies.values.toList().asReversed().forEach { runCatching { it.close() } }
+        socks4Proxies.clear()
         // Tear down from the exit towards the physical entry, keeping every
         // previous prefix available while its dependent engine is stopped.
         workers.values.filter { it.started }.sortedByDescending { it.hop }.forEach { worker ->

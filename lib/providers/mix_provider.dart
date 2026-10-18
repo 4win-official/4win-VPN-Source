@@ -113,10 +113,25 @@ extension _MixProviderLogic on VpnProvider {
       final proxies = await _proxyService.loadServers();
       final dns = await _dnsService.getAllDnsServers();
       if (cancelled()) return;
-      final usesNativeChain = strategy.hops.any(
-        (hop) =>
-            const {'warp', 'sstp', 'openvpn', 'psiphon'}.contains(hop.protocol),
-      );
+      final usesNativeChain =
+          strategy.udpRelay != null ||
+          strategy.hops.any(
+            (hop) =>
+                const {
+                  'warp',
+                  'sstp',
+                  'openvpn',
+                  'psiphon',
+                }.contains(hop.protocol) ||
+                (hop.protocol == 'proxy' &&
+                    proxies.any(
+                      (proxy) =>
+                          proxy.protocol == 'socks4' &&
+                          (proxy.id == hop.serverId ||
+                              ((hop.group?.isNotEmpty ?? false) &&
+                                  proxy.group == hop.group)),
+                    )),
+          );
       int delay;
       if (usesNativeChain) {
         await loadServers(forceRefresh: true);

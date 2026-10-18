@@ -38,6 +38,16 @@ class MixWarpConfigTest {
         assertTrue(result.getBoolean("mix_force_tunnel"))
     }
 
+    @Test fun explicitMixIdentityOverridesBothAccountPathsWithoutChangingRuntimeRoot() {
+        val identity = "/files/mix-identities/2/aether-warp.toml"
+        val result = MixWarpConfig.build(config(), "/private/mix/session-9/2/warp", 21002,
+            "socks5://127.0.0.1:22001", identity)
+        assertEquals(identity, result.getString("config_path"))
+        assertEquals(identity, result.getString("wireguard_config_path"))
+        assertEquals("127.0.0.1:21002", result.getString("listen"))
+        assertFalse(result.getString("config_path").contains("session-9"))
+    }
+
     @Test fun unrelatedUnknownFieldsAreNotSilentlyHiddenFromRustValidation() {
         val input = config().put("misspelled_option", true)
         assertTrue(MixWarpConfig.build(input, "/private/mix", 21000, null).has("misspelled_option"))

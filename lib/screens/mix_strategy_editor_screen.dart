@@ -19,9 +19,14 @@ class MixStrategyEditorScreen extends StatefulWidget {
 
 class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
   late final TextEditingController _name;
+  late final TextEditingController _relayHost;
+  late final TextEditingController _relayPort;
+  late final TextEditingController _relayServerName;
+  late final TextEditingController _relayToken;
   late List<MixHop> _hops;
   late final String _id;
   bool _saving = false;
+  late bool _relayEnabled;
   String? _error;
   Future<List<DnsServer>>? _dnsFuture;
 
@@ -31,17 +36,40 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
     final old = widget.existingStrategy;
     _id = old?.id ?? 'mix_${DateTime.now().microsecondsSinceEpoch}';
     _name = TextEditingController(text: old?.name ?? '');
+    final relay = old?.udpRelay;
+    _relayEnabled = relay != null;
+    _relayHost = TextEditingController(text: relay?.host ?? '');
+    _relayPort = TextEditingController(text: relay?.port.toString() ?? '');
+    _relayServerName = TextEditingController(text: relay?.serverName ?? '');
+    _relayToken = TextEditingController(text: relay?.token ?? '');
     _hops = List<MixHop>.from(old?.hops ?? const <MixHop>[]);
   }
 
   @override
   void dispose() {
     _name.dispose();
+    _relayHost.dispose();
+    _relayPort.dispose();
+    _relayServerName.dispose();
+    _relayToken.dispose();
     super.dispose();
   }
 
-  MixStrategy get _strategy =>
-      MixStrategy(id: _id, name: _name.text, hops: _hops);
+  MixStrategy get _strategy => MixStrategy(
+    id: _id,
+    name: _name.text,
+    hops: _hops,
+    udpRelay: _relayEnabled
+        ? MixUdpRelay(
+            host: _relayHost.text,
+            port: int.tryParse(_relayPort.text) ?? 0,
+            token: _relayToken.text,
+            serverName: _relayServerName.text.isEmpty
+                ? _relayHost.text
+                : _relayServerName.text,
+          )
+        : null,
+  );
 
   void _append(String protocol) {
     if (_hops.length >= MixStrategy.maxBlocks) {
@@ -315,6 +343,80 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                       labelText: 'Strategy name',
                       hintText: 'e.g. Gaming route',
                       prefixIcon: Icon(Icons.edit_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: ExpansionTile(
+                      initiallyExpanded: _relayEnabled,
+                      leading: const Icon(Icons.security_outlined),
+                      title: const Text('Optional UDP-over-TLS relay'),
+                      subtitle: const Text('For UDP behind Psiphon or HTTP'),
+                      children: [
+                        SwitchListTile(
+                          title: const Text('Enable UDP relay'),
+                          value: _relayEnabled,
+                          onChanged: (enabled) =>
+                              setState(() => _relayEnabled = enabled),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Requires your own running relay server with a trusted TLS certificate. UDP crosses the selected tunnel to this additional server; if the final block is Psiphon or HTTP, UDP exits from the relay, while TCP still exits from that block. Standalone protocols are unchanged.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ),
+                        TextField(
+                          controller: _relayHost,
+                          decoration: const InputDecoration(
+                            labelText: 'Relay host (IP or hostname)',
+                          ),
+                          keyboardType: TextInputType.url,
+                        ),
+                        TextField(
+                          controller: _relayPort,
+                          decoration: const InputDecoration(
+                            labelText: 'Relay port',
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                        TextField(
+                          controller: _relayServerName,
+                          decoration: const InputDecoration(
+                            labelText: 'TLS server name (defaults to host)',
+                          ),
+                          keyboardType: TextInputType.url,
+                        ),
+                        TextField(
+                          controller: _relayToken,
+                          obscureText: true,
+                          enableSuggestions: false,
+                          autocorrect: false,
+                          decoration: const InputDecoration(
+                            labelText: 'Auth token',
+                            helperText: '32–256 printable ASCII characters',
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () => setState(() {
+                              _relayEnabled = false;
+                              _relayHost.clear();
+                              _relayPort.clear();
+                              _relayServerName.clear();
+                              _relayToken.clear();
+                            }),
+                            child: const Text('Disable relay'),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 12),

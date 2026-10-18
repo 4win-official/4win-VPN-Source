@@ -13,11 +13,24 @@ internal object MixRouting {
         prefixPorts: List<Int>,
         workerPorts: Map<Int, Int>,
         dnsPorts: Map<Int, Int>,
-        rawPrefixPorts: Map<Int, Int> = emptyMap()
+        rawPrefixPorts: Map<Int, Int> = emptyMap(),
+        udpRelayPorts: Map<Int, Int> = emptyMap(),
+        relayUnderlayPorts: Map<Int, Int> = emptyMap()
     ): JSONObject {
         val hops = plan.getJSONArray("hops")
         require(hops.length() in 1..MAX_BLOCKS && prefixPorts.size == hops.length()) {
             "Invalid Mix hop count"
+        }
+        require(prefixPorts.all { it in 1..65535 }) { "Invalid Mix prefix port" }
+        require(udpRelayPorts.keys == relayUnderlayPorts.keys) {
+            "UDP relay maps must contain the same stages"
+        }
+        udpRelayPorts.forEach { (stage, relayPort) ->
+            require(stage in 0 until hops.length() && relayPort in 1..65535 &&
+                relayUnderlayPorts.getValue(stage) in 1..65535) { "Invalid UDP relay stage" }
+            require(hops.getJSONObject(stage).getString("protocol") != "direct_dns") {
+                "UDP relay cannot wrap a DNS stage"
+            }
         }
         val outbounds = mutableListOf<JSONObject>()
         val inbounds = JSONArray()
@@ -29,7 +42,9 @@ internal object MixRouting {
             val protocol = hop.getString("protocol")
             val tag = "mix-stage-$i"
             val outbound: JSONObject
+            val wrapped = udpRelayPorts.containsKey(i)
             if (protocol == "direct_dns") {
+                require(!wrapped) { "UDP relay cannot wrap a DNS stage" }
                 val address = hop.optString("address").trim()
                 require(isIpAddress(address)) { "Invalid direct_dns address at stage ${i + 1}" }
                 outbound = JSONObject().put("tag", tag).put("protocol", "freedom")
@@ -42,6 +57,11 @@ internal object MixRouting {
                 nearestDnsStage = i
             } else if (protocol in nativeProtocols) {
                 val port = workerPorts[i] ?: error("No worker assigned to stage ${i + 1}")
+                outbound = socksOutbound(tag, port)
+            } else if (protocol == "proxy" && hop.has("socks4")) {
+                // SOCKS4 is converted by the Mix-only adapter. That adapter
+                // consumes the previous prefix itself, just like a native hop.
+                val port = workerPorts[i] ?: error("No SOCKS4 adapter assigned to stage ${i + 1}")
                 outbound = socksOutbound(tag, port)
             } else {
                 require(protocol == "xray" || protocol == "proxy") { "Unknown Mix stage" }
@@ -58,7 +78,26 @@ internal object MixRouting {
                 outbound.put("streamSettings", stream)
                 outbound.remove("proxySettings")
             }
-            outbounds.add(outbound)
+            if (wrapped) {
+                // The relay's TCP-facing underlay must enter the original
+                // outbound directly. It must not use the public stage tag,
+                // otherwise the wrapper would dial itself through a cycle.
+                outbound.put("tag", "mix-underlay-$i")
+                outbounds.add(outbound)
+                outbounds.add(socksOutbound(tag, udpRelayPorts.getValue(i)))
+                inbounds.put(JSONObject().put("tag", "mix-relay-underlay-$i")
+                    .put("listen", "127.0.0.1")
+                    .put("port", relayUnderlayPorts.getValue(i))
+                    .put("protocol", "socks")
+                    .put("settings", JSONObject().put("auth", "noauth").put("udp", true)))
+                // This is deliberately before the stage's normal rule and
+                // has no port-53 matcher: relay traffic bypasses DNS policy.
+                rules.put(JSONObject().put("type", "field")
+                    .put("inboundTag", JSONArray().put("mix-relay-underlay-$i"))
+                    .put("outboundTag", "mix-underlay-$i"))
+            } else {
+                outbounds.add(outbound)
+            }
             inbounds.put(JSONObject().put("tag", "mix-prefix-$i").put("listen", "127.0.0.1")
                 .put("port", prefixPorts[i]).put("protocol", "socks")
                 .put("settings", JSONObject().put("auth", "noauth").put("udp", true)))

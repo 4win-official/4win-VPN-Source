@@ -55,11 +55,6 @@ class MixPlanBuilder {
             (v) => v.group,
             'proxy server/group',
           );
-          if (s.protocol != 'socks5' && s.protocol != 'http') {
-            throw const FormatException(
-              'Mix supports SOCKS5 and HTTP proxies, not SOCKS4.',
-            );
-          }
           final decoded = _decode(XrayConfigBuilder.buildForProxyServer(s));
           final outbound = _firstOutbound(decoded);
           if (s.link.toLowerCase().startsWith('https://')) {
@@ -68,7 +63,16 @@ class MixPlanBuilder {
               'tlsSettings': {'serverName': s.address, 'allowInsecure': false},
             };
           }
-          hops.add({'protocol': 'proxy', 'outbound': outbound});
+          hops.add({
+            'protocol': 'proxy',
+            'outbound': outbound,
+            if (s.protocol.toLowerCase() == 'socks4')
+              'socks4': {
+                'host': s.address,
+                'port': s.port,
+                'userId': s.username,
+              },
+          });
           break;
         case 'warp':
           if (hop.serverId != 'default') {
@@ -150,7 +154,13 @@ class MixPlanBuilder {
     final dns = dnsHop.isEmpty
         ? '1.1.1.1'
         : (dnsHop.last.serverId ?? '1.1.1.1');
-    return {'version': 1, 'hops': hops, 'dns': dns, 'baseConfig': base};
+    return {
+      'version': 1,
+      'hops': hops,
+      'dns': dns,
+      'baseConfig': base,
+      if (strategy.udpRelay != null) 'udpRelay': strategy.udpRelay!.toJson(),
+    };
   }
 
   /// Named alias for callers that prefer the plan terminology.

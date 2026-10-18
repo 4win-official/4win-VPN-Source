@@ -1,9 +1,11 @@
 package com.forwin.vpn.mix
 
 import android.content.Context
+import android.content.ContextWrapper
 import ca.psiphon.PsiphonTunnel
 import gi.Seq
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -66,23 +68,27 @@ class PsiphonMixAdapter : MixAdapter {
         System.loadLibrary(NATIVE_LIBRARY)
 
         require(environment.listenPort in 1..65535) { "invalid Mix SOCKS listen port" }
-        val psiphonConfig = JSONObject(config.toString())
-            .put("LocalSocksProxyPort", environment.listenPort)
-            // Mix consumes SOCKS only; do not ask Psiphon to expose HTTP.
-            .put("LocalHttpProxyPort", 0)
-
-        // Overwrite any caller-provided value. If this is a non-first hop,
-        // the supplied proxy is mandatory and Psiphon must not silently use a
-        // direct route when it cannot reach it. A null value is the deliberate
-        // first-hop case and therefore omits the option.
-        if (environment.upstreamSocksUrl != null) {
-            psiphonConfig.put("UpstreamProxyURL", environment.upstreamSocksUrl)
-        } else {
-            psiphonConfig.remove("UpstreamProxyURL")
+        val root = MixPsiphonConfig.root(environment.context.filesDir, environment.hopId)
+        listOf(root, File(root, "tunnel-core"), File(root, "legacy"), File(root, "cache"),
+            File(root, "no-backup")).forEach {
+            check(it.mkdirs() || it.isDirectory) { "Cannot prepare private Mix Psiphon storage" }
         }
+        val privateContext = object : ContextWrapper(environment.context.applicationContext) {
+            override fun getApplicationContext(): Context = this
+            override fun getFilesDir(): File = File(root, "legacy")
+            override fun getCacheDir(): File = File(root, "cache")
+            override fun getNoBackupFilesDir(): File = File(root, "no-backup")
+            override fun getFileStreamPath(name: String): File = File(filesDir, name)
+            override fun getSharedPreferences(name: String, mode: Int) =
+                super.getSharedPreferences("mix_psiphon_${environment.hopId}_$name", mode)
+        }
+        val bootstrap = environment.context.assets.open("mix_psiphon_bootstrap.json")
+            .bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
+        val psiphonConfig = MixPsiphonConfig.build(config, root,
+            environment.listenPort, environment.upstreamSocksUrl, bootstrap)
 
         val hostService = object : PsiphonTunnel.HostService {
-            override fun getContext(): Context = environment.context.applicationContext
+            override fun getContext(): Context = privateContext
             override fun getPsiphonConfig(): String = psiphonConfig.toString()
             override fun loadLibrary(library: String) {
                 if (library == "gojni") System.loadLibrary(NATIVE_LIBRARY)
@@ -95,7 +101,15 @@ class PsiphonMixAdapter : MixAdapter {
             // intentional and avoids an unsafe VpnService cast.
             override fun bindToDevice(fileDescriptor: Long) = Unit
 
-            override fun onConnecting() = Unit
+            override fun onConnecting() {
+                synchronized(lock) {
+                    // A published prefix must not silently disappear while the
+                    // rest of the chain continues to advertise a working VPN.
+                    if (readySent && isLiveLocked(token)) {
+                        failLocked(token, environment, "Psiphon stage lost its tunnel")
+                    }
+                }
+            }
 
             override fun onConnected() {
                 synchronized(lock) {
@@ -108,8 +122,8 @@ class PsiphonMixAdapter : MixAdapter {
             override fun onListeningSocksProxyPort(port: Int) {
                 synchronized(lock) {
                     if (!isLiveLocked(token)) return
-                    if (port !in 1..65535) {
-                        failLocked(token, environment, "Psiphon returned an invalid SOCKS port")
+                    if (port != environment.listenPort) {
+                        failLocked(token, environment, "Psiphon did not bind the assigned Mix SOCKS port")
                         return
                     }
                     socksPort = port
@@ -180,8 +194,13 @@ class PsiphonMixAdapter : MixAdapter {
         timeout = null
         timeoutExecutor?.shutdownNow()
         timeoutExecutor = null
-        try { tunnel?.stop() } catch (_: Throwable) {}
+        val failedTunnel = tunnel
         tunnel = null
+        // Psiphon invokes us on native threads. stop() may join those same
+        // threads; never call it from a callback or while holding this lock.
+        if (failedTunnel != null) Thread({
+            runCatching { failedTunnel.stop() }
+        }, "psiphon-mix-failed-stop").apply { isDaemon = true; start() }
         try { environment.onFailure(reason) } catch (_: Throwable) {}
     }
 

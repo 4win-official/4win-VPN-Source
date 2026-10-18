@@ -6,6 +6,8 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.forwin.vpn.R
 import org.json.JSONObject
@@ -17,6 +19,10 @@ open class MixWorkerService : Service() {
     private var adapter: MixAdapter? = null
     private val generation = AtomicLong()
     private val stopping = AtomicBoolean(false)
+    private val destroyed = AtomicBoolean(false)
+    private val adapterClosed = AtomicBoolean(false)
+    private val stoppedSent = AtomicBoolean(false)
+    private val main = Handler(Looper.getMainLooper())
     private var sessionId = ""
     private var hopId = ""
 
@@ -44,7 +50,7 @@ open class MixWorkerService : Service() {
         if (intent.action != ACTION_START || incomingSession.isBlank() || incomingHop.isBlank()) {
             stopSelf(); return START_NOT_STICKY
         }
-        if (adapter != null) {
+        if (adapter != null || stopping.get()) {
             emit(incomingSession, incomingHop, "error", "Worker is still occupied by another stage")
             return START_NOT_STICKY
         }
@@ -92,10 +98,21 @@ open class MixWorkerService : Service() {
         adapter = null
         Thread {
             try { engine?.stop() } catch (_: Throwable) { }
-            if (sessionId.isNotEmpty()) emit(sessionId, hopId, "stopped")
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            finally {
+                adapterClosed.set(true)
+                main.post {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    emitStoppedIfClosed()
+                }
+            }
         }.start()
+    }
+
+    private fun emitStoppedIfClosed() {
+        // A new strategy must not reuse this instance while it is still stopping.
+        if (destroyed.get() && adapterClosed.get() && sessionId.isNotEmpty() &&
+            stoppedSent.compareAndSet(false, true)) emit(sessionId, hopId, "stopped")
     }
 
     private fun emit(session: String, hop: String, state: String, error: String? = null, udp: Boolean = false) {
@@ -104,7 +121,12 @@ open class MixWorkerService : Service() {
             .putExtra("error", error).putExtra("supportsUdp", udp))
     }
 
-    override fun onDestroy() { stopAdapter(); super.onDestroy() }
+    override fun onDestroy() {
+        destroyed.set(true)
+        stopAdapter()
+        emitStoppedIfClosed()
+        super.onDestroy()
+    }
 
     companion object {
         const val ACTION_START = "com.forwin.vpn.mix.START_WORKER"

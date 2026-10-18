@@ -193,4 +193,36 @@ class MixRoutingTest {
         }
     }
 
+    @Test fun udpRelayWrapsStagesWithoutCreatingADialerCycle() {
+        val result = MixRouting.sidecar(
+            plan("xray", "proxy"),
+            listOf(20000, 20001),
+            emptyMap(), emptyMap(),
+            udpRelayPorts = mapOf(0 to 21000, 1 to 21001),
+            relayUnderlayPorts = mapOf(0 to 22000, 1 to 22001)
+        )
+        val outbounds = (0 until result.getJSONArray("outbounds").length())
+            .map { result.getJSONArray("outbounds").getJSONObject(it) }
+            .associateBy { it.getString("tag") }
+        assertEquals("socks", outbounds["mix-stage-0"]!!.getString("protocol"))
+        assertEquals(21000, outbounds["mix-stage-0"]!!.getJSONObject("settings")
+            .getJSONArray("servers").getJSONObject(0).getInt("port"))
+        assertEquals("mix-stage-0", outbounds["mix-underlay-1"]!!
+            .getJSONObject("streamSettings").getJSONObject("sockopt")
+            .getString("dialerProxy"))
+        assertEquals("mix-underlay-0", (0 until result.getJSONObject("routing")
+            .getJSONArray("rules").length()).map { result.getJSONObject("routing")
+            .getJSONArray("rules").getJSONObject(it) }.single {
+                it.getJSONArray("inboundTag").getString(0) == "mix-relay-underlay-0"
+            }.getString("outboundTag"))
+        assertEquals(22001, (0 until result.getJSONArray("inbounds").length())
+            .map { result.getJSONArray("inbounds").getJSONObject(it) }.single {
+                it.getString("tag") == "mix-relay-underlay-1"
+            }.getInt("port"))
+        assertThrows(IllegalArgumentException::class.java) {
+            MixRouting.sidecar(plan("direct_dns"), listOf(20000), emptyMap(), mapOf(0 to 23000),
+                udpRelayPorts = mapOf(0 to 24000), relayUnderlayPorts = mapOf(0 to 25000))
+        }
+    }
+
 }

@@ -30,6 +30,10 @@ class OpenVpnMixAdapter : MixAdapter {
 
     override fun start(config: JSONObject, environment: MixAdapterEnvironment) {
         if (!stopped.compareAndSet(true, false)) { environment.onFailure("OpenVPN Mix adapter is already running"); return }
+        // The adapter instance can be started again after stop().  Do not let a
+        // failure from the previous generation suppress this generation's
+        // callback (failureReported is intentionally per-run state).
+        failureReported.set(false)
         this.environment = environment
         worker = Executors.newSingleThreadExecutor { r -> Thread(r, "openvpn-mix-${environment.sessionId}").apply { isDaemon = true } }
         worker!!.execute {

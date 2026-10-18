@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_swift/models/mix_strategy.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
-import 'package:vpn_swift/services/vpn_service.dart';
 
 class TestVpnProvider extends VpnProvider {
   @override
@@ -153,6 +152,50 @@ void main() {
       provider.dispose();
     },
   );
+
+  test('relay on an otherwise Xray-only chain uses the coordinator', () async {
+    final strategy = MixStrategy(
+      id: 'relay',
+      name: 'Relay',
+      hops: _strategy().hops,
+      udpRelay: const MixUdpRelay(
+        host: 'relay.example',
+        port: 4433,
+        token: '0123456789abcdef0123456789abcdef',
+      ),
+    );
+    final provider = await providerWith(strategy);
+    await provider.connect();
+    expect(provider.status, VpnConnectionStatus.connected);
+    expect(calls, contains('connectMixPlan'));
+    expect(calls, isNot(contains('connectMix')));
+    await provider.disconnect();
+    expect(calls, contains('disconnectMixPlan'));
+    provider.dispose();
+  });
+
+  test('SOCKS4-only chain uses its real coordinator adapter', () async {
+    final strategy = MixStrategy(
+      id: 'four',
+      name: 'SOCKS4',
+      hops: const [MixHop(protocol: 'proxy', serverId: 'p1')],
+    );
+    final provider = await providerWith(strategy);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('proxy_servers', [
+      jsonEncode({
+        ..._proxy,
+        'protocol': 'socks4',
+        'link': 'socks4://proxy.example.com:1080',
+      }),
+    ]);
+    await provider.connect();
+    expect(provider.status, VpnConnectionStatus.connected);
+    expect(calls, contains('connectMixPlan'));
+    expect(calls, isNot(contains('connectMix')));
+    await provider.disconnect();
+    provider.dispose();
+  });
 
   test(
     'proxy-only mode rejects Mix before permission or native connect',
