@@ -30,6 +30,7 @@ class XrayVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var coreController: CoreController? = null
     private var configJson: String? = null
+    private var mixMode = false
     @Volatile private var isRunning = false
     @Volatile private var aetherActive = false
 
@@ -38,6 +39,7 @@ class XrayVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.forwin.vpn.XRAY_DISCONNECT"
         const val EXTRA_CONFIG_JSON = "config_json"
         const val EXTRA_PROXY_MODE = "proxy_mode"
+        const val EXTRA_MIX_MODE = "mix_mode"
 
         private const val TAG = "XrayVpnService"
         private const val NOTIFICATION_ID = 2
@@ -77,6 +79,7 @@ class XrayVpnService : VpnService() {
         when (intent?.action) {
             ACTION_CONNECT -> {
                 configJson = intent.getStringExtra(EXTRA_CONFIG_JSON)
+                mixMode = intent.getBooleanExtra(EXTRA_MIX_MODE, false)
                 try {
                     showNotification()
                 } catch (t: Throwable) {
@@ -107,7 +110,7 @@ class XrayVpnService : VpnService() {
                 return
             }
             val builder = Builder()
-                .setSession("4win VPN - Xray")
+                .setSession(if (mixMode) "4win VPN - Mix" else "4win VPN - Xray")
                 .setMtu(VPN_MTU)
                 .addAddress(PRIVATE_VLAN4_CLIENT, 30)
                 .addRoute("0.0.0.0", 0)
@@ -125,13 +128,14 @@ class XrayVpnService : VpnService() {
             // disallowed list. In OFF/EXCLUDE mode our app stays outside the
             // tunnel to prevent loops.
             val splitMode = SplitTunnel.mode(applicationContext)
-            if (splitMode != "include") {
+            if (mixMode || splitMode != "include") {
                 try {
                     builder.addDisallowedApplication(packageName)
                 } catch (_: Throwable) { }
             }
 
-            SplitTunnel.apply(applicationContext, builder, packageName)
+            // Mix captures all other apps; never rewrite standalone preferences.
+            if (!mixMode) SplitTunnel.apply(applicationContext, builder, packageName)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.setMetered(false)

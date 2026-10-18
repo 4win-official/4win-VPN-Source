@@ -109,7 +109,8 @@ mod tests {
             s.addr,
             "[2606:4700::6810:f0f9]:443".parse().unwrap()
         );
-        assert_eq!(s.host, "[2606:4700::6810:f0f9]");
+        // Host/SNI is the IPv6 literal; only SocketAddr formatting keeps brackets.
+        assert_eq!(s.host, "2606:4700::6810:f0f9");
     }
 
     #[test]
@@ -119,7 +120,8 @@ mod tests {
             s.addr,
             "[2606:4700::6810:f0f9]:8443".parse().unwrap()
         );
-        assert_eq!(s.host, "[2606:4700::6810:f0f9]");
+        // Host/SNI is the IPv6 literal; only SocketAddr formatting keeps brackets.
+        assert_eq!(s.host, "2606:4700::6810:f0f9");
     }
 
     #[test]

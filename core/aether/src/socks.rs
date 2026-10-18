@@ -35,6 +35,9 @@ impl std::fmt::Display for Target {
     }
 }
 
+static FORCE_STACK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_force_stack(value: bool) { FORCE_STACK.store(value, std::sync::atomic::Ordering::Release); }
+
 static GATEWAY_PROXY: std::sync::RwLock<Option<SocketAddr>> = std::sync::RwLock::new(None);
 
 pub fn set_gateway_proxy(address: &str) {
@@ -184,6 +187,19 @@ pub(crate) fn proxy_connect_succeeded(head: &[u8]) -> Option<bool> {
 
 pub async fn serve(listen: SocketAddr, stack: StackHandle) -> Result<()> {
     let listener = TcpListener::bind(listen).await?;
+    serve_bound(listener, stack).await
+}
+
+pub async fn serve_bound_stack(listener: TcpListener, stack: StackHandle) -> Result<()> {
+    serve_bound_mode(listener, stack, true).await
+}
+
+pub async fn serve_bound(listener: TcpListener, stack: StackHandle) -> Result<()> {
+    serve_bound_mode(listener, stack, FORCE_STACK.load(std::sync::atomic::Ordering::Acquire)).await
+}
+
+async fn serve_bound_mode(listener: TcpListener, stack: StackHandle, force_stack: bool) -> Result<()> {
+    let listen = listener.local_addr()?;
     log::info!("socks5 listening on {listen}");
     let bind_ip = listen.ip();
 
@@ -205,7 +221,7 @@ pub async fn serve(listen: SocketAddr, stack: StackHandle) -> Result<()> {
 
         let stack = stack.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(sock, stack, bind_ip).await {
+            if let Err(e) = handle_client(sock, stack, bind_ip, force_stack).await {
                 log::debug!("socks client {peer} ended: {e}");
             }
         });
@@ -236,7 +252,7 @@ pub fn accept_backoff(error: &std::io::Error) -> Option<std::time::Duration> {
     }
 }
 
-async fn handle_client(mut sock: TcpStream, stack: StackHandle, bind_ip: IpAddr) -> Result<()> {
+async fn handle_client(mut sock: TcpStream, stack: StackHandle, bind_ip: IpAddr, force_stack: bool) -> Result<()> {
     handshake(&mut sock).await?;
 
     let mut head = [0u8; 4];
@@ -250,8 +266,8 @@ async fn handle_client(mut sock: TcpStream, stack: StackHandle, bind_ip: IpAddr)
     let (target, port) = read_target(&mut sock, atyp).await?;
 
     match cmd {
-        CMD_CONNECT => handle_connect(sock, stack, target, port).await,
-        CMD_UDP_ASSOCIATE => handle_udp_associate(sock, stack, bind_ip, target, port).await,
+        CMD_CONNECT => handle_connect(sock, stack, target, port, force_stack).await,
+        CMD_UDP_ASSOCIATE => handle_udp_associate(sock, stack, bind_ip, target, port, force_stack).await,
         _ => {
             reply(&mut sock, REP_NOT_SUPPORTED).await?;
             Err(AetherError::Other("unsupported socks command".into()))
@@ -728,6 +744,7 @@ async fn handle_connect(
     stack: StackHandle,
     target: Target,
     port: u16,
+    force_stack: bool,
 ) -> Result<()> {
     // DOMAIN SNIFF: an IP-targeted connection may still announce its name in
     // the ClientHello, which is the only place a domain routing rule can match
@@ -773,11 +790,11 @@ async fn handle_connect(
         // on the IP is Direct with or without a name, so the fast path is kept
         // and the head is carried into handle_direct instead of being read a
         // second time.
-        Action::Direct => {
+        Action::Direct if !force_stack => {
             log::debug!("[route] direct tcp {target}:{port}");
             return handle_direct(sock, target, port, head, replied).await;
         }
-        Action::Proxy => {}
+        Action::Direct | Action::Proxy => {}
     }
 
     let via_gateway = gateway_proxy().filter(|_| should_use_gateway(port));
@@ -1032,6 +1049,7 @@ async fn handle_udp_associate(
     bind_ip: IpAddr,
     requested: Target,
     _requested_port: u16,
+    force_stack: bool,
 ) -> Result<()> {
     let control_peer = sock.peer_addr()?;
     let expected_ip = expected_udp_source(control_peer, &requested);
@@ -1082,7 +1100,7 @@ async fn handle_udp_associate(
                             log::debug!("[route] block udp {dst}:{dst_port}");
                             continue;
                         }
-                        Action::Direct => {
+                        Action::Direct if !force_stack => {
                             let outside = match &dst {
                                 Target::Ip(ip) => Some(SocketAddr::new(*ip, dst_port)),
                                 Target::Domain(name) => {
@@ -1101,7 +1119,7 @@ async fn handle_udp_associate(
                             }
                             continue;
                         }
-                        Action::Proxy => {}
+                        Action::Direct | Action::Proxy => {}
                     }
 
                     let dst = match dst {

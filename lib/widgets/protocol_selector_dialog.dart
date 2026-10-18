@@ -4,11 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../screens/settings_screen.dart';
+import '../screens/mix_strategies_screen.dart';
 
 class ProtocolSelectorDialog extends StatelessWidget {
   const ProtocolSelectorDialog({super.key});
 
   void _openProtocolSettings(BuildContext context, String protocol) {
+    if (protocol == 'mix') {
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => const MixStrategiesScreen(),
+      ));
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -233,6 +240,16 @@ class ProtocolSelectorDialog extends StatelessWidget {
                             physics: const BouncingScrollPhysics(),
                             child: Column(
                               children: [
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'mix',
+                                  title: 'Mix · میکس',
+                                  subtitle: 'Ordered, real multi-hop strategies',
+                                  icon: Icons.account_tree,
+                                  accent: Colors.cyan,
+                                ),
                                 _protocolTile(
                                   context,
                                   provider: vpnProvider,

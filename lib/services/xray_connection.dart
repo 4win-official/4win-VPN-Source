@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 
@@ -5,6 +6,44 @@ import 'package:flutter/foundation.dart';
 /// Bridges to [XrayVpnService] which runs the real Xray core (libv2ray).
 class XrayConnection {
   static const platform = MethodChannel('com.forwin.vpn/xray');
+
+  static Future<int> connectMixPlan(Map<String, dynamic> plan) async {
+    try {
+      final result = await platform.invokeMethod('connectMixPlan', {
+        'planJson': jsonEncode(plan),
+      });
+      if (result is int) return result;
+      if (result is num) return result.toInt();
+      throw StateError(
+        'The native Mix coordinator returned an invalid response.',
+      );
+    } on PlatformException catch (error) {
+      throw StateError(error.message ?? 'The complete Mix chain failed.');
+    } on MissingPluginException {
+      throw StateError('This app build does not include the Mix coordinator.');
+    }
+  }
+
+  static Future<void> disconnectMixPlan() async {
+    try {
+      await platform.invokeMethod('disconnectMixPlan');
+    } catch (_) {
+      // Optional on older native builds and test method-channel mocks.
+    }
+  }
+
+  /// Separate entry point: always a system-wide tunnel, never proxy-only or
+  /// the standalone split-tunnel preference. Existing connect() is unchanged.
+  static Future<bool> connectMix(String configJson) async {
+    try {
+      return await platform.invokeMethod('connectMix', {
+            'configJson': configJson,
+          }) ==
+          true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Request the system VPN permission. Returns true if already granted.
   static Future<bool> requestPermission() async {
@@ -22,8 +61,10 @@ class XrayConnection {
   /// When [proxyMode] is true the native service runs the core WITHOUT a system
   /// VpnService tunnel — it only serves a local SOCKS/HTTP proxy on
   /// 127.0.0.1:4444, so no VPN key icon appears.
-  static Future<bool> connect(String configJson,
-      {bool proxyMode = false}) async {
+  static Future<bool> connect(
+    String configJson, {
+    bool proxyMode = false,
+  }) async {
     try {
       final result = await platform.invokeMethod('connectXray', {
         'configJson': configJson,
@@ -61,8 +102,10 @@ class XrayConnection {
   /// request routed through the proxy described by [configJson] (a proxy-only
   /// config built by XrayConfigBuilder.buildForDelayTest). Returns latency in
   /// ms, or -1 if the config does not work / times out.
-  static Future<int> measureDelay(String configJson,
-      {String url = 'https://www.google.com/generate_204'}) async {
+  static Future<int> measureDelay(
+    String configJson, {
+    String url = 'https://www.google.com/generate_204',
+  }) async {
     try {
       final result = await platform.invokeMethod('measureDelay', {
         'configJson': configJson,

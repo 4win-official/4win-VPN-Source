@@ -6,7 +6,7 @@ set_target_properties(aether PROPERTIES
     IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../jniLibs/${ANDROID_ABI}/libaether.so"
     IMPORTED_NO_SONAME TRUE)
 
-add_library(aether_jni SHARED aether_jni.cpp)
+add_library(aether_jni SHARED aether_jni.cpp mix_packet_jni.cpp)
 target_link_options(aether_jni PRIVATE
     "-Wl,-z,max-page-size=16384")
 # No -z common-page-size: it pads PT_GNU_RELRO to a 16K boundary that can

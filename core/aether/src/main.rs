@@ -72,6 +72,7 @@ pub struct StartOptions {
     pub access_email: Option<String>,
     pub gateway: bool,
     pub upstream_proxy: Option<String>,
+    pub mix_force_tunnel: bool,
     /// Where to publish the HTTP CONNECT proxy alongside SOCKS, if anywhere.
     ///
     /// Only meaningful on the no-`tun_fd` path: that is the branch that builds the
@@ -137,11 +138,7 @@ pub struct TunnelAddresses {
 }
 
 fn address_host(raw: &str) -> String {
-    raw.split('/')
-        .next()
-        .unwrap_or(raw)
-        .trim()
-        .to_string()
+    raw.split('/').next().unwrap_or(raw).trim().to_string()
 }
 
 impl StartOptions {
@@ -180,6 +177,7 @@ impl StartOptions {
             access_email: None,
             gateway: false,
             upstream_proxy: None,
+            mix_force_tunnel: false,
             http_proxy: None,
         }
     }
@@ -263,6 +261,25 @@ pub async fn run_cli() -> Result<()> {
 
 pub async fn start(options: StartOptions) -> Result<()> {
     apply_runtime_options(&options);
+    match options
+        .upstream_proxy
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        Some(proxy) => std::env::set_var("AETHER_WG_UPSTREAM_SOCKS", proxy),
+        None => std::env::remove_var("AETHER_WG_UPSTREAM_SOCKS"),
+    }
+    // Account registration and endpoint API probes must use the same upstream
+    // when a chain is requested; never silently probe the physical network.
+    if let Some(proxy) = options
+        .upstream_proxy
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        std::env::set_var("AETHER_SOCKS_PROXY", socks_proxy_authority(proxy));
+    }
     initialize();
 
     match options.protocol {
@@ -322,14 +339,35 @@ pub async fn start(options: StartOptions) -> Result<()> {
             );
             let ech = resolve_ech().await;
             let lastconn_path = mim_lastconn_path(&primary_path);
-            run_mim(primary, secondary, ech, options.listen, lastconn_path, &options).await
+            run_mim(
+                primary,
+                secondary,
+                ech,
+                options.listen,
+                lastconn_path,
+                &options,
+            )
+            .await
         }
         Protocol::Psiphon => {
-            let upstream = options.upstream_proxy.as_deref().unwrap_or("127.0.0.1:1080");
+            let upstream = options
+                .upstream_proxy
+                .as_deref()
+                .unwrap_or("127.0.0.1:1080");
             log::info!("[+] Psiphon upstream SOCKS proxy: {upstream}");
             run_psiphon(upstream, options.listen, &options).await
         }
     }
+}
+
+fn socks_proxy_authority(raw: &str) -> String {
+    let value = raw.trim();
+    let value = value
+        .strip_prefix("socks5h://")
+        .or_else(|| value.strip_prefix("socks5://"))
+        .or_else(|| value.strip_prefix("socks://"))
+        .unwrap_or(value);
+    value.strip_prefix("//").unwrap_or(value).to_string()
 }
 
 fn apply_runtime_options(options: &StartOptions) {
@@ -383,6 +421,7 @@ fn apply_runtime_options(options: &StartOptions) {
     } else {
         std::env::remove_var("AETHER_GATEWAY");
     }
+    socks::set_force_stack(options.mix_force_tunnel);
     socks::clear_gateway_proxy();
     socks::reload_routes();
 }
@@ -462,8 +501,7 @@ pub fn initialize() {
                 // hickory are chatty at info and would flood the app log — they
                 // stay on stdout (logcat) instead, which is where a developer
                 // looks for them anyway.
-                metadata.level() == log::Level::Info
-                    && metadata.target().starts_with("aether")
+                metadata.level() == log::Level::Info && metadata.target().starts_with("aether")
             }
             fn log(&self, record: &log::Record) {
                 if !self.enabled(record.metadata()) {
@@ -922,7 +960,8 @@ async fn select_peer(
                     enable_restricted_h2();
                     let mut h2_probe = probe.clone();
                     h2_probe.ports = masque_h2_ports(&probe.ports);
-                    match prober::verify_cached_gateways(&h2_probe, masque_h2_gateway_peers()).await {
+                    match prober::verify_cached_gateways(&h2_probe, masque_h2_gateway_peers()).await
+                    {
                         Some(best) => best,
                         None => {
                             // See `hunt_masque_peer`: a wide HTTP/2 sweep cannot
@@ -988,9 +1027,9 @@ async fn select_peer(
             );
             Ok(SocketAddr::new(best.ip, best.port))
         }
-        Protocol::Psiphon => {
-            Err(AetherError::Other("psiphon gateway discovery is not applicable".into()))
-        }
+        Protocol::Psiphon => Err(AetherError::Other(
+            "psiphon gateway discovery is not applicable".into(),
+        )),
     }
 }
 
@@ -1216,7 +1255,11 @@ fn masque_gateway_peers() -> Vec<SocketAddr> {
         };
         let o = base.octets();
         for host in [1u8, 2] {
-            push(&mut out, Ipv4Addr::new(o[0], o[1], o[2], host), consts::QUIC_PORT);
+            push(
+                &mut out,
+                Ipv4Addr::new(o[0], o[1], o[2], host),
+                consts::QUIC_PORT,
+            );
         }
     }
 
@@ -1582,11 +1625,8 @@ async fn hunt_masque_peer(
             let mut h2_probe = probe.clone();
             h2_probe.ports = masque_h2_ports(&probe.ports);
             crate::ffi::record_log("Checking Cloudflare CDN anycast for HTTP/2");
-            if let Some(best) = prober::verify_cached_gateways(
-                &h2_probe,
-                masque_gateway_peers(),
-            )
-            .await
+            if let Some(best) =
+                prober::verify_cached_gateways(&h2_probe, masque_gateway_peers()).await
             {
                 crate::ffi::record_log(format!(
                     "Selected {}:{} ({:?})",
@@ -2606,10 +2646,7 @@ fn http_proxy_listen(options: &StartOptions) -> Option<SocketAddr> {
     }
 }
 
-fn spawn_http_proxy(
-    stack: &netstack::StackHandle,
-    options: &StartOptions,
-) -> Option<TunnelExit> {
+fn spawn_http_proxy(stack: &netstack::StackHandle, options: &StartOptions) -> Option<TunnelExit> {
     let listen = http_proxy_listen(options)?;
     let stack = stack.clone();
     Some(tokio::spawn(async move {
@@ -2960,8 +2997,7 @@ async fn run_warp_in_warp(
                 .await
                 .map_err(|e| AetherError::Other(format!("[inner] {e}")))
         });
-        let local_task =
-            tokio::spawn(tun::bridge(fd, secondary_ipv4, inbound_rx, outbound_tx));
+        let local_task = tokio::spawn(tun::bridge(fd, secondary_ipv4, inbound_rx, outbound_tx));
         (inner_exit, local_task)
     } else {
         let (inner_stack, inner_exit) = establish_wg(
@@ -3078,9 +3114,7 @@ fn mim_inner_budget(outer_mtu: usize, inner_peer: SocketAddr, h2: bool) -> (usiz
         .clamp(quic::MIN_DATAGRAM_SIZE, quic::MAX_DATAGRAM_SIZE);
     // What the capsule layer costs on top of the inner IP packet.
     let capsule_overhead = quic::MAX_DATAGRAM_SIZE - TUNNEL_MTU;
-    let mtu = datagram
-        .saturating_sub(capsule_overhead)
-        .clamp(576, 1500);
+    let mtu = datagram.saturating_sub(capsule_overhead).clamp(576, 1500);
     (datagram, mtu)
 }
 
@@ -3321,7 +3355,10 @@ async fn establish_masque(
             pin_endpoint: true,
             expected_pins: consts::MASQUE_PINS.iter().map(|p| p.to_vec()).collect(),
         };
-        log::info!("[+] [{label}] MASQUE transport: HTTP/2 (TCP) to {} (inner mtu {mtu})", h2cfg.peer);
+        log::info!(
+            "[+] [{label}] MASQUE transport: HTTP/2 (TCP) to {} (inner mtu {mtu})",
+            h2cfg.peer
+        );
         tokio::spawn(masque_h2::run(
             h2cfg,
             internals,
@@ -3556,9 +3593,7 @@ async fn run_masque_in_masque(
     }
 
     crate::ffi::mark_ready();
-    log::info!(
-        "[+] masque-in-masque ready: {peer} (outer) and {inner_peer} (inner)"
-    );
+    log::info!("[+] masque-in-masque ready: {peer} (outer) and {inner_peer} (inner)");
 
     #[derive(PartialEq)]
     enum Winner {
@@ -3666,9 +3701,7 @@ async fn run_mim(
             last_peer.or(cached_peer)
         } else {
             if let Some(p) = last_peer {
-                log::warn!(
-                    "[-] outer edge {p} failed {outer_fails} times in a row; rescanning"
-                );
+                log::warn!("[-] outer edge {p} failed {outer_fails} times in a row; rescanning");
             }
             cached_peer = None;
             None
@@ -3812,16 +3845,13 @@ fn join_outcome(
 }
 
 /// PSIPHON mode: bridge Android TUN → upstream SOCKS5 proxy (tun2socks).
-async fn run_psiphon(
-    upstream: &str,
-    _listen: SocketAddr,
-    options: &StartOptions,
-) -> Result<()> {
+async fn run_psiphon(upstream: &str, _listen: SocketAddr, options: &StartOptions) -> Result<()> {
     let upstream_addr: SocketAddr = upstream
         .parse()
         .map_err(|e| AetherError::Other(format!("invalid upstream proxy {upstream}: {e}")))?;
 
-    let tun_fd = options.tun_fd
+    let tun_fd = options
+        .tun_fd
         .ok_or_else(|| AetherError::Other("psiphon mode requires a TUN fd".into()))?;
 
     log::info!("[+] PSIPHON tun2socks: TUN fd={tun_fd} → upstream SOCKS5 {upstream_addr}");
@@ -4197,7 +4227,10 @@ mod tests {
     #[test]
     fn prepare_addresses_drop_cidr_suffixes() {
         assert_eq!(address_host("172.16.0.2/32"), "172.16.0.2");
-        assert_eq!(address_host("2606:4700:110:8877::2/128"), "2606:4700:110:8877::2");
+        assert_eq!(
+            address_host("2606:4700:110:8877::2/128"),
+            "2606:4700:110:8877::2"
+        );
         assert_eq!(address_host(""), "");
     }
 
@@ -4397,7 +4430,11 @@ mod tests {
 
         // Ports left off the ladder must not cost a user-visible verify timeout
         // on the start path, even though the sweep may still reach them.
-        for text in ["162.159.199.1:4443", "162.159.199.1:8443", "162.159.199.1:2408"] {
+        for text in [
+            "162.159.199.1:4443",
+            "162.159.199.1:8443",
+            "162.159.199.1:2408",
+        ] {
             assert!(index(text).is_none(), "{text} must not be on the ladder");
         }
 
@@ -4525,10 +4562,16 @@ mod tests {
         assert_eq!(protocol.as_str(), consts::CF_CONNECT_PROTOCOL);
 
         assert_eq!(request.uri().scheme_str(), Some("https"));
-        assert_eq!(request.uri().authority().map(|a| a.as_str()), Some("cloudflareaccess.com"));
+        assert_eq!(
+            request.uri().authority().map(|a| a.as_str()),
+            Some("cloudflareaccess.com")
+        );
         assert_eq!(request.uri().path(), "/");
         assert_eq!(
-            request.headers().get("capsule-protocol").map(|v| v.as_bytes()),
+            request
+                .headers()
+                .get("capsule-protocol")
+                .map(|v| v.as_bytes()),
             Some(&b"?1"[..])
         );
     }
@@ -4630,7 +4673,10 @@ mod tests {
         assert_eq!(request.uri().host(), Some(quic::default_authority()));
         assert_eq!(request.uri().path(), "/");
         assert_eq!(
-            request.headers().get("capsule-protocol").map(|v| v.as_bytes()),
+            request
+                .headers()
+                .get("capsule-protocol")
+                .map(|v| v.as_bytes()),
             Some(b"?1".as_ref())
         );
     }

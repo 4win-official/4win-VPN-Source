@@ -116,13 +116,13 @@ void main() {
     });
 
     test('buildForWarp selects the Aether WireGuard data-plane', () {
-      const account = WarpAccount(
+      final account = WarpAccount(
         id: 'id',
         accountId: 'account',
         token: 'token',
         privateKeyBase64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
-        publicKeyBase64: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=',
-        peerPublicKeyBase64: 'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=',
+        publicKeyBase64: base64Encode(List<int>.filled(32, 1)),
+        peerPublicKeyBase64: base64Encode(List<int>.filled(32, 2)),
         peerEndpoint: '162.159.192.1:2408',
         addressV4: '172.16.0.2/32',
         addressV6: '',

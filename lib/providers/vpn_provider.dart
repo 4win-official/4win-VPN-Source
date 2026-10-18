@@ -25,11 +25,32 @@ import '../services/warp_service.dart';
 import '../services/psiphon_service.dart';
 import '../services/retry_policy.dart';
 import '../services/connection_logger.dart';
+import '../models/mix_strategy.dart';
+import '../services/mix_strategy_store.dart';
+import '../services/mix_config_builder.dart';
+import '../services/mix_plan_builder.dart';
 
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
+part 'mix_provider.dart';
 
 class VpnProvider with ChangeNotifier {
+  final MixStrategyStore _mixStore = MixStrategyStore();
+  List<MixStrategy> _mixStrategies = [];
+  String? _selectedMixStrategyId;
+  late final Future<void> _mixLoaded;
+  Future<void>? _mixOperation;
+  int _mixConnectGen = 0;
+  Timer? _mixMonitor;
+  bool _mixDisposed = false;
+  Future<void>? _mixDisconnectOperation;
+  List<MixStrategy> get mixStrategies => List.unmodifiable(_mixStrategies);
+  String? get selectedMixStrategyId => _selectedMixStrategyId;
+  MixStrategy? get selectedMixStrategy => _selectedMixStrategy;
+  Future<void> saveMixStrategy(MixStrategy strategy) =>
+      _saveMixStrategy(strategy);
+  Future<void> deleteMixStrategy(String id) => _deleteMixStrategy(id);
+  Future<void> selectMixStrategy(String id) => _selectMixStrategy(id);
   final ServerService _serverService = ServerService();
   final VpnService _vpnService = VpnService();
   final DnsService _dnsService = DnsService();
@@ -49,7 +70,7 @@ class VpnProvider with ChangeNotifier {
 
   // Expose VPN service for log access
   VpnService get vpnService => _vpnService;
-  
+
   // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', 'xray',
   // 'proxy' (dedicated SOCKS4/SOCKS5/HTTP proxy protocol) or 'warp'.
   String _selectedProtocol = 'xray';
@@ -81,8 +102,7 @@ class VpnProvider with ChangeNotifier {
   // group names currently running a delay test (per-group spinner)
   final Set<String> _xrayTestingGroups = {};
   final Set<String> _xrayTcpTestingGroups = {};
-  bool xrayGroupTestingFor(String group) =>
-      _xrayTestingGroups.contains(group);
+  bool xrayGroupTestingFor(String group) => _xrayTestingGroups.contains(group);
   bool xrayGroupTcpTestingFor(String group) =>
       _xrayTcpTestingGroups.contains(group);
   bool _xrayGroupTesting = false;
@@ -145,13 +165,13 @@ class VpnProvider with ChangeNotifier {
   SlowDnsConfig? _selectedSlowDnsConfig;
   List<SlowDnsConfig> get slowDnsConfigs => _slowDnsConfigs;
   SlowDnsConfig? get selectedSlowDnsConfig => _selectedSlowDnsConfig;
-  
+
   // DNS servers
   List<DnsServer> _dnsServers = [];
   DnsServer? _selectedDnsServer;
   List<DnsServer> get dnsServers => _dnsServers;
   DnsServer? get selectedDnsServer => _selectedDnsServer;
-  
+
   // OpenVPN configs
   List<OpenVpnConfig> _openVpnConfigs = [];
   OpenVpnConfig? _selectedOpenVpnConfig;
@@ -164,7 +184,7 @@ class VpnProvider with ChangeNotifier {
   /// app, which asks at connect time). Returning null means the user cancelled
   /// → the connection is aborted. Returning a (user, pass) pair injects them.
   Future<({String username, String password})?> Function(OpenVpnConfig config)?
-      onOpenVpnCredentialsRequired;
+  onOpenVpnCredentialsRequired;
 
   List<VpnServer> _servers = [];
   VpnServer? _selectedServer;
@@ -186,7 +206,7 @@ class VpnProvider with ChangeNotifier {
   // Direct DNS traffic baseline (TrafficStats - device-wide counters)
   int _dnsBaselineRxBytes = -1;
   int _dnsBaselineTxBytes = -1;
-  
+
   // Ping tracking
   int? _currentPing;
   bool _pingFailed = false; // تایم‌اوت 3 ثانیه برای پینگ
@@ -235,7 +255,7 @@ class VpnProvider with ChangeNotifier {
   bool get isConnecting => _status == VpnConnectionStatus.connecting;
   int? get currentPing => _currentPing;
   bool get pingFailed => _pingFailed; // نمایش Failed در UI
-  
+
   String get dataUsage {
     final download = _formatBytes(_totalDownloadBytes);
     final upload = _formatBytes(_totalUploadBytes);
@@ -243,6 +263,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   VpnProvider() {
+    _mixLoaded = _loadMixStrategies();
     _init();
     // بارگیری پروتکل انتخابی و در صورت نیاز اتصال خودکار به آخرین سرور OpenVPN
     _startupRestore();
@@ -301,8 +322,10 @@ class VpnProvider with ChangeNotifier {
 
   void _init() {
     _statusSubscription = _vpnService.statusStream.listen((status) {
+      if (_selectedProtocol == 'mix')
+        return; // Ignore stale standalone callbacks.
       _status = status;
-      
+
       if (status == VpnConnectionStatus.connected) {
         _connectedServer = _vpnService.connectedServer;
         _startDurationTimer();
@@ -322,10 +345,10 @@ class VpnProvider with ChangeNotifier {
         // خطا در اتصال - تلاش برای سرور بعدی
         _handleConnectionError();
       }
-      
+
       notifyListeners();
     });
-    
+
     // Forward SSTP engine logs into the unified connection log so the log
     // viewer shows every protocol (not just Psiphon) in one place.
     try {
@@ -372,7 +395,7 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
     } catch (_) {}
   }
-  
+
   Future<void> _loadAndTestServers() async {
     // فقط دانلود - تست نشود
     // تست هنگام کلیک دکمه اتصال انجام می‌شود
@@ -389,7 +412,8 @@ class VpnProvider with ChangeNotifier {
           _selectedProtocol == 'xray' ||
           _selectedProtocol == 'warp' ||
           _selectedProtocol == 'openvpn' ||
-          _selectedProtocol == 'psiphon') {
+          _selectedProtocol == 'psiphon' ||
+          _selectedProtocol == 'mix') {
         _connectionDuration += const Duration(seconds: 1);
         notifyListeners();
         return;
@@ -418,17 +442,17 @@ class VpnProvider with ChangeNotifier {
         timer.cancel();
         return;
       }
-      
+
       // Direct DNS mode: ترافیک رد و بدل شده با استفاده از TrafficStats دستگاه
       if (_selectedProtocol == 'direct_dns') {
         _updateDnsTraffic();
         return;
       }
-      
+
       // SSTP mode: Get current traffic from VPN service
       final currentDownload = _vpnService.downloadSpeed;
       final currentUpload = _vpnService.uploadSpeed;
-      
+
       // Calculate difference and add to total
       if (_lastDownloadBytes > 0) {
         _totalDownloadBytes += (currentDownload - _lastDownloadBytes).abs();
@@ -436,10 +460,10 @@ class VpnProvider with ChangeNotifier {
       if (_lastUploadBytes > 0) {
         _totalUploadBytes += (currentUpload - _lastUploadBytes).abs();
       }
-      
+
       _lastDownloadBytes = currentDownload;
       _lastUploadBytes = currentUpload;
-      
+
       notifyListeners();
     });
   }
@@ -485,11 +509,14 @@ class VpnProvider with ChangeNotifier {
     _stopXrayTraffic();
     _totalDownloadBytes = 0;
     _totalUploadBytes = 0;
-    _xrayTrafficTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+    _xrayTrafficTimer = Timer.periodic(const Duration(seconds: 1), (
+      timer,
+    ) async {
       if (!isConnected ||
           (_selectedProtocol != 'xray' &&
               _selectedProtocol != 'proxy' &&
-              _selectedProtocol != 'warp')) {
+              _selectedProtocol != 'warp' &&
+              _selectedProtocol != 'mix')) {
         timer.cancel();
         return;
       }
@@ -622,8 +649,10 @@ class VpnProvider with ChangeNotifier {
       try {
         // WARP is already running in Aether. Read its validated RTT directly;
         // the generic Xray delay path must not create a temporary core.
-        final delay = await XrayConnection.measureWarpDelay()
-            .timeout(const Duration(seconds: 6), onTimeout: () => -1);
+        final delay = await XrayConnection.measureWarpDelay().timeout(
+          const Duration(seconds: 6),
+          onTimeout: () => -1,
+        );
         _currentPing = delay >= 0 ? delay : null;
         _pingFailed = delay < 0;
       } catch (_) {
@@ -672,15 +701,13 @@ class VpnProvider with ChangeNotifier {
       try {
         _pingFailed = false;
         // پینگ native (ICMP + TCP + UDP) - حتی موقع فعال بودن VPN هم کار می‌کند
-        int? ping = await DnsVpnConnection.pingDns(dnsIp).timeout(
-          const Duration(seconds: 6),
-          onTimeout: () => null,
-        );
+        int? ping = await DnsVpnConnection.pingDns(
+          dnsIp,
+        ).timeout(const Duration(seconds: 6), onTimeout: () => null);
         // در صورت ناموفق بودن native، fallback به روش Dart
-        ping ??= await _dnsService.testDnsConnectivity(_selectedDnsServer!).timeout(
-          const Duration(seconds: 4),
-          onTimeout: () => null,
-        );
+        ping ??= await _dnsService
+            .testDnsConnectivity(_selectedDnsServer!)
+            .timeout(const Duration(seconds: 4), onTimeout: () => null);
         _currentPing = ping;
         _pingFailed = (ping == null);
       } catch (e) {
@@ -690,7 +717,7 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
       return;
     }
-    
+
     // OpenVPN mode: TCP-ping the config's remote host:port (the tunnel is up,
     // so this round-trips through it — a good live latency indicator).
     if (_selectedProtocol == 'openvpn') {
@@ -706,9 +733,11 @@ class VpnProvider with ChangeNotifier {
       try {
         _pingFailed = false;
         final sw = Stopwatch()..start();
-        final socket = await Socket.connect(host, port,
-                timeout: const Duration(seconds: 5))
-            .timeout(const Duration(seconds: 5));
+        final socket = await Socket.connect(
+          host,
+          port,
+          timeout: const Duration(seconds: 5),
+        ).timeout(const Duration(seconds: 5));
         sw.stop();
         socket.destroy();
         _currentPing = sw.elapsedMilliseconds;
@@ -723,11 +752,12 @@ class VpnProvider with ChangeNotifier {
 
     // SSTP mode: ping VPN server
     if (_connectedServer == null) return;
-    
+
     try {
       _pingFailed = false; // Reset قبل از تست جدید
       // تایم‌اوت 3 ثانیه برای پینگ
-      final ping = await _serverService.testServerConnectivity(_connectedServer!)
+      final ping = await _serverService
+          .testServerConnectivity(_connectedServer!)
           .timeout(
             const Duration(seconds: 3),
             onTimeout: () {
@@ -763,7 +793,7 @@ class VpnProvider with ChangeNotifier {
 
     try {
       _servers = await _serverService.fetchServers(forceRefresh: forceRefresh);
-      
+
       // حذف خطا - فقط Connecting نمایش داده شود
       if (_servers.isEmpty) {
         // بدون نمایش خطا - حلقه بی‌نهایت دوباره دانلود می‌کند
@@ -792,28 +822,32 @@ class VpnProvider with ChangeNotifier {
 
     try {
       // تایم‌اوت کلی 120 ثانیه (2 دقیقه) برای تست - اگه گیر کرد، skip میشه
-      final testedServers = await _serverService.testServersInParallel(
-        _servers,
-        onProgress: (tested, total) {
-          // حذف پیغام Testing - فقط Connecting در UI
-          // پیشرفت تست فقط در debug log
-          if (kDebugMode) {
-            debugPrint('Testing $tested/$total servers...');
-          }
-        },
-      ).timeout(
-        const Duration(seconds: 120), // 2 دقیقه
-        onTimeout: () {
-          // اگه تایم‌اوت شد، لیست خام سرورها رو برگردون (بدون تست)
-          if (kDebugMode) {
-            debugPrint('⚠️ Testing timeout - using servers without ping test');
-          }
-          return _servers;
-        },
-      );
+      final testedServers = await _serverService
+          .testServersInParallel(
+            _servers,
+            onProgress: (tested, total) {
+              // حذف پیغام Testing - فقط Connecting در UI
+              // پیشرفت تست فقط در debug log
+              if (kDebugMode) {
+                debugPrint('Testing $tested/$total servers...');
+              }
+            },
+          )
+          .timeout(
+            const Duration(seconds: 120), // 2 دقیقه
+            onTimeout: () {
+              // اگه تایم‌اوت شد، لیست خام سرورها رو برگردون (بدون تست)
+              if (kDebugMode) {
+                debugPrint(
+                  '⚠️ Testing timeout - using servers without ping test',
+                );
+              }
+              return _servers;
+            },
+          );
 
       _servers = testedServers;
-      
+
       if (_servers.isNotEmpty) {
         _selectedServer = _servers.first; // بهترین سرور (کمترین ping)
         _errorMessage = null;
@@ -841,12 +875,12 @@ class VpnProvider with ChangeNotifier {
   Future<void> findBestServer() async {
     await testAllServers();
   }
-  
+
   /// Handle connection error and try next server (بدون نمایش شمارش)
   void _handleConnectionError() async {
     // کمی تاخیر برای اطمینان از disconnect کامل
     await Future.delayed(const Duration(milliseconds: 500));
-    
+
     // دوباره اتصال - connect خودش حلقه بی‌نهایت داره
     await connect();
   }
@@ -856,7 +890,11 @@ class VpnProvider with ChangeNotifier {
   /// [forceBypassCert] — set when the user confirmed "connect anyway" after an
   /// OpenVPN certificate warning; passed through to the OpenVPN connect path.
   Future<void> connect({bool forceBypassCert = false}) async {
-    if (_status == VpnConnectionStatus.connecting || _status == VpnConnectionStatus.connected) {
+    if (_selectedProtocol == 'mix' &&
+        _status == VpnConnectionStatus.disconnecting)
+      return;
+    if (_status == VpnConnectionStatus.connecting ||
+        _status == VpnConnectionStatus.connected) {
       return;
     }
 
@@ -864,6 +902,16 @@ class VpnProvider with ChangeNotifier {
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
 
+    if (_selectedProtocol == 'mix') {
+      final operation = _connectMix();
+      _mixOperation = operation;
+      try {
+        await operation;
+      } finally {
+        if (identical(_mixOperation, operation)) _mixOperation = null;
+      }
+      return;
+    }
     // 🌐 CONNECTION MODE (global). Proxy mode = run a LOCAL proxy on
     // 127.0.0.1:4444 with NO system tunnel / no VPN icon. Only Xray can do that;
     // SSTP / DNS-changer / OpenVPN / SlowDNS are IP-layer tunnel protocols that
@@ -871,7 +919,8 @@ class VpnProvider with ChangeNotifier {
     // message instead of silently falling back to a full VPN tunnel (which is
     // what made the setting look ignored).
     final modePrefs = await SharedPreferences.getInstance();
-    final proxyMode = (modePrefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+    final proxyMode =
+        (modePrefs.getString('connection_mode') ?? 'vpn') == 'proxy';
     // Xray, the dedicated Proxy protocol AND WARP all run the Xray core and
     // can serve a local proxy without a system tunnel; every other protocol
     // is an IP-layer VPN and cannot run in connection-mode "proxy".
@@ -918,17 +967,17 @@ class VpnProvider with ChangeNotifier {
     }
 
     // ✅ SSTP: Original SSTP connection logic
-    
+
     // 🔧 CHECK CUSTOM SERVER FIRST
     final prefs = await SharedPreferences.getInstance();
     final useCustomServer = prefs.getBool('use_custom_server') ?? false;
-    
+
     if (useCustomServer) {
       // ✅ Use custom server only
       final customServerStr = prefs.getString('custom_server') ?? '';
       final customUsername = prefs.getString('custom_username') ?? '';
       final customPassword = prefs.getString('custom_password') ?? '';
-      
+
       if (customServerStr.isNotEmpty) {
         // Parse custom server
         final parts = customServerStr.split(':');
@@ -939,24 +988,24 @@ class VpnProvider with ChangeNotifier {
             username: customUsername.isNotEmpty ? customUsername : 'vpn',
             password: customPassword.isNotEmpty ? customPassword : 'vpn',
           );
-          
+
           _selectedServer = customServer;
           notifyListeners();
-          
+
           try {
             // Request VPN permission
             final permissionGranted = await _vpnService.requestPermission();
-            
+
             if (!permissionGranted) {
               _status = VpnConnectionStatus.error;
               _errorMessage = 'VPN permission denied';
               notifyListeners();
               return;
             }
-            
+
             // Connect to custom server
             final success = await _vpnService.connect(customServer);
-            
+
             if (success) {
               // Success!
               return;
@@ -985,7 +1034,7 @@ class VpnProvider with ChangeNotifier {
         return;
       }
     }
-    
+
     // ✅ If not using custom server, use server list
     // 1️⃣ If no servers → infinite loop: download → test → connect
     while (_servers.isEmpty) {
@@ -1011,7 +1060,8 @@ class VpnProvider with ChangeNotifier {
 
     // تنظیمات DNS برای اتصال SSTP
     final bool deepScan = prefs.getBool('deep_scan') ?? false;
-    final String chosenDns = (prefs.getString('custom_dns') ?? '8.8.8.8').trim();
+    final String chosenDns = (prefs.getString('custom_dns') ?? '8.8.8.8')
+        .trim();
 
     // تنظیم MTU برای SSTP. سه حالت:
     //   'off'    : MTU پیش‌فرض (1500)
@@ -1032,10 +1082,12 @@ class VpnProvider with ChangeNotifier {
       // Derive a smaller MTU from the configured fragment size. Larger sizes
       // -> less aggressive (bigger MTU); smaller sizes -> more aggressive.
       final String fragSize = prefs.getString('sstp_fragment_size') ?? '1-3';
-      final int firstNum =
-          int.tryParse(fragSize.split('-').first.trim()) ?? 1;
+      final int firstNum = int.tryParse(fragSize.split('-').first.trim()) ?? 1;
       // Map fragment "size" 1..6 to an MTU in the 1280..1380 range.
-      final int fragMtu = (1280 + (firstNum.clamp(1, 6) - 1) * 20).clamp(1280, 1500);
+      final int fragMtu = (1280 + (firstNum.clamp(1, 6) - 1) * 20).clamp(
+        1280,
+        1500,
+      );
       mtuMode = 'manual';
       manualMtu = fragMtu;
     }
@@ -1095,15 +1147,15 @@ class VpnProvider with ChangeNotifier {
   /// اتصال برای کاربرانِ با اینترنت محدودشده فراهم شود.
   List<String> _deepScanDnsList() {
     return const [
-      '8.8.8.8',          // Google
-      '1.1.1.1',          // Cloudflare
-      '178.22.122.100',   // Shekan
-      '185.51.200.2',     // Shekan secondary
-      '10.202.10.10',     // Radar Game
-      '10.202.10.202',    // Online.403
-      '78.157.42.100',    // Electro
-      '185.55.226.26',    // Begzar
-      '208.67.222.222',   // OpenDNS
+      '8.8.8.8', // Google
+      '1.1.1.1', // Cloudflare
+      '178.22.122.100', // Shekan
+      '185.51.200.2', // Shekan secondary
+      '10.202.10.10', // Radar Game
+      '10.202.10.202', // Online.403
+      '78.157.42.100', // Electro
+      '185.55.226.26', // Begzar
+      '208.67.222.222', // OpenDNS
     ];
   }
 
@@ -1141,14 +1193,14 @@ class VpnProvider with ChangeNotifier {
 
     const policy = RetryPolicy.psiphonConnect;
     try {
-      for (var attempt = 0;
-          policy.shouldRetry(attempt);
-          attempt++) {
+      for (var attempt = 0; policy.shouldRetry(attempt); attempt++) {
         if (cancelled()) return;
         if (attempt > 0) {
           final backoff = policy.delayForAttempt(attempt);
-          log.warning('psiphon',
-              'Retrying in ${backoff.inSeconds}s (attempt ${attempt + 1}/${policy.maxAttempts})…');
+          log.warning(
+            'psiphon',
+            'Retrying in ${backoff.inSeconds}s (attempt ${attempt + 1}/${policy.maxAttempts})…',
+          );
           _errorMessage =
               'Retrying… (attempt ${attempt + 1}/${policy.maxAttempts})';
           notifyListeners();
@@ -1164,8 +1216,10 @@ class VpnProvider with ChangeNotifier {
           return;
         }
         if (!started) {
-          log.warning('psiphon',
-              'Attempt ${attempt + 1}: service did not start (VPN permission pending?)');
+          log.warning(
+            'psiphon',
+            'Attempt ${attempt + 1}: service did not start (VPN permission pending?)',
+          );
           continue;
         }
 
@@ -1198,7 +1252,9 @@ class VpnProvider with ChangeNotifier {
           return;
         }
         log.warning(
-            'psiphon', 'Attempt ${attempt + 1}: timed out waiting for tunnel');
+          'psiphon',
+          'Attempt ${attempt + 1}: timed out waiting for tunnel',
+        );
         // Clean slate before the next attempt (native blackhole only applies
         // to the FINAL failure — see below).
         try {
@@ -1212,8 +1268,10 @@ class VpnProvider with ChangeNotifier {
       if (killSwitch) {
         // Leave the native service engaged: on failure it holds the TUN as a
         // blackhole (no leaks) and the monitor keeps healing it.
-        log.error('psiphon',
-            'All attempts failed — kill switch engaged, traffic blocked');
+        log.error(
+          'psiphon',
+          'All attempts failed — kill switch engaged, traffic blocked',
+        );
         try {
           await _psiphonService.start();
         } catch (_) {}
@@ -1245,8 +1303,9 @@ class VpnProvider with ChangeNotifier {
   /// failures, stops the service and reports an error.
   void _startPsiphonMonitor() {
     _psiphonMonitorTimer?.cancel();
-    _psiphonMonitorTimer =
-        Timer.periodic(const Duration(seconds: 20), (_) async {
+    _psiphonMonitorTimer = Timer.periodic(const Duration(seconds: 20), (
+      _,
+    ) async {
       if (_selectedProtocol != 'psiphon' ||
           (_status != VpnConnectionStatus.connected &&
               _status != VpnConnectionStatus.connecting &&
@@ -1283,8 +1342,10 @@ class VpnProvider with ChangeNotifier {
         final log = ConnectionLogger.instance;
 
         if (!policy.shouldRetry(_psiphonFailCount - 1)) {
-          log.error('psiphon',
-              'Connection lost — recovery failed ${_psiphonFailCount - 1} times, giving up');
+          log.error(
+            'psiphon',
+            'Connection lost — recovery failed ${_psiphonFailCount - 1} times, giving up',
+          );
           try {
             await _psiphonService.stop();
           } catch (_) {}
@@ -1298,8 +1359,10 @@ class VpnProvider with ChangeNotifier {
         }
 
         final backoff = policy.delayForAttempt(_psiphonFailCount);
-        log.warning('psiphon',
-            'Tunnel unhealthy — recovery attempt $_psiphonFailCount in ${backoff.inSeconds}s…');
+        log.warning(
+          'psiphon',
+          'Tunnel unhealthy — recovery attempt $_psiphonFailCount in ${backoff.inSeconds}s…',
+        );
         _status = VpnConnectionStatus.connecting;
         _errorMessage =
             'Connection unstable — retrying (attempt $_psiphonFailCount)…';
@@ -1327,7 +1390,8 @@ class VpnProvider with ChangeNotifier {
         }
         log.warning('psiphon', 'Recovery attempt timed out — will retry');
         // Stay in `connecting` so the next tick keeps healing.
-      } catch (_) {} finally {
+      } catch (_) {
+      } finally {
         _psiphonMonitorBusy = false;
       }
     });
@@ -1345,8 +1409,9 @@ class VpnProvider with ChangeNotifier {
     _stopPsiphonTraffic();
     _totalDownloadBytes = 0;
     _totalUploadBytes = 0;
-    _psiphonTrafficTimer =
-        Timer.periodic(const Duration(seconds: 2), (timer) async {
+    _psiphonTrafficTimer = Timer.periodic(const Duration(seconds: 2), (
+      timer,
+    ) async {
       if (!isConnected || _selectedProtocol != 'psiphon') {
         timer.cancel();
         return;
@@ -1427,9 +1492,11 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Please select a DNS server from Server List first';
       notifyListeners();
-      
+
       if (kDebugMode) {
-        debugPrint('⚠️ No DNS server selected - please choose from Server List');
+        debugPrint(
+          '⚠️ No DNS server selected - please choose from Server List',
+        );
       }
       return;
     }
@@ -1441,7 +1508,7 @@ class VpnProvider with ChangeNotifier {
 
       // Request VPN permission
       final permissionGranted = await DnsVpnConnection.requestPermission();
-      
+
       if (!permissionGranted) {
         _status = VpnConnectionStatus.disconnected;
         notifyListeners();
@@ -1599,8 +1666,10 @@ class VpnProvider with ChangeNotifier {
       }
 
       if (kDebugMode) {
-        debugPrint('🚀 OpenVPN connect attempt $attempt: '
-            '${_selectedOpenVpnConfig!.name}');
+        debugPrint(
+          '🚀 OpenVPN connect attempt $attempt: '
+          '${_selectedOpenVpnConfig!.name}',
+        );
       }
 
       final completer = Completer<bool>();
@@ -1648,8 +1717,8 @@ class VpnProvider with ChangeNotifier {
           _selectedOpenVpnConfig!,
           // This controls whether client-certificate material is stripped.
           // Inline PKCS#12 is recognized as a client credential too.
-          forceBypassCert: forceBypassCert ||
-              !_selectedOpenVpnConfig!.hasClientCert,
+          forceBypassCert:
+              forceBypassCert || !_selectedOpenVpnConfig!.hasClientCert,
         );
       } catch (e) {
         if (kDebugMode) debugPrint('⚠️ attempt $attempt threw: $e');
@@ -1722,7 +1791,7 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Please select a Slow DNS config first';
       notifyListeners();
-      
+
       if (kDebugMode) {
         debugPrint('❌ No Slow DNS config selected');
       }
@@ -1734,7 +1803,9 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
 
       if (kDebugMode) {
-        debugPrint('🌐 Connecting to Slow DNS: ${_selectedSlowDnsConfig!.name}');
+        debugPrint(
+          '🌐 Connecting to Slow DNS: ${_selectedSlowDnsConfig!.name}',
+        );
         debugPrint('   Domain: ${_selectedSlowDnsConfig!.domain}');
         debugPrint('   Name Server: ${_selectedSlowDnsConfig!.nameServer}');
       }
@@ -1757,14 +1828,15 @@ class VpnProvider with ChangeNotifier {
       };
 
       // Connect using Slow DNS
-      final connected = await SlowDnsConnection.connect(_selectedSlowDnsConfig!);
-      
+      final connected = await SlowDnsConnection.connect(
+        _selectedSlowDnsConfig!,
+      );
+
       if (!connected) {
         _status = VpnConnectionStatus.error;
         _errorMessage = 'Failed to connect. Check config and try again.';
         notifyListeners();
       }
-      
     } catch (e) {
       if (kDebugMode) {
         debugPrint('⚠️ Failed to connect Slow DNS: $e');
@@ -1869,8 +1941,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   /// Backwards-compatible helper: select the built-in free group.
-  Future<void> selectXrayFreeGroup() =>
-      selectXrayGroup(XrayServer.freeGroup);
+  Future<void> selectXrayFreeGroup() => selectXrayGroup(XrayServer.freeGroup);
 
   /// Subscription URL management (Xray settings).
   Future<List<String>> getXraySubUrls() => _xrayService.getSubUrls();
@@ -1930,8 +2001,10 @@ class VpnProvider with ChangeNotifier {
 
   /// Refresh the locked free subscription group from the server.
   /// [force] ignores the throttle window. Returns number of free servers.
-  Future<int> refreshXrayFreeGroup(
-      {bool force = false, bool builtInOnly = false}) async {
+  Future<int> refreshXrayFreeGroup({
+    bool force = false,
+    bool builtInOnly = false,
+  }) async {
     _xrayRefreshing = true;
     notifyListeners();
     try {
@@ -2114,8 +2187,10 @@ class VpnProvider with ChangeNotifier {
   /// that many times and keeps the BEST (lowest positive) ping — used when
   /// connecting to a whole group so the "connect to fastest" choice is more
   /// reliable. Defaults to a single round.
-  Future<void> testXrayServers(List<XrayServer> servers,
-      {int rounds = 1}) async {
+  Future<void> testXrayServers(
+    List<XrayServer> servers, {
+    int rounds = 1,
+  }) async {
     if (servers.isEmpty) return;
     final groups = servers.map((s) => s.group).toSet();
     // Different groups may run in parallel; prevent duplicate jobs for the
@@ -2152,27 +2227,34 @@ class VpnProvider with ChangeNotifier {
         for (var i = 0; i < servers.length; i += batchSize) {
           // Abort the whole test if the user cancelled the connect meanwhile.
           if (testGen != _xrayConnectGen) {
-            if (kDebugMode) debugPrint('🚫 group delay-test aborted (cancelled)');
+            if (kDebugMode)
+              debugPrint('🚫 group delay-test aborted (cancelled)');
             return;
           }
           final batch = servers.sublist(
-              i, (i + batchSize).clamp(0, servers.length));
+            i,
+            (i + batchSize).clamp(0, servers.length),
+          );
           for (final s in batch) {
             _xrayTestingIds.add(s.id);
           }
           notifyListeners();
-          await Future.wait(batch.map((s) async {
-            try {
-              final config = await _buildDelayConfig(s);
-              final delay =
-                  await XrayConnection.measureDelay(config, url: testUrl);
-              mergeBest(s.id, delay >= 0 ? delay : -1);
-            } catch (_) {
-              mergeBest(s.id, -1);
-            } finally {
-              _xrayTestingIds.remove(s.id);
-            }
-          }));
+          await Future.wait(
+            batch.map((s) async {
+              try {
+                final config = await _buildDelayConfig(s);
+                final delay = await XrayConnection.measureDelay(
+                  config,
+                  url: testUrl,
+                );
+                mergeBest(s.id, delay >= 0 ? delay : -1);
+              } catch (_) {
+                mergeBest(s.id, -1);
+              } finally {
+                _xrayTestingIds.remove(s.id);
+              }
+            }),
+          );
           // Another group may finish and sort the shared list while this job
           // is running, so resolve ids against the current list every batch.
           final currentIndexById = <String, int>{};
@@ -2183,8 +2265,9 @@ class VpnProvider with ChangeNotifier {
           for (final s in batch) {
             final idx = currentIndexById[s.id];
             if (idx != null && idx < _xrayServers.length) {
-              _xrayServers[idx] =
-                  _xrayServers[idx].copyWith(ping: results[s.id]);
+              _xrayServers[idx] = _xrayServers[idx].copyWith(
+                ping: results[s.id],
+              );
             }
           }
           notifyListeners();
@@ -2301,10 +2384,9 @@ class VpnProvider with ChangeNotifier {
     final rounds = await getXrayGroupTestRounds();
     await testXrayServers(group, rounds: rounds);
     final g = _selectedXrayGroup;
-    final working = _xrayServers
-        .where((s) => s.group == g && (s.ping ?? -1) > 0)
-        .toList()
-      ..sort((a, b) => (a.ping ?? 999999).compareTo(b.ping ?? 999999));
+    final working =
+        _xrayServers.where((s) => s.group == g && (s.ping ?? -1) > 0).toList()
+          ..sort((a, b) => (a.ping ?? 999999).compareTo(b.ping ?? 999999));
     return working.isNotEmpty ? working.first : null;
   }
 
@@ -2524,29 +2606,36 @@ class VpnProvider with ChangeNotifier {
       }
       for (var i = 0; i < servers.length; i += batchSize) {
         if (testGen != _proxyConnectGen) return;
-        final batch =
-            servers.sublist(i, (i + batchSize).clamp(0, servers.length));
+        final batch = servers.sublist(
+          i,
+          (i + batchSize).clamp(0, servers.length),
+        );
         for (final s in batch) {
           _proxyTestingIds.add(s.id);
         }
         notifyListeners();
-        await Future.wait(batch.map((s) async {
-          try {
-            final config = XrayConfigBuilder.buildProxyServerDelayTest(s);
-            final delay =
-                await XrayConnection.measureDelay(config, url: testUrl);
-            results[s.id] = delay >= 0 ? delay : -1;
-          } catch (_) {
-            results[s.id] = -1;
-          } finally {
-            _proxyTestingIds.remove(s.id);
-          }
-        }));
+        await Future.wait(
+          batch.map((s) async {
+            try {
+              final config = XrayConfigBuilder.buildProxyServerDelayTest(s);
+              final delay = await XrayConnection.measureDelay(
+                config,
+                url: testUrl,
+              );
+              results[s.id] = delay >= 0 ? delay : -1;
+            } catch (_) {
+              results[s.id] = -1;
+            } finally {
+              _proxyTestingIds.remove(s.id);
+            }
+          }),
+        );
         for (final s in batch) {
           final idx = indexById[s.id];
           if (idx != null && idx < _proxyServers.length) {
-            _proxyServers[idx] =
-                _proxyServers[idx].copyWith(ping: results[s.id]);
+            _proxyServers[idx] = _proxyServers[idx].copyWith(
+              ping: results[s.id],
+            );
           }
         }
         notifyListeners();
@@ -2615,10 +2704,9 @@ class VpnProvider with ChangeNotifier {
     if (group.isEmpty) return null;
     await testProxyServers(group);
     final g = _selectedProxyGroup;
-    final working = _proxyServers
-        .where((s) => s.group == g && (s.ping ?? -1) > 0)
-        .toList()
-      ..sort((a, b) => (a.ping ?? 999999).compareTo(b.ping ?? 999999));
+    final working =
+        _proxyServers.where((s) => s.group == g && (s.ping ?? -1) > 0).toList()
+          ..sort((a, b) => (a.ping ?? 999999).compareTo(b.ping ?? 999999));
     return working.isNotEmpty ? working.first : null;
   }
 
@@ -2646,7 +2734,8 @@ class VpnProvider with ChangeNotifier {
   /// Connect through the selected SOCKS4 / SOCKS5 / HTTP proxy. Runs the real
   /// Xray core with the upstream proxy as its outbound.
   Future<void> _connectProxy() async {
-    final groupHasServers = _selectedProxyGroup != null &&
+    final groupHasServers =
+        _selectedProxyGroup != null &&
         _proxyServers.any((s) => s.group == _selectedProxyGroup);
     if (_selectedProxyServer == null && !groupHasServers) {
       _status = VpnConnectionStatus.error;
@@ -2703,12 +2792,16 @@ class VpnProvider with ChangeNotifier {
       );
 
       if (kDebugMode) {
-        debugPrint('🚀 Connecting Proxy: ${serverToConnect.remark} '
-            '(${serverToConnect.protocol}) mode=${proxyMode ? "proxy" : "vpn"}');
+        debugPrint(
+          '🚀 Connecting Proxy: ${serverToConnect.remark} '
+          '(${serverToConnect.protocol}) mode=${proxyMode ? "proxy" : "vpn"}',
+        );
       }
 
-      final connected =
-          await XrayConnection.connect(configJson, proxyMode: proxyMode);
+      final connected = await XrayConnection.connect(
+        configJson,
+        proxyMode: proxyMode,
+      );
       if (cancelled()) {
         try {
           await XrayConnection.disconnect();
@@ -2739,7 +2832,8 @@ class VpnProvider with ChangeNotifier {
   /// Connect using the real Xray core (libv2ray / v2rayNG) with TLS
   /// ClientHello fragmentation enabled.
   Future<void> _connectXray() async {
-    final groupHasServers = _selectedXrayGroup != null &&
+    final groupHasServers =
+        _selectedXrayGroup != null &&
         _xrayServers.any((s) => s.group == _selectedXrayGroup);
     if (_selectedXrayServer == null && !groupHasServers) {
       _status = VpnConnectionStatus.error;
@@ -2786,7 +2880,8 @@ class VpnProvider with ChangeNotifier {
       // Read fragment settings (default OFF).
       final prefs = await SharedPreferences.getInstance();
       final fragEnabled = prefs.getBool('xray_fragment') ?? false;
-      final fragPackets = prefs.getString('xray_fragment_packets') ?? 'tlshello';
+      final fragPackets =
+          prefs.getString('xray_fragment_packets') ?? 'tlshello';
       final fragLength = prefs.getString('xray_fragment_length') ?? '10-20';
       final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
       final fragHost = prefs.getString('xray_fragment_host') ?? '';
@@ -2829,17 +2924,22 @@ class VpnProvider with ChangeNotifier {
       );
 
       if (kDebugMode) {
-        debugPrint('🚀 Connecting Xray: ${serverToConnect.remark} '
-            '(${serverToConnect.protocol}) fragment=$fragEnabled '
-            'mode=${proxyMode ? "proxy" : "vpn"}');
+        debugPrint(
+          '🚀 Connecting Xray: ${serverToConnect.remark} '
+          '(${serverToConnect.protocol}) fragment=$fragEnabled '
+          'mode=${proxyMode ? "proxy" : "vpn"}',
+        );
       }
 
-      final connected =
-          await XrayConnection.connect(configJson, proxyMode: proxyMode);
+      final connected = await XrayConnection.connect(
+        configJson,
+        proxyMode: proxyMode,
+      );
       // If the user cancelled meanwhile, tear the just-started tunnel down and
       // stay disconnected instead of flipping to "connected".
       if (cancelled()) {
-        if (kDebugMode) debugPrint('🚫 Xray connected late after cancel — tearing down');
+        if (kDebugMode)
+          debugPrint('🚫 Xray connected late after cancel — tearing down');
         try {
           await XrayConnection.disconnect();
         } catch (_) {}
@@ -2941,13 +3041,17 @@ class VpnProvider with ChangeNotifier {
         );
 
         if (kDebugMode) {
-          debugPrint('🚀 Connecting WARP (attempt $attempt): '
-              '${account.addressV4} via ${account.peerEndpoint} '
-              'mode=${proxyMode ? "proxy" : "vpn"}');
+          debugPrint(
+            '🚀 Connecting WARP (attempt $attempt): '
+            '${account.addressV4} via ${account.peerEndpoint} '
+            'mode=${proxyMode ? "proxy" : "vpn"}',
+          );
         }
 
-        final started =
-            await XrayConnection.connect(configJson, proxyMode: proxyMode);
+        final started = await XrayConnection.connect(
+          configJson,
+          proxyMode: proxyMode,
+        );
         if (cancelled()) {
           try {
             await XrayConnection.disconnect();
@@ -2999,10 +3103,12 @@ class VpnProvider with ChangeNotifier {
 
   /// Disconnect from VPN
   Future<void> disconnect() async {
-    if (_status == VpnConnectionStatus.disconnecting || _status == VpnConnectionStatus.disconnected) {
+    if (_status == VpnConnectionStatus.disconnecting ||
+        _status == VpnConnectionStatus.disconnected) {
       return;
     }
 
+    _mixConnectGen++;
     // Invalidate any in-flight Xray connect (e.g. a group delay-test in
     // progress) so it aborts instead of connecting after the user cancelled.
     _xrayConnectGen++;
@@ -3014,7 +3120,15 @@ class VpnProvider with ChangeNotifier {
 
     try {
       // Disconnect based on protocol
-      if (_selectedProtocol == 'psiphon') {
+      if (_selectedProtocol == 'mix') {
+        final operation = _disconnectMix();
+        _mixDisconnectOperation = operation;
+        try {
+          await operation;
+        } finally {
+          _mixDisconnectOperation = null;
+        }
+      } else if (_selectedProtocol == 'psiphon') {
         _psiphonConnectGen++; // abort any in-flight connect/retry loop
         _stopPsiphonMonitor();
         _stopPsiphonTraffic();
@@ -3096,7 +3210,7 @@ class VpnProvider with ChangeNotifier {
       } else {
         await _vpnService.disconnect();
       }
-      
+
       _status = VpnConnectionStatus.disconnected;
     } catch (e) {
       if (kDebugMode) {
@@ -3104,7 +3218,7 @@ class VpnProvider with ChangeNotifier {
       }
       _status = VpnConnectionStatus.disconnected;
     }
-    
+
     notifyListeners();
   }
 
@@ -3129,12 +3243,12 @@ class VpnProvider with ChangeNotifier {
   /// Connect to next server in list
   Future<void> connectToNextServer() async {
     if (_servers.isEmpty || _selectedServer == null) return;
-    
+
     // Find current server index
     final currentIndex = _servers.indexWhere(
-      (s) => s.fullAddress == _selectedServer?.fullAddress
+      (s) => s.fullAddress == _selectedServer?.fullAddress,
     );
-    
+
     if (currentIndex == -1 || currentIndex >= _servers.length - 1) {
       // حذف ارور - همیشه Connecting باقی بماند
       // دوباره به اولین سرور برگرد و تلاش کن
@@ -3144,17 +3258,17 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
       return;
     }
-    
+
     // Disconnect first
     await disconnect();
-    
+
     // Wait for disconnect
     await Future.delayed(const Duration(seconds: 1));
-    
+
     // Select next server
     _selectedServer = _servers[currentIndex + 1];
     notifyListeners();
-    
+
     // Connect to next server
     await connect();
   }
@@ -3171,54 +3285,57 @@ class VpnProvider with ChangeNotifier {
       _lastDownloadBytes = 0;
       _lastUploadBytes = 0;
       notifyListeners();
-      
+
       // Reload and test servers
       _loadAndTestServers();
     }
   }
 
   // ==================== Direct DNS Protocol Methods ====================
-  
+
   /// بارگیری پروتکل انتخابی از SharedPreferences
   Future<void> loadSelectedProtocol() async {
     _selectedProtocol = await _dnsService.getSelectedProtocol();
     notifyListeners();
   }
-  
+
   /// تغییر پروتکل (SSTP یا Direct DNS)
   Future<void> switchProtocol(String protocol) async {
+    if (_selectedProtocol == 'mix' && _mixDisconnectOperation != null) {
+      await _mixDisconnectOperation;
+    }
     if (_selectedProtocol == protocol) return;
-    
+
     // اگر متصل است، ابتدا قطع کن
     if (isConnected || isConnecting) {
       await disconnect();
     }
-    
+
     _selectedProtocol = protocol;
     await _dnsService.setSelectedProtocol(protocol);
     notifyListeners();
   }
-  
+
   /// گرفتن تمام DNS servers
   Future<List<DnsServer>> getAllDnsServers() async {
     return await _dnsService.getAllDnsServers();
   }
-  
+
   /// انتخاب DNS server و اتصال خودکار
   Future<void> selectDnsServerAndConnect(DnsServer server) async {
     _selectedDnsServer = server;
     notifyListeners();
-    
+
     // اگه قبلاً متصل بود، قطع کن و دوباره وصل کن
     if (isConnected || isConnecting) {
       await disconnect();
       await Future.delayed(const Duration(milliseconds: 500));
     }
-    
+
     // اتصال خودکار
     await connect();
   }
-  
+
   /// تست همه DNS servers
   Future<List<DnsServer>> testAllDnsServers(List<DnsServer> servers) async {
     return await _dnsService.testDnsServersInParallel(
@@ -3230,49 +3347,51 @@ class VpnProvider with ChangeNotifier {
       },
     );
   }
-  
+
   /// افزودن DNS سفارشی
   Future<void> addCustomDns(DnsServer server) async {
     await _dnsService.addCustomDns(server);
     _dnsServers = await _dnsService.getAllDnsServers();
     notifyListeners();
   }
-  
+
   /// حذف DNS سفارشی
   Future<void> removeCustomDns(String primaryDns) async {
     await _dnsService.removeCustomDns(primaryDns);
     _dnsServers = await _dnsService.getAllDnsServers();
     notifyListeners();
   }
-  
+
   /// انتخاب DNS و اتصال
   Future<void> selectDnsAndConnect(DnsServer server) async {
     _selectedDnsServer = server;
-    
+
     // Save selected DNS
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('selected_dns_primary', server.primaryDns);
     if (server.secondaryDns != null) {
       await prefs.setString('selected_dns_secondary', server.secondaryDns!);
     }
-    
+
     notifyListeners();
-    
+
     if (kDebugMode) {
-      debugPrint('✅ DNS Server Selected: ${server.name} (${server.primaryDns})');
+      debugPrint(
+        '✅ DNS Server Selected: ${server.name} (${server.primaryDns})',
+      );
     }
-    
+
     // Automatically connect
     await connect();
   }
-  
+
   /// ==================== OpenVPN Methods ====================
-  
+
   /// Load OpenVPN configs
   Future<void> loadOpenVpnConfigs() async {
     try {
       _openVpnConfigs = await _openVpnService.loadConfigs();
-      
+
       // Load selected config (null-safe: never cast null to OpenVpnConfig).
       final selectedName = await _openVpnService.getSelectedConfigName();
       if (selectedName != null && _openVpnConfigs.isNotEmpty) {
@@ -3287,9 +3406,9 @@ class VpnProvider with ChangeNotifier {
       } else if (_openVpnConfigs.isEmpty) {
         _selectedOpenVpnConfig = null;
       }
-      
+
       notifyListeners();
-      
+
       if (kDebugMode) {
         debugPrint('✅ Loaded ${_openVpnConfigs.length} OpenVPN configs');
       }
@@ -3299,7 +3418,7 @@ class VpnProvider with ChangeNotifier {
       }
     }
   }
-  
+
   /// Select an OpenVPN config WITHOUT connecting. The user connects manually
   /// via the power button afterwards.
   Future<void> selectOpenVpnConfig(OpenVpnConfig config) async {
@@ -3411,6 +3530,10 @@ class VpnProvider with ChangeNotifier {
 
   @override
   void dispose() {
+    _mixDisposed = true;
+    _mixConnectGen++;
+    _mixMonitor?.cancel();
+    _errorAutoClearTimer?.cancel();
     _statusSubscription?.cancel();
     _stopDurationTimer();
     _stopPingTimer();

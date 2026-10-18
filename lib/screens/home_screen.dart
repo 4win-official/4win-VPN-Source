@@ -1,3 +1,4 @@
+import 'mix_strategies_screen.dart';
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -569,7 +570,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           Row(
                                             children: [
                                               Icon(
-                                                vpnProvider.selectedProtocol == 'sstp'
+                                                vpnProvider.selectedProtocol == 'mix'
+                                                    ? Icons.account_tree
+                                                    : vpnProvider.selectedProtocol == 'sstp'
                                                     ? Icons.vpn_key
                                                     : vpnProvider.selectedProtocol == 'openvpn'
                                                         ? Icons.shield
@@ -584,7 +587,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                                         : vpnProvider.selectedProtocol == 'warp'
                                                                             ? Icons.cloud_done
                                                                             : Icons.dns,
-                                                color: vpnProvider.selectedProtocol == 'sstp'
+                                                color: vpnProvider.selectedProtocol == 'mix'
+                                                    ? Colors.cyan
+                                                    : vpnProvider.selectedProtocol == 'sstp'
                                                     ? Colors.green
                                                     : vpnProvider.selectedProtocol == 'openvpn'
                                                         ? Colors.purple
@@ -603,7 +608,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               ),
                                               const SizedBox(width: 12),
                                               Text(
-                                                'Protocol: ${vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : vpnProvider.selectedProtocol == "proxy" ? "Proxy" : vpnProvider.selectedProtocol == "psiphon" ? "Psiphon" : vpnProvider.selectedProtocol == "warp" ? "WARP" : "DNS changer"}',
+                                                'Protocol: ${vpnProvider.selectedProtocol == "mix" ? "Mix · میکس" : vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : vpnProvider.selectedProtocol == "proxy" ? "Proxy" : vpnProvider.selectedProtocol == "psiphon" ? "Psiphon" : vpnProvider.selectedProtocol == "warp" ? "WARP" : "DNS changer"}',
                                                 style: TextStyle(
                                                   fontSize: 14,
                                                   color: isDark ? Colors.white : Colors.black87,
@@ -892,6 +897,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: const EdgeInsets.all(24),
               child: Consumer<VpnProvider>(
                 builder: (context, provider, _) {
+                  if (provider.selectedProtocol == 'mix') {
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(provider.selectedMixStrategy?.name ?? 'No strategy selected',
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.account_tree),
+                            label: const Text('استراتژی · Strategy'),
+                            onPressed: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const MixStrategiesScreen())),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
                   // DNS: Always show "Server List" button
                   if (provider.selectedProtocol == 'direct_dns') {
                     return SizedBox(

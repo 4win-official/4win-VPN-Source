@@ -1,5 +1,7 @@
 package com.forwin.vpn
 
+import com.forwin.vpn.mix.MixCoordinatorService
+
 import android.content.Context
 import android.content.Intent
 import android.net.TrafficStats
@@ -314,9 +316,32 @@ class MainActivity: FlutterActivity() {
                         result.success(true) // Already granted
                     }
                 }
-                "connectXray" -> {
+                "connectMixPlan" -> {
+                    try {
+                        val json = call.argument<String>("planJson") ?: error("Missing Mix plan")
+                        MixCoordinatorService.connect(applicationContext, org.json.JSONObject(json))
+                            .whenComplete { delay, failure ->
+                                runOnUiThread {
+                                    if (failure == null) result.success(delay)
+                                    else result.error("MIX_CONNECTION", (failure.cause ?: failure).message ?: "Mix connection failed", null)
+                                }
+                            }
+                    } catch (failure: Throwable) {
+                        result.error("MIX_CONNECTION", failure.message ?: "Mix plan is invalid", null)
+                    }
+                }
+                "disconnectMixPlan" -> {
+                    MixCoordinatorService.disconnect().whenComplete { _, failure ->
+                        runOnUiThread {
+                            if (failure == null) result.success(true)
+                            else result.error("MIX_DISCONNECT", "Mix cleanup failed", null)
+                        }
+                    }
+                }
+                "connectXray", "connectMix" -> {
                     val configJson = call.argument<String>("configJson") ?: ""
-                    val proxyMode = call.argument<Boolean>("proxyMode") ?: false
+                    val mixMode = call.method == "connectMix"
+                    val proxyMode = !mixMode && (call.argument<Boolean>("proxyMode") ?: false)
 
                     // Proxy mode uses a PLAIN foreground service (no VpnService),
                     // so Android shows no VPN key icon; VPN mode uses XrayVpnService.
@@ -330,6 +355,7 @@ class MainActivity: FlutterActivity() {
                             action = XrayVpnService.ACTION_CONNECT
                             putExtra(XrayVpnService.EXTRA_CONFIG_JSON, configJson)
                             putExtra(XrayVpnService.EXTRA_PROXY_MODE, false)
+                            putExtra(XrayVpnService.EXTRA_MIX_MODE, mixMode)
                         }
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -372,13 +398,15 @@ class MainActivity: FlutterActivity() {
                 "isXrayRunning" -> {
                     result.success(
                         XrayVpnService.isServiceRunning ||
-                            XrayProxyService.isServiceRunning
+                            XrayProxyService.isServiceRunning || MixCoordinatorService.isRunning
                     )
                 }
                 "queryXrayStats" -> {
                     // Returns cumulative proxy traffic [uplinkBytes, downlinkBytes]
                     // since connect, polled by Flutter to show data usage.
-                    val stats = if (XrayProxyService.isServiceRunning) {
+                    val stats = if (MixCoordinatorService.isRunning) {
+                        MixCoordinatorService.traffic()
+                    } else if (XrayProxyService.isServiceRunning) {
                         XrayProxyService.queryTrafficStats()
                     } else {
                         XrayVpnService.queryTrafficStats()

@@ -170,6 +170,7 @@ struct NativeStartOptions {
     access_email: Option<String>,
     gateway: bool,
     upstream_proxy: Option<String>,
+    mix_force_tunnel: bool,
     /// `ip:port` for the HTTP CONNECT proxy, or empty/absent for none.
     ///
     /// Android-only channel for what the CLI reads from `AETHER_HTTP_PROXY`: a
@@ -221,6 +222,7 @@ impl Default for NativeStartOptions {
             access_email: None,
             gateway: false,
             upstream_proxy: None,
+            mix_force_tunnel: false,
             http_proxy: None,
             socks_proxy: None,
         }
@@ -281,6 +283,7 @@ impl TryFrom<NativeStartOptions> for StartOptions {
         options.access_token = value.access_token.filter(|value| !value.trim().is_empty());
         options.access_email = value.access_email.filter(|value| !value.trim().is_empty());
         options.gateway = value.gateway;
+        options.mix_force_tunnel = value.mix_force_tunnel;
         options.upstream_proxy = value.upstream_proxy.filter(|v| !v.trim().is_empty());
         options.http_proxy = match value.http_proxy.as_deref().map(str::trim) {
             None | Some("") => None,

@@ -114,6 +114,11 @@ val psiphonOriginal by configurations.creating {
 }
 
 dependencies {
+    // Mix vendors the PPP engine without using the standalone SSTP VPN service.
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+
     add("psiphonOriginal", "ca.psiphon:psiphontunnel:2.0.40")
 }
 

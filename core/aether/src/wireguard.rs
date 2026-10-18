@@ -1,11 +1,12 @@
+use tokio::net::UdpSocket;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
+use crate::mix_socks_udp::WgUdpSocket;
 use boringtun::noise::{Tunn, TunnResult};
 use boringtun::x25519::{PublicKey, StaticSecret};
-use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::aethernoize::{self, AetherNoizeConfig};
@@ -14,10 +15,8 @@ use rand::RngExt;
 
 const TIMER_TICK: Duration = Duration::from_millis(250);
 const MAX_PACKET: usize = 65536;
-const VERIFY_RETRY_DELAYS: [Duration; 2] = [
-    Duration::from_millis(750),
-    Duration::from_millis(2_000),
-];
+const VERIFY_RETRY_DELAYS: [Duration; 2] =
+    [Duration::from_millis(750), Duration::from_millis(2_000)];
 
 const WG_MSG_TYPE_MIN: u8 = 1;
 const WG_MSG_TYPE_MAX: u8 = 4;
@@ -86,7 +85,7 @@ pub struct WgConfig {
 
 pub struct WgTunnel {
     tunn: Arc<Mutex<Box<Tunn>>>,
-    sock: Arc<UdpSocket>,
+    sock: Arc<WgUdpSocket>,
     peer: SocketAddr,
     inbound_tx: mpsc::Sender<Vec<u8>>,
     pub obf_sent: Arc<Mutex<bool>>,
@@ -97,28 +96,35 @@ pub struct WgTunnel {
 
 pub struct EstablishedSession {
     tunn: Arc<Mutex<Box<Tunn>>>,
-    sock: Arc<UdpSocket>,
+    sock: Arc<WgUdpSocket>,
     peer: SocketAddr,
     client_id: [u8; 3],
 }
 
 impl WgTunnel {
     pub async fn new(cfg: WgConfig, inbound_tx: mpsc::Sender<Vec<u8>>) -> Result<Self> {
-        let bind_addr = if cfg.peer_endpoint.is_ipv4() {
-            "0.0.0.0:0"
-        } else {
-            "[::]:0"
-        };
-
-        let sock = UdpSocket::bind(bind_addr).await?;
-        crate::platform::protect_socket(&sock)?;
-        sock.connect(cfg.peer_endpoint).await?;
+        let upstream = std::env::var("AETHER_WG_UPSTREAM_SOCKS").ok()
+            .filter(|value| !value.trim().is_empty());
+        Self::new_with_upstream(cfg, inbound_tx, upstream.as_deref()).await
+    }
+    pub async fn new_with_upstream(cfg: WgConfig, inbound_tx: mpsc::Sender<Vec<u8>>, upstream: Option<&str>) -> Result<Self> {
+        let sock = WgUdpSocket::bind(cfg.peer_endpoint, upstream).await?;
+        if let Some(raw) = sock.direct() {
+            crate::platform::protect_socket(raw)?;
+        }
 
         let local_secret = StaticSecret::from(cfg.local_private_key);
         let peer_public = PublicKey::from(cfg.peer_public_key);
         let preshared = cfg.preshared_key;
 
-        let tunn = Tunn::new(local_secret, peer_public, preshared, cfg.persistent_keepalive, 0, None);
+        let tunn = Tunn::new(
+            local_secret,
+            peer_public,
+            preshared,
+            cfg.persistent_keepalive,
+            0,
+            None,
+        );
 
         Ok(Self {
             tunn: Arc::new(Mutex::new(Box::new(tunn))),
@@ -254,7 +260,9 @@ impl WgTunnel {
                             if !*sent && aethernoize.is_enabled() {
                                 *sent = true;
                                 drop(sent);
-                                aethernoize::apply_obfuscation(&sock_w, peer, &aethernoize).await;
+                                if let Some(raw) = sock_w.direct() {
+                                    aethernoize::apply_obfuscation(raw, peer, &aethernoize).await;
+                                }
                             }
                         }
 
@@ -266,12 +274,10 @@ impl WgTunnel {
                             let sock_clone = sock_w.clone();
                             let cfg_clone = aethernoize.clone();
                             tokio::spawn(async move {
-                                aethernoize::send_post_handshake_junk(
-                                    &sock_clone,
-                                    peer,
-                                    &cfg_clone,
-                                )
-                                .await;
+                                if let Some(raw) = sock_clone.direct() {
+                                    aethernoize::send_post_handshake_junk(raw, peer, &cfg_clone)
+                                        .await;
+                                }
                             });
                         }
                     }
@@ -299,7 +305,9 @@ impl WgTunnel {
                         let sock_j = sock_t.clone();
                         let cfg_j = aethernoize_t.clone();
                         tokio::spawn(async move {
-                            aethernoize::send_keepalive_junk(&sock_j, &cfg_j).await;
+                            if let Some(raw) = sock_j.direct() {
+                                aethernoize::send_keepalive_junk(raw, &cfg_j).await;
+                            }
                             let _ = sock_j.send(&pkt_vec).await;
                         });
                     } else {
@@ -444,7 +452,7 @@ fn build_dataplane_probe(src: Ipv4Addr) -> Vec<u8> {
 }
 
 async fn send_dataplane_probe(
-    sock: &UdpSocket,
+    sock: &WgUdpSocket,
     tunn: &mut Tunn,
     client_id: &[u8; 3],
     probe: &[u8],
@@ -597,7 +605,7 @@ fn is_large_probe_reply(pkt: &[u8]) -> bool {
 /// endpoint where even the smallest rung fails is rejected — at that point
 /// nothing useful can cross and another endpoint is the right answer.
 async fn verify_dataplane(
-    sock: &UdpSocket,
+    sock: &WgUdpSocket,
     tunn: &mut Tunn,
     client_id: &[u8; 3],
     local_ipv4: Ipv4Addr,
@@ -663,7 +671,11 @@ async fn verify_dataplane(
         }
 
         if now >= resend_at {
-            let probe: &[u8] = if rung.is_some() { &large_probe } else { &small_probe };
+            let probe: &[u8] = if rung.is_some() {
+                &large_probe
+            } else {
+                &small_probe
+            };
             let _ = send_dataplane_probe(sock, tunn, client_id, probe, &mut out_buf).await;
             last_probe_at = now;
             resend_at = now + Duration::from_millis(700);
@@ -784,20 +796,19 @@ pub async fn verify_endpoint_keep_session(
         data_check
     );
 
-    let bind = if peer.is_ipv4() {
-        "0.0.0.0:0"
-    } else {
-        "[::]:0"
-    };
-    let sock = UdpSocket::bind(bind).await?;
-    crate::platform::protect_socket(&sock)?;
-    sock.connect(peer).await?;
+    let upstream_proxy = std::env::var("AETHER_WG_UPSTREAM_SOCKS").ok();
+    let sock = WgUdpSocket::bind(peer, upstream_proxy.as_deref()).await?;
+    if let Some(raw) = sock.direct() {
+        crate::platform::protect_socket(raw)?;
+    }
 
     let start = Instant::now();
     let deadline = start + timeout;
 
     if aethernoize.is_enabled() {
-        aethernoize::apply_obfuscation(&sock, peer, aethernoize).await;
+        if let Some(raw) = sock.direct() {
+            aethernoize::apply_obfuscation(raw, peer, aethernoize).await;
+        }
     }
 
     let local_secret = StaticSecret::from(private_key);
@@ -997,6 +1008,9 @@ pub fn wg_seeds_v4() -> Vec<&'static str> {
 mod tests {
     use super::*;
     use std::io::{Error, ErrorKind};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
 
     #[test]
     fn the_documented_zero_trust_wireguard_ingress_range_is_scanned() {
@@ -1188,5 +1202,123 @@ mod tests {
         assert_eq!(received.len(), 3);
         assert_eq!(received[0], received[1]);
         assert_eq!(received[1], received[2]);
+    }
+
+    #[tokio::test]
+    async fn wg_tunnel_new_with_upstream_uses_live_socks_udp_and_never_falls_back() {
+        let relay = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let relay_addr = relay.local_addr().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        let (captured_tx, captured_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut control, _) = tokio::time::timeout(
+                Duration::from_secs(3),
+                listener.accept(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let mut greeting = [0u8; 3];
+            control.read_exact(&mut greeting).await.unwrap();
+            assert_eq!(greeting, [5, 1, 0]);
+            control.write_all(&[5, 0]).await.unwrap();
+
+            let mut associate = [0u8; 10];
+            control.read_exact(&mut associate).await.unwrap();
+            assert_eq!(associate, [5, 3, 0, 1, 0, 0, 0, 0, 0, 0]);
+            let mut reply = vec![5, 0, 0, 1];
+            if let SocketAddr::V4(addr) = relay_addr {
+                reply.extend_from_slice(&addr.ip().octets());
+                reply.extend_from_slice(&addr.port().to_be_bytes());
+            }
+            control.write_all(&reply).await.unwrap();
+
+            let mut frame = [0u8; 256];
+            let (n, client) = tokio::time::timeout(
+                Duration::from_secs(3),
+                relay.recv_from(&mut frame),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            captured_tx.send(frame[..n].to_vec()).unwrap();
+
+            // The SOCKS control stream must remain the transport's lifetime
+            // guard; do not let the fake server disappear before the client.
+            let mut eof = [0u8; 1];
+            let _ = control.read(&mut eof).await;
+            let _ = client;
+        });
+
+        let peer: SocketAddr = "203.0.113.7:51820".parse().unwrap();
+        let peer_public = PublicKey::from(&StaticSecret::from([9u8; 32])).to_bytes();
+        let cfg = WgConfig {
+            local_private_key: [7u8; 32],
+            peer_public_key: peer_public,
+            peer_endpoint: peer,
+            local_ipv4: "172.16.0.2".parse().unwrap(),
+            local_ipv6: Ipv6Addr::UNSPECIFIED,
+            client_id: [0, 0, 3],
+            preshared_key: None,
+            persistent_keepalive: None,
+            aethernoize: Arc::new(AetherNoizeConfig::off()),
+        };
+        let (inbound_tx, _inbound_rx) = mpsc::channel(1);
+        let proxy = format!("socks5h://{proxy_addr}");
+        let tunnel = tokio::time::timeout(
+            Duration::from_secs(3),
+            WgTunnel::new_with_upstream(cfg, inbound_tx, Some(&proxy)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), tunnel.sock.send(b"live-data"))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let frame = tokio::time::timeout(Duration::from_secs(3), captured_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&frame[..3], &[0, 0, 0]);
+        assert_eq!(frame[3], 1, "SOCKS5 UDP target must be IPv4");
+        assert_eq!(&frame[4..8], &peer.ip().to_string().parse::<Ipv4Addr>().unwrap().octets());
+        assert_eq!(u16::from_be_bytes([frame[8], frame[9]]), peer.port());
+        assert_eq!(&frame[10..], b"live-data");
+
+        drop(tunnel);
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let unused = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let unreachable = unused.local_addr().unwrap();
+        drop(unused);
+        let (inbound_tx, _inbound_rx) = mpsc::channel(1);
+        let cfg = WgConfig {
+            local_private_key: [7u8; 32],
+            peer_public_key: peer_public,
+            peer_endpoint: peer,
+            local_ipv4: "172.16.0.2".parse().unwrap(),
+            local_ipv6: Ipv6Addr::UNSPECIFIED,
+            client_id: [0, 0, 3],
+            preshared_key: None,
+            persistent_keepalive: None,
+            aethernoize: Arc::new(AetherNoizeConfig::off()),
+        };
+        assert!(tokio::time::timeout(
+            Duration::from_secs(3),
+            WgTunnel::new_with_upstream(
+                cfg,
+                inbound_tx,
+                Some(&format!("socks5h://{unreachable}")),
+            ),
+        )
+        .await
+        .unwrap()
+        .is_err());
     }
 }
