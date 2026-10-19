@@ -1,27 +1,18 @@
-/// Slow DNS (DNS Tunneling) configuration model
-///
-/// A Slow DNS config describes how to tunnel traffic through DNS queries.
-/// It is primarily intended for use under heavy censorship where regular
-/// VPN protocols are blocked but DNS traffic still flows.
+import 'dart:convert';
+
+/// A standalone dnstt profile. DNS transport is not a tunnel protocol selector.
 class SlowDnsConfig {
-  final String name; // نام کانفیگ
-  final String domain; // دامنه‌ی تونل DNS (مثال: tunnel.example.com)
-  final String nameServer; // آدرس Name Server / Resolver (مثال: 1.1.1.1)
-  final String? pubKey; // کلید عمومی سرور SlowDNS (اختیاری)
-  final int? port; // پورت (پیش‌فرض 53)
-  final String? username; // نام کاربری (اختیاری)
-  final String? password; // رمز عبور (اختیاری)
-  // نوع انتقال DNS برای تونل (الهام‌گرفته از SlipNet): udp | dot | doh
-  // udp = رزولوِر معمولی روی پورت 53 (پیش‌فرض)
-  // dot = DNS over TLS، doh = DNS over HTTPS (برای عبور از DPI)
+  final String name;
+  final String domain;
+  final String nameServer;
+  final String? pubKey;
+  final int? port;
+  final String? username;
+  final String? password;
   final String dnsTransport;
-  // آدرس سرور DoH (فقط وقتی dnsTransport == 'doh')، مثال: https://1.1.1.1/dns-query
   final String? dohUrl;
-  // فهرست ریزالورهای پشتیبان (failover). هنگام اتصال، همه‌ی ریزالورها هم‌زمان
-  // تست می‌شوند و سریع‌ترین ریزالورِ سالم برای رسیدن به سرور استفاده می‌شود؛
-  // اگر هیچ‌کدام کار نکرد، به‌ترتیب ریزالورهای بعدی امتحان می‌شوند تا وصل شود.
   final List<String> resolvers;
-  final DateTime addedAt; // تاریخ اضافه شدن
+  final DateTime addedAt;
 
   SlowDnsConfig({
     required this.name,
@@ -37,59 +28,160 @@ class SlowDnsConfig {
     DateTime? addedAt,
   }) : addedAt = addedAt ?? DateTime.now();
 
-  /// All resolvers to try, always starting with the primary [nameServer] and
-  /// followed by the failover [resolvers] (de-duplicated, in order).
-  List<String> get allResolvers {
-    final out = <String>[];
-    final seen = <String>{};
-    for (final r in [nameServer, ...resolvers]) {
-      final v = r.trim();
-      if (v.isNotEmpty && seen.add(v)) out.add(v);
+  static const supportedTransports = {'udp', 'dot', 'doh'};
+  int get defaultPort => switch (dnsTransport.toLowerCase()) {
+    'dot' => 853,
+    'doh' => 443,
+    _ => 53,
+  };
+  int get effectivePort => port ?? defaultPort;
+
+  List<String> get validationErrors {
+    final errors = <String>[];
+    if (name.trim().isEmpty) errors.add('Name is required.');
+    if (resolvers.length > 31) {
+      errors.add('Use at most 32 resolver candidates per profile.');
     }
-    return out;
+    if (!isValidDnsName(domain)) errors.add('Domain must be a valid DNS name.');
+    if (!isValidPublicKey(pubKey)) {
+      errors.add('A 64-character hexadecimal public key is required.');
+    }
+    if (!supportedTransports.contains(dnsTransport.toLowerCase())) {
+      errors.add('DNS transport must be udp, dot, or doh.');
+    }
+    if (effectivePort < 1 || effectivePort > 65535) {
+      errors.add('Port must be between 1 and 65535.');
+    }
+    if (dnsTransport.toLowerCase() == 'doh') {
+      if (!isValidDohUrl(dohUrl))
+        errors.add('DoH URL must be a valid HTTPS URL.');
+    } else {
+      if (!isValidResolverEndpoint(nameServer) ||
+          resolvers.any((value) => !isValidResolverEndpoint(value))) {
+        errors.add(
+          'Resolvers must be valid IP addresses or hostnames; enter the port separately.',
+        );
+      }
+    }
+    final hasUsername = username?.isNotEmpty ?? false;
+    final hasPassword = password?.isNotEmpty ?? false;
+    if (hasUsername != hasPassword) {
+      errors.add(
+        'Remote SOCKS5 username and password must be provided together.',
+      );
+    } else if (hasUsername &&
+        (utf8.encode(username!).length > 255 ||
+            utf8.encode(password!).length > 255)) {
+      errors.add(
+        'Remote SOCKS5 username and password must be 1 to 255 UTF-8 bytes.',
+      );
+    }
+    return errors;
   }
 
-  /// پورت موثر (پیش‌فرض 53 برای DNS)
-  int get effectivePort => port ?? 53;
-
-  /// Convert to JSON for storage
-  Map<String, dynamic> toJson() {
-    return {
-      'name': name,
-      'domain': domain,
-      'nameServer': nameServer,
-      'pubKey': pubKey,
-      'port': port,
-      'username': username,
-      'password': password,
-      'dnsTransport': dnsTransport,
-      'dohUrl': dohUrl,
-      'resolvers': resolvers,
-      'addedAt': addedAt.toIso8601String(),
-    };
+  String? get validationError {
+    final errors = validationErrors;
+    return errors.isEmpty ? null : errors.first;
   }
 
-  /// Create from JSON
-  factory SlowDnsConfig.fromJson(Map<String, dynamic> json) {
-    return SlowDnsConfig(
-      name: json['name'] as String,
-      domain: json['domain'] as String,
-      nameServer: json['nameServer'] as String,
-      pubKey: json['pubKey'] as String?,
-      port: json['port'] as int?,
-      username: json['username'] as String?,
-      password: json['password'] as String?,
-      dnsTransport: (json['dnsTransport'] as String?) ?? 'udp',
-      dohUrl: json['dohUrl'] as String?,
-      resolvers: (json['resolvers'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          const [],
-      addedAt: DateTime.parse(json['addedAt'] as String),
-    );
+  bool get isValid => validationError == null;
+
+  static bool isValidPublicKey(String? value) =>
+      value != null && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(value.trim());
+
+  static bool isValidDnsName(String value) {
+    final v = value.trim().replaceFirst(RegExp(r'\.$'), '');
+    if (v.isEmpty || v.length > 253) return false;
+    return v
+        .split('.')
+        .every(
+          (label) =>
+              label.length <= 63 &&
+              RegExp(
+                r'^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$',
+              ).hasMatch(label),
+        );
   }
 
-  /// Create a copy with modified fields
+  /// Bare IPv4/IPv6 or hostname only. No hidden port, URL, or credentials.
+  static bool isValidResolverEndpoint(String value) {
+    var v = value.trim();
+    if (v.startsWith('[') && v.endsWith(']')) v = v.substring(1, v.length - 1);
+    if (v.isEmpty || v.contains(RegExp(r'[\s/@?#%]'))) return false;
+    if (v.contains(':')) {
+      try {
+        Uri.parseIPv6Address(v);
+        return true;
+      } on FormatException {
+        return false;
+      }
+    }
+    if (RegExp(r'^[0-9.]+$').hasMatch(v)) {
+      final parts = v.split('.');
+      return parts.length == 4 &&
+          parts.every(
+            (part) =>
+                RegExp(r'^(0|[1-9][0-9]{0,2})$').hasMatch(part) &&
+                int.parse(part) <= 255,
+          );
+    }
+    return isValidDnsName(v);
+  }
+
+  static bool isValidDohUrl(String? value) {
+    try {
+      final uri = Uri.parse(value?.trim() ?? '');
+      return uri.scheme == 'https' &&
+          uri.host.isNotEmpty &&
+          isValidResolverEndpoint(uri.host) &&
+          uri.userInfo.isEmpty &&
+          !uri.hasFragment &&
+          uri.port >= 1 &&
+          uri.port <= 65535;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  List<String> get allResolvers => [nameServer, ...resolvers]
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toSet()
+      .toList();
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'domain': domain,
+    'nameServer': nameServer,
+    'pubKey': pubKey,
+    'port': port,
+    'username': username,
+    'password': password,
+    'dnsTransport': dnsTransport,
+    'dohUrl': dohUrl,
+    'resolvers': resolvers,
+    'addedAt': addedAt.toIso8601String(),
+  };
+
+  factory SlowDnsConfig.fromJson(Map<String, dynamic> json) => SlowDnsConfig(
+    name: json['name'] as String,
+    domain: json['domain'] as String,
+    nameServer: json['nameServer'] as String,
+    pubKey: json['pubKey'] as String?,
+    port: json['port'] as int?,
+    username: json['username'] as String?,
+    password: json['password'] as String?,
+    dnsTransport: (json['dnsTransport'] as String?) ?? 'udp',
+    dohUrl: json['dohUrl'] as String?,
+    resolvers:
+        (json['resolvers'] as List<dynamic>?)
+            ?.map((value) => value.toString())
+            .toList() ??
+        const [],
+    addedAt:
+        DateTime.tryParse(json['addedAt'] as String? ?? '') ?? DateTime.now(),
+  );
+
   SlowDnsConfig copyWith({
     String? name,
     String? domain,
@@ -102,24 +194,21 @@ class SlowDnsConfig {
     String? dohUrl,
     List<String>? resolvers,
     DateTime? addedAt,
-  }) {
-    return SlowDnsConfig(
-      name: name ?? this.name,
-      domain: domain ?? this.domain,
-      nameServer: nameServer ?? this.nameServer,
-      pubKey: pubKey ?? this.pubKey,
-      port: port ?? this.port,
-      username: username ?? this.username,
-      password: password ?? this.password,
-      dnsTransport: dnsTransport ?? this.dnsTransport,
-      dohUrl: dohUrl ?? this.dohUrl,
-      resolvers: resolvers ?? this.resolvers,
-      addedAt: addedAt ?? this.addedAt,
-    );
-  }
+  }) => SlowDnsConfig(
+    name: name ?? this.name,
+    domain: domain ?? this.domain,
+    nameServer: nameServer ?? this.nameServer,
+    pubKey: pubKey ?? this.pubKey,
+    port: port ?? this.port,
+    username: username ?? this.username,
+    password: password ?? this.password,
+    dnsTransport: dnsTransport ?? this.dnsTransport,
+    dohUrl: dohUrl ?? this.dohUrl,
+    resolvers: resolvers ?? this.resolvers,
+    addedAt: addedAt ?? this.addedAt,
+  );
 
   @override
-  String toString() {
-    return 'SlowDnsConfig(name: $name, domain: $domain, ns: $nameServer:$effectivePort)';
-  }
+  String toString() =>
+      'SlowDnsConfig(name: $name, domain: $domain, transport: $dnsTransport)';
 }

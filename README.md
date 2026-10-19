@@ -33,7 +33,7 @@
 | **SSTP** | Connects using Secure Socket Tunneling Protocol. | Uses the app's server list or a custom server configured in settings. |
 | **DNS Changer** | Changes DNS handling through an Android VPN interface; it is not a general-purpose full-tunnel protocol. | Select a DNS server from the app's DNS list. |
 | **Proxy** | Routes traffic through an upstream SOCKS4, SOCKS5, or HTTP proxy. | Add a proxy link or endpoint, or import a subscription. Offers a TCP latency test and an open-site test through the proxy. |
-| **Slow DNS** | Tunnels traffic over DNS for networks where other methods are unavailable. | Beta feature; add and select a Slow DNS configuration. The DNS scanner can help find candidate name servers. |
+| **Slow DNS** | Standalone dnstt TCP tunnel over UDP DNS, DoT, or DoH. | Requires a delegated domain, server public key and remote SOCKS5 endpoint. DNS is tunneled over TCP; other UDP is blocked. Scanner results are candidates, not authenticated tunnel verification. Excluded from Mix. See [Slow DNS setup and limitations](docs/SLOW_DNS.md). |
 
 ### Server and profile formats
 

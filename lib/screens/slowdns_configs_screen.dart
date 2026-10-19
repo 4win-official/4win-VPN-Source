@@ -6,7 +6,6 @@ import 'dns_scanner_screen.dart';
 
 /// Screen for managing Slow DNS (DNS Tunneling) configurations.
 ///
-/// Slow DNS is exposed as a **Beta** feature.
 class SlowDnsConfigsScreen extends StatefulWidget {
   const SlowDnsConfigsScreen({super.key});
 
@@ -31,30 +30,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Slow DNS'),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.orange.withValues(alpha: 0.6),
-                  width: 1,
-                ),
-              ),
-              child: const Text(
-                'Beta',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-          ],
+          children: [const Text('Slow DNS')],
         ),
         backgroundColor: Colors.orange,
         foregroundColor: Colors.white,
@@ -65,9 +41,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const DnsScannerScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const DnsScannerScreen()),
               );
             },
           ),
@@ -79,20 +53,23 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
 
           return Column(
             children: [
-              // Beta info banner
               Container(
                 width: double.infinity,
                 color: Colors.orange.withValues(alpha: 0.12),
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
-                    const Icon(Icons.info_outline,
-                        color: Colors.orange, size: 20),
+                    const Icon(
+                      Icons.info_outline,
+                      color: Colors.orange,
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Slow DNS tunnels traffic through DNS queries for use under '
-                        'heavy censorship. This feature is in Beta.',
+                        'Requires a dnstt server exposing a remote SOCKS5 endpoint. '
+                        'The client forwards TCP through tunneled DNS queries; it does not '
+                        'provide SSH or arbitrary UDP tunneling.',
                         style: TextStyle(
                           fontSize: 12.5,
                           color: isDark ? Colors.white70 : Colors.black87,
@@ -113,9 +90,14 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
                           final config = configs[index];
                           final isSelected =
                               provider.selectedSlowDnsConfig?.name ==
-                                  config.name;
+                              config.name;
                           return _buildConfigCard(
-                              context, provider, config, isSelected, isDark);
+                            context,
+                            provider,
+                            config,
+                            isSelected,
+                            isDark,
+                          );
                         },
                       ),
               ),
@@ -137,9 +119,11 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.cloud_queue,
-              size: 72,
-              color: isDark ? Colors.white24 : Colors.black26),
+          Icon(
+            Icons.cloud_queue,
+            size: 72,
+            color: isDark ? Colors.white24 : Colors.black26,
+          ),
           const SizedBox(height: 16),
           Text(
             'No Slow DNS configs yet',
@@ -193,7 +177,11 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Domain: ${config.domain}'),
-            Text('NS: ${config.nameServer}:${config.effectivePort}'),
+            Text(
+              config.dnsTransport == 'doh'
+                  ? 'DoH: ${config.dohUrl}'
+                  : 'NS: ${config.nameServer}:${config.effectivePort}',
+            ),
           ],
         ),
         isThreeLine: true,
@@ -222,7 +210,10 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
   }
 
   void _confirmDelete(
-      BuildContext context, VpnProvider provider, SlowDnsConfig config) {
+    BuildContext context,
+    VpnProvider provider,
+    SlowDnsConfig config,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -252,6 +243,8 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
     final pubKeyController = TextEditingController();
     final portController = TextEditingController(text: '53');
     final dohUrlController = TextEditingController();
+    final usernameController = TextEditingController();
+    final passwordController = TextEditingController();
     final resolversController = TextEditingController();
     final formKey = GlobalKey<FormState>();
     // DNS transport (SlipNet-inspired): udp | dot | doh
@@ -261,193 +254,281 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocalState) => AlertDialog(
-        title: const Text('Add Slow DNS Config'),
-        content: SingleChildScrollView(
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Name *',
-                    hintText: 'My Slow DNS',
-                  ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                TextFormField(
-                  controller: domainController,
-                  decoration: const InputDecoration(
-                    labelText: 'Domain *',
-                    hintText: 'tunnel.example.com',
-                  ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                TextFormField(
-                  controller: nsController,
-                  decoration: InputDecoration(
-                    labelText: 'Name Server *',
-                    hintText: '1.1.1.1',
-                    suffixIcon: IconButton(
-                      tooltip: 'Find best DNS (Scanner)',
-                      icon: const Icon(Icons.radar, color: Colors.orange),
-                      onPressed: () async {
-                        final picked = await Navigator.push<String>(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => DnsScannerScreen(
-                              probeDomain: domainController.text.trim().isEmpty
-                                  ? null
-                                  : domainController.text.trim(),
-                            ),
-                          ),
-                        );
-                        if (picked != null && picked.isNotEmpty) {
-                          nsController.text = picked;
-                        }
-                      },
-                    ),
-                  ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                TextFormField(
-                  controller: portController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Port',
-                    hintText: '53',
-                  ),
-                ),
-                TextFormField(
-                  controller: pubKeyController,
-                  decoration: const InputDecoration(
-                    labelText: 'Public Key (optional)',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // 🔀 DNS Transport (SlipNet-inspired): UDP / DoT / DoH
-                DropdownButtonFormField<String>(
-                  initialValue: dnsTransport,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'DNS Transport',
-                    helperText: 'DoH/DoT help bypass DPI on DNS queries',
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'udp', child: Text('UDP (Plain, port 53)')),
-                    DropdownMenuItem(
-                        value: 'dot', child: Text('DoT (DNS over TLS)')),
-                    DropdownMenuItem(
-                        value: 'doh', child: Text('DoH (DNS over HTTPS)')),
-                  ],
-                  onChanged: (v) =>
-                      setLocalState(() => dnsTransport = v ?? 'udp'),
-                ),
-                if (dnsTransport == 'doh')
+          title: const Text('Add Slow DNS Config'),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   TextFormField(
-                    controller: dohUrlController,
+                    controller: nameController,
                     decoration: const InputDecoration(
-                      labelText: 'DoH URL',
-                      hintText: 'https://1.1.1.1/dns-query',
+                      labelText: 'Name *',
+                      hintText: 'My Slow DNS',
                     ),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
                   ),
-                const SizedBox(height: 8),
-                // 🔁 Failover resolvers: multiple resolvers tried concurrently;
-                // the connection uses whichever reaches the server, and falls
-                // back through the list until one works.
-                TextFormField(
-                  controller: resolversController,
-                  minLines: 1,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    labelText: 'Failover resolvers (optional)',
-                    hintText: '8.8.8.8, 1.1.1.1, 9.9.9.9 — comma/space/newline',
-                    helperText:
-                        'Tried together with the name server; first working one is used',
-                    suffixIcon: IconButton(
-                      tooltip: 'Scan & pick a resolver',
-                      icon: const Icon(Icons.radar, color: Colors.orange),
-                      onPressed: () async {
-                        final picked = await Navigator.push<String>(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => DnsScannerScreen(
-                              probeDomain:
-                                  domainController.text.trim().isEmpty
-                                      ? null
-                                      : domainController.text.trim(),
+                  TextFormField(
+                    controller: domainController,
+                    decoration: const InputDecoration(
+                      labelText: 'Domain *',
+                      hintText: 'tunnel.example.com',
+                    ),
+                    validator: (v) => SlowDnsConfig.isValidDnsName(v ?? '')
+                        ? null
+                        : 'Enter a valid DNS name (for example, tunnel.example.com).',
+                  ),
+                  TextFormField(
+                    controller: nsController,
+                    decoration: InputDecoration(
+                      labelText: dnsTransport == 'doh'
+                          ? 'Name Server (unused for DoH)'
+                          : 'Name Server *',
+                      hintText: '1.1.1.1',
+                      suffixIcon: IconButton(
+                        tooltip: 'Find best DNS (Scanner)',
+                        icon: const Icon(Icons.radar, color: Colors.orange),
+                        onPressed: () async {
+                          final picked = await Navigator.push<String>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DnsScannerScreen(
+                                probeDomain:
+                                    domainController.text.trim().isEmpty
+                                    ? null
+                                    : domainController.text.trim(),
+                              ),
                             ),
-                          ),
-                        );
-                        if (picked != null && picked.isNotEmpty) {
-                          final cur = resolversController.text.trim();
-                          setLocalState(() {
-                            resolversController.text =
-                                cur.isEmpty ? picked : '$cur, $picked';
-                          });
-                        }
-                      },
+                          );
+                          if (picked != null && picked.isNotEmpty) {
+                            nsController.text = picked;
+                          }
+                        },
+                      ),
+                    ),
+                    validator: (v) =>
+                        dnsTransport == 'doh' ||
+                            SlowDnsConfig.isValidResolverEndpoint(v ?? '')
+                        ? null
+                        : 'Enter an IP address or hostname, not a URL.',
+                  ),
+                  TextFormField(
+                    controller: portController,
+                    enabled: dnsTransport != 'doh',
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Port',
+                      hintText: '53',
+                      helperText:
+                          'UDP defaults to 53, DoT to 853. For DoH, set the port in its URL.',
+                    ),
+                    validator: (v) {
+                      final value = int.tryParse(v?.trim() ?? '');
+                      return value != null && value >= 1 && value <= 65535
+                          ? null
+                          : 'Enter a port between 1 and 65535.';
+                    },
+                  ),
+                  TextFormField(
+                    controller: pubKeyController,
+                    decoration: const InputDecoration(
+                      labelText: 'Public Key *',
+                      helperText:
+                          'Required: exactly 64 hexadecimal characters.',
+                    ),
+                    validator: (v) => SlowDnsConfig.isValidPublicKey(v)
+                        ? null
+                        : 'Enter the server public key (64 hex characters).',
+                  ),
+                  TextFormField(
+                    controller: usernameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Remote SOCKS5 username (optional)',
+                      helperText:
+                          'Used by the dnstt server SOCKS5 endpoint, not SSH.',
+                    ),
+                    validator: (v) => _credentialValidator(
+                      v,
+                      passwordController.text,
+                      'Username',
                     ),
                   ),
-                ),
-              ],
+                  TextFormField(
+                    controller: passwordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Remote SOCKS5 password (optional)',
+                    ),
+                    validator: (v) => _credentialValidator(
+                      v,
+                      usernameController.text,
+                      'Password',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // DNS transport: UDP, DoT, or DoH resolver transport.
+                  DropdownButtonFormField<String>(
+                    initialValue: dnsTransport,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'DNS Transport',
+                      helperText: 'DoH/DoT help bypass DPI on DNS queries',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'udp',
+                        child: Text('UDP (Plain, port 53)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'dot',
+                        child: Text('DoT (DNS over TLS)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'doh',
+                        child: Text('DoH (DNS over HTTPS)'),
+                      ),
+                    ],
+                    onChanged: (v) => setLocalState(() {
+                      dnsTransport = v ?? 'udp';
+                      portController.text = dnsTransport == 'dot'
+                          ? '853'
+                          : dnsTransport == 'doh'
+                          ? '443'
+                          : '53';
+                    }),
+                  ),
+                  if (dnsTransport == 'doh')
+                    TextFormField(
+                      controller: dohUrlController,
+                      decoration: const InputDecoration(
+                        labelText: 'DoH URL *',
+                        hintText: 'https://dns.example.com/dns-query',
+                      ),
+                      validator: (v) => SlowDnsConfig.isValidDohUrl(v)
+                          ? null
+                          : 'Enter a valid HTTPS URL.',
+                    ),
+                  const SizedBox(height: 8),
+                  // 🔁 Failover resolvers: multiple resolvers tried concurrently;
+                  // the connection uses whichever reaches the server, and falls
+                  // back through the list until one works.
+                  TextFormField(
+                    controller: resolversController,
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: 'Failover resolvers (optional)',
+                      hintText:
+                          '8.8.8.8, 1.1.1.1, 9.9.9.9 — comma/space/newline',
+                      helperText:
+                          'Tried in order after the name server. DoH uses its URL only.',
+                      suffixIcon: IconButton(
+                        tooltip: 'Scan & pick a resolver',
+                        icon: const Icon(Icons.radar, color: Colors.orange),
+                        onPressed: () async {
+                          final picked = await Navigator.push<String>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DnsScannerScreen(
+                                probeDomain:
+                                    domainController.text.trim().isEmpty
+                                    ? null
+                                    : domainController.text.trim(),
+                              ),
+                            ),
+                          );
+                          if (picked != null && picked.isNotEmpty) {
+                            final cur = resolversController.text.trim();
+                            setLocalState(() {
+                              resolversController.text = cur.isEmpty
+                                  ? picked
+                                  : '$cur, $picked';
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+              onPressed: () async {
+                if (!formKey.currentState!.validate()) return;
+
+                final config = SlowDnsConfig(
+                  name: nameController.text.trim(),
+                  domain: domainController.text.trim(),
+                  nameServer: nsController.text.trim(),
+                  port: int.tryParse(portController.text.trim()),
+                  pubKey: pubKeyController.text.trim().isEmpty
+                      ? null
+                      : pubKeyController.text.trim(),
+                  username: usernameController.text.trim().isEmpty
+                      ? null
+                      : usernameController.text,
+                  password: passwordController.text.isEmpty
+                      ? null
+                      : passwordController.text,
+                  dnsTransport: dnsTransport,
+                  dohUrl:
+                      dnsTransport != 'doh' ||
+                          dohUrlController.text.trim().isEmpty
+                      ? null
+                      : dohUrlController.text.trim(),
+                  resolvers: resolversController.text
+                      .split(RegExp(r'[\s,;\n]+'))
+                      .map((e) => e.trim())
+                      .where((e) => e.isNotEmpty)
+                      .toList(),
+                );
+
+                if (config.validationError != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(config.validationError!)),
+                  );
+                  return;
+                }
+                final provider = ctx.read<VpnProvider>();
+                final navigator = Navigator.of(ctx);
+                final messenger = ScaffoldMessenger.of(context);
+
+                final success = await provider.addSlowDnsConfig(config);
+
+                navigator.pop();
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      success
+                          ? 'Config added'
+                          : 'Failed: name may already exist',
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Add'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              final config = SlowDnsConfig(
-                name: nameController.text.trim(),
-                domain: domainController.text.trim(),
-                nameServer: nsController.text.trim(),
-                port: int.tryParse(portController.text.trim()),
-                pubKey: pubKeyController.text.trim().isEmpty
-                    ? null
-                    : pubKeyController.text.trim(),
-                dnsTransport: dnsTransport,
-                dohUrl: dohUrlController.text.trim().isEmpty
-                    ? null
-                    : dohUrlController.text.trim(),
-                resolvers: resolversController.text
-                    .split(RegExp(r'[\s,;\n]+'))
-                    .map((e) => e.trim())
-                    .where((e) => e.isNotEmpty)
-                    .toList(),
-              );
-
-              final provider = ctx.read<VpnProvider>();
-              final navigator = Navigator.of(ctx);
-              final messenger = ScaffoldMessenger.of(context);
-
-              final success = await provider.addSlowDnsConfig(config);
-
-              navigator.pop();
-              messenger.showSnackBar(
-                SnackBar(
-                  content: Text(success
-                      ? 'Config added'
-                      : 'Failed: name may already exist'),
-                ),
-              );
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
       ),
     );
+  }
+
+  String? _credentialValidator(String? value, String peer, String label) {
+    final current = value ?? '';
+    if (current.isEmpty && peer.isEmpty) return null;
+    if (current.isEmpty || peer.isEmpty)
+      return 'Remote SOCKS5 username and password are required together.';
+    if (current.length > 255) return '$label must be 1 to 255 characters.';
+    return null;
   }
 }

@@ -47,9 +47,9 @@ android {
     // AGP's modern default (useLegacyPackaging = false) stores jniLibs
     // UNCOMPRESSED + page-aligned in the APK so they can be mmap'd directly
     // without extraction — optimized for install footprint/startup speed at
-    // the cost of a bigger APK/download. This app never exec()s a native lib
-    // as a subprocess (Xray/Psiphon are both dlopen()'d via JNI), so there is
-    // no functional reason to avoid legacy packaging, and legacy packaging
+    // the cost of a bigger APK/download. Slow DNS additionally executes its
+    // isolated dnstt client from nativeLibraryDir, so extraction is required.
+    // Xray/Psiphon remain dlopen()'d via JNI. Legacy packaging
     // compresses the ~128MB of libgojni.so (Xray) + libpsiphon-gojni.so
     // (Psiphon, all 4 ABIs each) inside the APK itself — measured ~65%
     // shrink with plain deflate on these libs. This changes NOTHING about
@@ -66,6 +66,9 @@ android {
             version = "3.22.1"
         }
     }
+    sourceSets.getByName("main").jniLibs.srcDir(
+        layout.buildDirectory.dir("slowdns/jniLibs")
+    )
 }
 
 flutter { source = "../.." }
@@ -217,7 +220,30 @@ dependencies {
 // Belt & suspenders: virtually every AGP task depends on preBuild, so this
 // guarantees the relocated/trimmed AARs exist before anything compiles/
 // packages them, regardless of file-collection dependency inference.
+val buildSlowDns = tasks.register("buildSlowDns") {
+    group = "build"
+    description = "Builds the checksum-pinned standalone dnstt executable for all Android ABIs."
+    val script = rootProject.file("../tools/build_slowdns.py")
+    val ndk = android.sdkDirectory.resolve("ndk/${android.ndkVersion}")
+    val output = layout.buildDirectory.dir("slowdns/jniLibs")
+    inputs.file(script)
+    inputs.property("ndkVersion", android.ndkVersion)
+    outputs.dir(output)
+    doLast {
+        val python = listOf("python3", "python").firstOrNull { cmd ->
+            runCatching { ProcessBuilder(cmd, "--version").start().waitFor() == 0 }
+                .getOrDefault(false)
+        } ?: throw GradleException("Python 3 is required to build Slow DNS.")
+        exec {
+            commandLine(python, script.absolutePath, "--ndk", ndk.absolutePath,
+                "--output", output.get().asFile.absolutePath,
+                "--cache", rootProject.file("../build/slowdns-source").absolutePath)
+        }
+    }
+}
+
 tasks.named("preBuild") {
     dependsOn(relocatePsiphonAar)
     dependsOn(trimLibv2rayAar)
+    dependsOn(buildSlowDns)
 }

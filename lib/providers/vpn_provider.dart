@@ -73,6 +73,7 @@ class VpnProvider with ChangeNotifier {
 
   // Protocol selection: 'sstp', 'direct_dns', 'openvpn', 'slowdns', 'xray',
   // 'proxy' (dedicated SOCKS4/SOCKS5/HTTP proxy protocol) or 'warp'.
+  int _slowDnsConnectGen = 0;
   String _selectedProtocol = 'xray';
   String get selectedProtocol => _selectedProtocol;
 
@@ -220,6 +221,13 @@ class VpnProvider with ChangeNotifier {
   /// every notifyListeners via the override below.
   void _syncErrorAutoClear() {
     final hasError = _errorMessage != null && _errorMessage!.isNotEmpty;
+    if (_selectedProtocol == 'slowdns' && _status == VpnConnectionStatus.error) {
+      // Its native TUN may deliberately remain a blackhole. Do not disguise
+      // blocked traffic as an ordinary disconnected state after ten seconds.
+      _errorAutoClearTimer?.cancel();
+      _errorAutoClearTimer = null;
+      return;
+    }
     if (hasError) {
       if (_errorAutoClearTimer == null || !_errorAutoClearTimer!.isActive) {
         _errorAutoClearTimer = Timer(const Duration(seconds: 10), () {
@@ -1785,68 +1793,61 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  /// Connect to Slow DNS
+  /// Connect only after the native dnstt server passes authenticated probes.
   Future<void> _connectSlowDns() async {
-    if (_selectedSlowDnsConfig == null) {
+    final config = _selectedSlowDnsConfig;
+    if (config == null) {
       _status = VpnConnectionStatus.error;
       _errorMessage = 'Please select a Slow DNS config first';
       notifyListeners();
-
-      if (kDebugMode) {
-        debugPrint('❌ No Slow DNS config selected');
-      }
       return;
     }
-
-    try {
-      _status = VpnConnectionStatus.connecting;
-      notifyListeners();
-
-      if (kDebugMode) {
-        debugPrint(
-          '🌐 Connecting to Slow DNS: ${_selectedSlowDnsConfig!.name}',
-        );
-        debugPrint('   Domain: ${_selectedSlowDnsConfig!.domain}');
-        debugPrint('   Name Server: ${_selectedSlowDnsConfig!.nameServer}');
-      }
-
-      // Setup Slow DNS connection state callback
-      SlowDnsConnection.onStateChanged = (bool connected, String message) {
-        if (connected) {
-          _status = VpnConnectionStatus.connected;
-          _connectedServer = null; // Slow DNS mode
-          _errorMessage = null;
-          _startDurationTimer();
-          _startPingTimer();
-        } else {
-          _status = VpnConnectionStatus.disconnected;
-          _errorMessage = message;
-          _stopDurationTimer();
-          _stopPingTimer();
-        }
-        notifyListeners();
-      };
-
-      // Connect using Slow DNS
-      final connected = await SlowDnsConnection.connect(
-        _selectedSlowDnsConfig!,
-      );
-
-      if (!connected) {
-        _status = VpnConnectionStatus.error;
-        _errorMessage = 'Failed to connect. Check config and try again.';
-        notifyListeners();
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('⚠️ Failed to connect Slow DNS: $e');
-      }
+    final generation = ++_slowDnsConnectGen;
+    bool cancelled() => generation != _slowDnsConnectGen ||
+        _selectedProtocol != 'slowdns' || _mixDisposed;
+    _status = VpnConnectionStatus.connecting;
+    _errorMessage = null;
+    notifyListeners();
+    if (config.validationError != null) {
       _status = VpnConnectionStatus.error;
-      _errorMessage = 'Failed to connect: ${e.toString()}';
+      _errorMessage = config.validationError;
+      notifyListeners();
+      return;
+    }
+    final granted = await SlowDnsConnection.requestPermission();
+    if (cancelled()) return;
+    if (!granted) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = SlowDnsConnection.lastError ??
+          'Approve the VPN permission, then connect again.';
+      notifyListeners();
+      return;
+    }
+    SlowDnsConnection.onStateChanged = (connected, message) {
+      if (cancelled()) return;
+      if (connected) {
+        _status = VpnConnectionStatus.connected;
+        _connectedServer = null;
+        _errorMessage = null;
+        _startDurationTimer();
+        // A direct ping from the excluded app UID is not tunnel latency.
+        _stopPingTimer();
+      } else {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = message;
+        _stopDurationTimer();
+        _stopPingTimer();
+      }
+      notifyListeners();
+    };
+    final connected = await SlowDnsConnection.connect(config);
+    if (cancelled()) return;
+    if (!connected) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = SlowDnsConnection.lastError ?? 'Slow DNS connection failed.';
       notifyListeners();
     }
   }
-
   // ==================== Xray Protocol Methods ====================
 
   /// Load persisted Xray servers + currently selected one.
@@ -3104,7 +3105,7 @@ class VpnProvider with ChangeNotifier {
   /// Disconnect from VPN
   Future<void> disconnect() async {
     if (_status == VpnConnectionStatus.disconnecting ||
-        _status == VpnConnectionStatus.disconnected) {
+        (_status == VpnConnectionStatus.disconnected && _selectedProtocol != 'slowdns')) {
       return;
     }
 
@@ -3163,7 +3164,13 @@ class VpnProvider with ChangeNotifier {
           debugPrint('🔌 Disconnecting OpenVPN...');
         }
       } else if (_selectedProtocol == 'slowdns') {
+        _slowDnsConnectGen++;
+        SlowDnsConnection.onStateChanged = null;
         await SlowDnsConnection.disconnect();
+        _errorMessage = null;
+        _connectionDuration = Duration.zero;
+        _stopDurationTimer();
+        _stopPingTimer();
         if (kDebugMode) {
           debugPrint('🔌 Disconnecting Slow DNS...');
         }
@@ -3307,7 +3314,7 @@ class VpnProvider with ChangeNotifier {
     if (_selectedProtocol == protocol) return;
 
     // اگر متصل است، ابتدا قطع کن
-    if (isConnected || isConnecting) {
+    if (isConnected || isConnecting || _selectedProtocol == 'slowdns') {
       await disconnect();
     }
 
@@ -3531,6 +3538,8 @@ class VpnProvider with ChangeNotifier {
   @override
   void dispose() {
     _mixDisposed = true;
+    _slowDnsConnectGen++;
+    SlowDnsConnection.detach();
     _mixConnectGen++;
     _mixMonitor?.cancel();
     _errorAutoClearTimer?.cancel();
