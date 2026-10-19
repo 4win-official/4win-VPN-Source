@@ -13,6 +13,8 @@ import go.Seq
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
 import libv2ray.Libv2ray
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Xray VPN Service backed by the REAL Xray core (AndroidLibXrayLite / libv2ray.aar),
@@ -33,10 +35,19 @@ class XrayVpnService : VpnService() {
     private var mixMode = false
     @Volatile private var isRunning = false
     @Volatile private var aetherActive = false
+    @Volatile private var aetherGeneration: Long? = null
+    private val lifecycleLock = Any()
+    @Volatile private var generation = System.nanoTime()
+    private var reconnectInProgress = false
+    private var activeConnectIntent: Intent? = null
+    private val commandExecutor: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "XrayVpnLifecycle") }
+    @Volatile private var engineThread: Thread? = null
 
     companion object {
         const val ACTION_CONNECT = "com.forwin.vpn.XRAY_CONNECT"
         const val ACTION_DISCONNECT = "com.forwin.vpn.XRAY_DISCONNECT"
+        const val ACTION_RECONNECT = "com.forwin.vpn.XRAY_RECONNECT"
+        private const val EXTRA_GENERATION = "connection_generation"
         const val EXTRA_CONFIG_JSON = "config_json"
         const val EXTRA_PROXY_MODE = "proxy_mode"
         const val EXTRA_MIX_MODE = "mix_mode"
@@ -50,6 +61,10 @@ class XrayVpnService : VpnService() {
 
         @Volatile
         var isServiceRunning = false
+            private set
+
+        @Volatile
+        var isReconnecting = false
             private set
 
         @Volatile
@@ -78,21 +93,39 @@ class XrayVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
-                configJson = intent.getStringExtra(EXTRA_CONFIG_JSON)
-                mixMode = intent.getBooleanExtra(EXTRA_MIX_MODE, false)
-                try {
-                    showNotification()
-                } catch (t: Throwable) {
-                    android.util.Log.e(TAG, "showNotification failed: ${t.message}", t)
-                }
-                Thread { startXray() }.start()
+                val token: Long
+                synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); configJson=intent.getStringExtra(EXTRA_CONFIG_JSON); mixMode=intent.getBooleanExtra(EXTRA_MIX_MODE,false) }
+                commandExecutor.execute { if (teardown(false) && isCurrent(token)) { runCatching { showNotification(token) }; launch(token) } }
             }
-            ACTION_DISCONNECT -> stopXray()
+            ACTION_DISCONNECT -> if (isCurrentToken(intent)) { synchronized(lifecycleLock) { invalidateConnectionLocked() }; commandExecutor.execute { teardown(true) } }
+            ACTION_RECONNECT -> reconnect(intent)
         }
         return START_STICKY
     }
+    private fun isCurrent(token: Long) = token == generation
+    private fun launch(token: Long) {
+        if (!isCurrent(token)) return
+        if (configJson?.contains("__APP_FILES__") != true) {
+            startXray(token)
+            return
+        }
+        val thread = Thread { startXray(token) }
+        engineThread = thread
+        thread.name = "XrayVpnEngine-$token"
+        thread.start()
+    }
 
-    private fun startXray() {
+    private fun finishReconnect(token: Long) {
+        synchronized(lifecycleLock) {
+            if (generation == token) {
+                reconnectInProgress = false
+                isReconnecting = false
+            }
+        }
+    }
+
+    private fun startXray(expectedGeneration: Long = generation) {
+        if (expectedGeneration != generation) return
         if (isRunning) {
             android.util.Log.d(TAG, "Xray already running")
             return
@@ -100,13 +133,14 @@ class XrayVpnService : VpnService() {
         val config = configJson
         if (config.isNullOrBlank()) {
             android.util.Log.e(TAG, "No config provided")
-            stopXray()
+            finishReconnect(expectedGeneration)
+            commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
             return
         }
 
         try {
             if (config.contains("__APP_FILES__")) {
-                startAether(config)
+                startAether(config, expectedGeneration)
                 return
             }
             val builder = Builder()
@@ -145,7 +179,7 @@ class XrayVpnService : VpnService() {
             vpnInterface = tun
             if (tun == null) {
                 android.util.Log.e(TAG, "Failed to establish VPN interface")
-                stopXray()
+                commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
                 return
             }
             val tunFd = tun.fd
@@ -155,33 +189,41 @@ class XrayVpnService : VpnService() {
             android.util.Log.d(TAG, "initCoreEnv done, "
                 + "version=${runCatching { Libv2ray.checkVersionX() }.getOrNull()}")
 
-            val controller = Libv2ray.newCoreController(XrayCallback())
+            val controller = Libv2ray.newCoreController(XrayCallback(expectedGeneration))
             coreController = controller
 
             android.util.Log.d(TAG, "Starting Xray core (tunFd=$tunFd, "
                 + "version=${runCatching { Libv2ray.checkVersionX() }.getOrNull()})")
             controller.startLoop(config, tunFd)
 
+            if (!isCurrent(expectedGeneration)) {
+                controller.stopLoop()
+                return
+            }
             isRunning = true
             isServiceRunning = true
             activeController = controller
             totalUplink = 0L
             totalDownlink = 0L
+            finishReconnect(expectedGeneration)
 
             android.util.Log.d(TAG, "Xray core started successfully")
         } catch (t: Throwable) {
             android.util.Log.e(TAG, "Failed to start Xray: ${t.message}", t)
-            stopXray()
+            finishReconnect(expectedGeneration)
+            commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
         }
     }
 
     /** Starts WARP through Aether, not Xray's WireGuard outbound. Aether only
      * emits ready after endpoint handshake plus a real HTTP probe. */
-    private fun startAether(rawConfig: String) {
+    private fun startAether(rawConfig: String, token: Long) {
         if (isRunning || aetherActive) return
         var tun: ParcelFileDescriptor? = null
         try {
             val config = rawConfig.replace("__APP_FILES__", filesDir.absolutePath)
+            aetherGeneration = token
+            aetherActive = true
             NativeCore.attach(this)
             val addresses = NativeCore.prepare(config)
             val builder = Builder()
@@ -203,21 +245,26 @@ class XrayVpnService : VpnService() {
             SplitTunnel.apply(applicationContext, builder, packageName)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
             tun = builder.establish() ?: error("Failed to establish WARP VPN interface")
+            check(isCurrent(token)) { "WARP startup cancelled" }
             vpnInterface = tun
             aetherActive = true
             isRunning = true
             isServiceRunning = true
             totalUplink = 0L
             totalDownlink = 0L
+            check(isCurrent(token)) { "WARP startup cancelled" }
             val result = NativeCore.start(config, tun.fd)
             if (result != 0) error(NativeCore.lastError().ifBlank { "Aether exited with code $result" })
-            stopXray()
+            teardown(false)
         } catch (t: Throwable) {
             android.util.Log.e(TAG, "Aether WARP failed: ${t.message}", t)
+            runCatching { tun?.close() }
             runCatching { NativeCore.stop() }
             runCatching { NativeCore.detach() }
             aetherActive = false
-            stopXray()
+            teardown(false)
+        } finally {
+            finishReconnect(token)
         }
     }
 
@@ -226,6 +273,9 @@ class XrayVpnService : VpnService() {
     fun onEvent(json: String) {
         runCatching {
             val event = JSONObject(json)
+            if (event.optString("type") == "status" && event.optString("status") == "connected") {
+                aetherGeneration?.let { finishReconnect(it) }
+            }
             if (event.optString("type") == "traffic") {
                 totalUplink = event.optLong("tx")
                 totalDownlink = event.optLong("rx")
@@ -236,47 +286,67 @@ class XrayVpnService : VpnService() {
 
     fun protectSocket(fd: Int): Boolean = protect(fd)
 
-    private fun stopXray() {
-        try {
-            isRunning = false
-            isServiceRunning = false
-            activeController = null
-            totalUplink = 0L
-            totalDownlink = 0L
-
-            if (aetherActive) {
-                runCatching { NativeCore.stop() }
-                runCatching { NativeCore.detach() }
-                aetherActive = false
-            }
-            try {
-                coreController?.stopLoop()
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "stopLoop error: ${e.message}")
-            }
-            coreController = null
-
-            vpnInterface?.close()
-            vpnInterface = null
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
-            }
-            android.util.Log.d(TAG, "Xray stopped")
-            stopSelf()
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error stopping Xray: ${e.message}")
+    private fun reconnect(intent: Intent?) {
+        if (!isCurrentToken(intent)) return
+        val token: Long
+        synchronized(lifecycleLock) {
+            if (reconnectInProgress || activeConnectIntent == null) return
+            reconnectInProgress = true
+            isReconnecting = true
+            generation++
+            token = generation
+        }
+        runCatching { showNotification(token) }
+        commandExecutor.execute {
+            if (teardown(false) && isCurrent(token)) {
+                runCatching { showNotification(token) }
+                launch(token)
+            } else finishReconnect(token)
         }
     }
 
-    private inner class XrayCallback : CoreCallbackHandler {
+    private fun isCurrentToken(intent: Intent?): Boolean =
+        intent == null || !intent.hasExtra(EXTRA_GENERATION) ||
+            intent.getLongExtra(EXTRA_GENERATION, Long.MIN_VALUE) == generation
+
+    private fun invalidateConnectionLocked() {
+        generation++
+        reconnectInProgress = false
+        isReconnecting = false
+        activeConnectIntent = null
+    }
+
+    private fun teardown(stopService: Boolean): Boolean {
+        isRunning=false; isServiceRunning=false; activeController=null; totalUplink=0L; totalDownlink=0L
+        if (aetherActive) runCatching { NativeCore.stop() }
+        runCatching { coreController?.stopLoop() }; coreController=null
+        val old=engineThread
+        if (old != null && old !== Thread.currentThread()) {
+            val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
+            while (old.isAlive && android.os.SystemClock.elapsedRealtime() < deadline) {
+                runCatching { NativeCore.stop() }
+                runCatching { old.join(100) }
+            }
+            if (old.isAlive) {
+                finishReconnect(generation)
+                return false
+            }
+        }
+        engineThread=null
+        if (aetherActive) runCatching { NativeCore.detach() }
+        aetherActive=false
+        aetherGeneration=null
+        runCatching { vpnInterface?.close() }; vpnInterface=null
+        if (stopService) { runCatching { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true) }; stopSelf() }
+        return true
+    }
+    private fun requestShutdown(token: Long) { if (isCurrent(token)) commandExecutor.execute { if (isCurrent(token)) teardown(false) } }
+
+    private inner class XrayCallback(private val token: Long) : CoreCallbackHandler {
         override fun startup(): Long = 0L
         override fun shutdown(): Long {
             try {
-                Thread { stopXray() }.start()
+                requestShutdown(token)
             } catch (_: Exception) { }
             return 0L
         }
@@ -286,29 +356,36 @@ class XrayVpnService : VpnService() {
         }
     }
 
-    private fun showNotification() {
+    private fun showNotification(token: Long) {
         val notificationIntent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE
         )
         val disconnectIntent = Intent(this, XrayVpnService::class.java).apply {
             action = ACTION_DISCONNECT
+                data = android.net.Uri.parse("forwin-xray-vpn://disconnect/$token")
+            putExtra(EXTRA_GENERATION, token)
+        }
+        val reconnectIntent = Intent(this, XrayVpnService::class.java).apply {
+            action = ACTION_RECONNECT
+                data = android.net.Uri.parse("forwin-xray-vpn://reconnect/$token")
+            putExtra(EXTRA_GENERATION, token)
         }
         val disconnectPendingIntent = PendingIntent.getService(
-            this, 0, disconnectIntent, PendingIntent.FLAG_IMMUTABLE
+            this, token.toInt(), disconnectIntent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val reconnectPendingIntent = PendingIntent.getService(
+            this, token.toInt() + 1, reconnectIntent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val isWarp = configJson?.contains("__APP_FILES__") == true
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(VpnNotificationLabels.xrayTitle(mixMode, isWarp))
-            .setContentText("Tap to open • Tap disconnect to stop")
+            .setContentText("Tap to open • Reconnect or disconnect")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Disconnect",
-                disconnectPendingIntent
-            )
+            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()
@@ -331,12 +408,14 @@ class XrayVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        stopXray()
+        synchronized(lifecycleLock) { invalidateConnectionLocked() }
+        commandExecutor.execute { teardown(true) }
         super.onRevoke()
     }
 
     override fun onDestroy() {
-        stopXray()
+        synchronized(lifecycleLock) { invalidateConnectionLocked() }
+        commandExecutor.execute { teardown(true); commandExecutor.shutdown() }
         super.onDestroy()
     }
 }

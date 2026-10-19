@@ -98,6 +98,18 @@ class XrayConnection {
     }
   }
 
+  /// Whether native Xray/Mix is intentionally rebuilding after a transient
+  /// loss. A false isRunning during this window is not a terminal stop.
+  static Future<bool> isReconnecting() async {
+    try {
+      final result = await platform.invokeMethod('isXrayReconnecting');
+      return result == true;
+    } catch (_) {
+      // Preserve compatibility with older native builds.
+      return false;
+    }
+  }
+
   /// Real delay test (v2rayNG style). Measures the latency of an actual HTTP
   /// request routed through the proxy described by [configJson] (a proxy-only
   /// config built by XrayConfigBuilder.buildForDelayTest). Returns latency in

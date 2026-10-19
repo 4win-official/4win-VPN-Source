@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import androidx.core.app.NotificationCompat
 import go.Seq
 import libv2ray.CoreCallbackHandler
@@ -26,10 +28,17 @@ class XrayProxyService : Service() {
     private var coreController: CoreController? = null
     private var configJson: String? = null
     @Volatile private var isRunning = false
+    private val lifecycleLock = Any()
+    @Volatile private var generation = System.nanoTime()
+    private var reconnectInProgress = false
+    private var activeConnectIntent: Intent? = null
+    private val commandExecutor: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "XrayProxyLifecycle") }
 
     companion object {
         const val ACTION_CONNECT = "com.forwin.vpn.XRAY_PROXY_CONNECT"
         const val ACTION_DISCONNECT = "com.forwin.vpn.XRAY_PROXY_DISCONNECT"
+        const val ACTION_RECONNECT = "com.forwin.vpn.XRAY_PROXY_RECONNECT"
+        private const val EXTRA_GENERATION = "connection_generation"
         const val EXTRA_CONFIG_JSON = "config_json"
 
         private const val TAG = "XrayProxyService"
@@ -38,6 +47,10 @@ class XrayProxyService : Service() {
 
         @Volatile
         var isServiceRunning = false
+            private set
+
+        @Volatile
+        var isReconnecting = false
             private set
 
         @Volatile private var activeController: CoreController? = null
@@ -67,106 +80,164 @@ class XrayProxyService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
-                configJson = intent.getStringExtra(EXTRA_CONFIG_JSON)
-                try {
-                    showNotification()
-                } catch (t: Throwable) {
-                    android.util.Log.e(TAG, "showNotification failed: ${t.message}", t)
+                val token: Long
+                synchronized(lifecycleLock) {
+                    generation++; token = generation
+                    reconnectInProgress = false
+                    isReconnecting = false
+                    activeConnectIntent = Intent(intent)
+                    configJson = intent.getStringExtra(EXTRA_CONFIG_JSON)
                 }
-                Thread { startXray() }.start()
+                commandExecutor.execute { teardown(false); if (isCurrent(token)) { runCatching { showNotification(token) }; launch(token) } }
             }
-            ACTION_DISCONNECT -> stopXray()
+            ACTION_DISCONNECT -> if (isCurrentToken(intent)) {
+                synchronized(lifecycleLock) { invalidateConnectionLocked() }
+                commandExecutor.execute { teardown(true) }
+            }
+            ACTION_RECONNECT -> reconnect(intent)
         }
         return START_STICKY
     }
 
-    private fun startXray() {
+    private fun isCurrent(token: Long): Boolean = token == generation
+
+    private fun launch(token: Long) {
+        if (!isCurrent(token)) return
+        startXray(token)
+    }
+
+    private fun finishReconnect(token: Long) {
+        synchronized(lifecycleLock) {
+            if (generation == token) {
+                reconnectInProgress = false
+                isReconnecting = false
+            }
+        }
+    }
+
+    private fun startXray(expectedGeneration: Long = generation) {
+        if (expectedGeneration != generation) return
         if (isRunning) return
         val config = configJson
         if (config.isNullOrBlank()) {
             android.util.Log.e(TAG, "No config provided")
-            stopXray()
+            finishReconnect(expectedGeneration)
+            commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
             return
         }
         try {
             Seq.setContext(applicationContext)
             Libv2ray.initCoreEnv(filesDir.absolutePath, "")
 
-            val controller = Libv2ray.newCoreController(XrayCallback())
+            val controller = Libv2ray.newCoreController(XrayCallback(expectedGeneration))
             coreController = controller
 
             // tunFd = -1: proxy-only, the config has no tun inbound.
             controller.startLoop(config, -1)
 
+            if (!isCurrent(expectedGeneration)) {
+                controller.stopLoop()
+                return
+            }
             isRunning = true
             isServiceRunning = true
             activeController = controller
             totalUplink = 0L
             totalDownlink = 0L
+            finishReconnect(expectedGeneration)
             android.util.Log.d(TAG, "Xray proxy started (127.0.0.1:4444)")
         } catch (t: Throwable) {
             android.util.Log.e(TAG, "Failed to start Xray proxy: ${t.message}", t)
-            stopXray()
+            finishReconnect(expectedGeneration)
+            commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
         }
     }
 
-    private fun stopXray() {
-        try {
-            isRunning = false
-            isServiceRunning = false
-            activeController = null
-            totalUplink = 0L
-            totalDownlink = 0L
-            try {
-                coreController?.stopLoop()
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "stopLoop error: ${e.message}")
+    private fun reconnect(intent: Intent?) {
+        if (!isCurrentToken(intent)) return
+        val token: Long
+        synchronized(lifecycleLock) {
+            if (reconnectInProgress || activeConnectIntent == null) return
+            reconnectInProgress = true; isReconnecting = true
+            generation++; token = generation
+            activeConnectIntent = activeConnectIntent?.let { Intent(it) }
+        }
+        runCatching { showNotification(token) }
+        commandExecutor.execute {
+            teardown(false)
+            if (isCurrent(token)) {
+                runCatching { showNotification(token) }
+                launch(token)
             }
-            coreController = null
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
-            }
+            if (!isCurrent(token)) finishReconnect(token)
+        }
+    }
+
+    private fun isCurrentToken(intent: Intent?): Boolean =
+        intent == null || !intent.hasExtra(EXTRA_GENERATION) ||
+            intent.getLongExtra(EXTRA_GENERATION, Long.MIN_VALUE) == generation
+
+    private fun invalidateConnectionLocked() {
+        generation++
+        reconnectInProgress = false
+        isReconnecting = false
+        activeConnectIntent = null
+    }
+
+    private fun teardown(stopService: Boolean) {
+        isRunning = false; isServiceRunning = false; activeController = null
+        totalUplink = 0L; totalDownlink = 0L
+        runCatching { coreController?.stopLoop() }
+        coreController = null
+        if (stopService) {
+            runCatching { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true) }
             stopSelf()
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error stopping Xray proxy: ${e.message}")
         }
     }
 
-    private inner class XrayCallback : CoreCallbackHandler {
+    private fun requestShutdown(token: Long) {
+        if (isCurrent(token)) commandExecutor.execute { if (isCurrent(token)) teardown(false) }
+    }
+
+    private inner class XrayCallback(private val token: Long) : CoreCallbackHandler {
         override fun startup(): Long = 0L
         override fun shutdown(): Long {
             try {
-                Thread { stopXray() }.start()
+                requestShutdown(token)
             } catch (_: Exception) { }
             return 0L
         }
         override fun onEmitStatus(level: Long, msg: String?): Long = 0L
     }
 
-    private fun showNotification() {
+    private fun showNotification(token: Long) {
         val notificationIntent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE
         )
         val disconnectIntent = Intent(this, XrayProxyService::class.java).apply {
             action = ACTION_DISCONNECT
+                data = android.net.Uri.parse("forwin-xray-proxy://disconnect/$token")
+            putExtra(EXTRA_GENERATION, token)
+        }
+        val reconnectIntent = Intent(this, XrayProxyService::class.java).apply {
+            action = ACTION_RECONNECT
+                data = android.net.Uri.parse("forwin-xray-proxy://reconnect/$token")
+            putExtra(EXTRA_GENERATION, token)
         }
         val disconnectPendingIntent = PendingIntent.getService(
-            this, 0, disconnectIntent, PendingIntent.FLAG_IMMUTABLE
+            this, token.toInt(), disconnectIntent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val reconnectPendingIntent = PendingIntent.getService(
+            this, token.toInt() + 1, reconnectIntent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🔌 Xray Proxy (127.0.0.1:4444)")
-            .setContentText("Local proxy running • Tap disconnect to stop")
+            .setContentText("Local proxy running • Reconnect or disconnect")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Disconnect",
-                disconnectPendingIntent
-            )
+            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()
@@ -189,7 +260,8 @@ class XrayProxyService : Service() {
     }
 
     override fun onDestroy() {
-        stopXray()
+        synchronized(lifecycleLock) { invalidateConnectionLocked() }
+        commandExecutor.execute { teardown(true); commandExecutor.shutdown() }
         super.onDestroy()
     }
 }

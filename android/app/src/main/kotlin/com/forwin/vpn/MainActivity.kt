@@ -219,7 +219,10 @@ class MainActivity: FlutterActivity() {
                 "isConnected" -> result.success(runCatching { PsiphonStatusStore.isConnected() }.getOrDefault(false))
                 // Read-only diagnostic text from the isolated native service;
                 // unlike the booleans this preserves the actual startup error.
-                "getStatus" -> result.success(runCatching { PsiphonStatusStore.statusText() }.getOrDefault(""))
+                "getStatus" -> result.success(mapOf(
+                    "statusText" to PsiphonStatusStore.statusText(),
+                    "reconnecting" to PsiphonStatusStore.isReconnecting()
+                ))
                 "isKillSwitchActive" -> result.success(runCatching { PsiphonStatusStore.isKillSwitchActive() }.getOrDefault(false))
                 "queryStats" -> {
                     val stats = runCatching { PsiphonStatusStore.queryTrafficStats() }.getOrDefault(longArrayOf(0L, 0L))
@@ -470,6 +473,13 @@ class MainActivity: FlutterActivity() {
                         XrayVpnService.isServiceRunning ||
                             XrayProxyService.isServiceRunning || MixCoordinatorService.isRunning
                     )
+                }
+                "isXrayReconnecting" -> {
+                    // A reconnecting service may intentionally report
+                    // !isRunning while teardown hands the next request to the
+                    // worker. Do not expose that transient gap as a stop.
+                    result.success(MixCoordinatorService.isReconnecting ||
+                        XrayVpnService.isReconnecting || XrayProxyService.isReconnecting)
                 }
                 "queryXrayStats" -> {
                     // Returns cumulative proxy traffic [uplinkBytes, downlinkBytes]

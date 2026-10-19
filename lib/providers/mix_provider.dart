@@ -215,6 +215,12 @@ extension _MixProviderLogic on VpnProvider {
           return;
         }
         checking = true;
+        // MixCoordinatorService can briefly report !isRunning while it tears
+        // down and starts the next request. Do not turn that into an error.
+        if (await XrayConnection.isReconnecting()) {
+          checking = false;
+          return;
+        }
         final alive = await XrayConnection.isRunning();
         checking = false;
         if (_mixDisposed ||
@@ -223,6 +229,14 @@ extension _MixProviderLogic on VpnProvider {
           return;
         }
         if (!alive) {
+          // Reconnect may have started while isRunning was in flight.
+          if (await XrayConnection.isReconnecting()) return;
+          if (_mixDisposed ||
+              generation != _mixConnectGen ||
+              _selectedProtocol != 'mix' ||
+              !isConnected) {
+            return;
+          }
           await disconnect();
           if (_mixDisposed || _selectedProtocol != 'mix') return;
           _status = VpnConnectionStatus.error;

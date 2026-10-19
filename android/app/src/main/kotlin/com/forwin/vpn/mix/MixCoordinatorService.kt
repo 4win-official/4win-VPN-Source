@@ -10,6 +10,9 @@ import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.Handler
+import android.os.Looper
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import com.forwin.vpn.R
 import com.forwin.vpn.VpnNotificationLabels
@@ -46,15 +49,17 @@ class MixCoordinatorService : VpnService() {
     private var receiverRegistered = false
     private val cleaned = AtomicBoolean(false)
     private val destroyed = AtomicBoolean(false)
+    private val main = Handler(Looper.getMainLooper())
+    @Volatile private var reconnectFrom: Request? = null
 
     private data class Worker(val slot: Int, val hop: Int,
         var started: Boolean = false,
         val ready: CompletableFuture<Boolean> = CompletableFuture(),
         val stopped: CompletableFuture<Unit> = CompletableFuture())
 
-    class Request(val id: String, val plan: JSONObject) {
+    class Request(val id: String, val plan: JSONObject,
+        val connected: CompletableFuture<Long> = CompletableFuture()) {
         val cancelled = AtomicBoolean(false)
-        val connected = CompletableFuture<Long>()
         val stopped = CompletableFuture<Unit>()
     }
 
@@ -62,10 +67,13 @@ class MixCoordinatorService : VpnService() {
         private const val CHANNEL = "MixCoordinator"
         private const val NOTIFICATION = 39
         private const val ACTION_START = "com.forwin.vpn.mix.CONNECT"
-        private const val ACTION_STOP = "com.forwin.vpn.mix.DISCONNECT"
+        const val ACTION_STOP = "com.forwin.vpn.mix.DISCONNECT"
+        const val ACTION_RECONNECT = "com.forwin.vpn.mix.RECONNECT"
         @Volatile private var active: Request? = null
         @Volatile private var instance: MixCoordinatorService? = null
         @Volatile var isRunning = false
+            private set
+        @Volatile var isReconnecting = false
             private set
         @Volatile private var statsCore: CoreController? = null
         private var uplink = 0L
@@ -136,12 +144,16 @@ class MixCoordinatorService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val next = active
-        if (intent?.action == ACTION_STOP) {
-            if (next != null) requestStop(next)
+        if (intent?.action == ACTION_STOP || intent?.action == ACTION_RECONNECT) {
+            // Notification actions belong to one chain only, including worker notifications.
+            if (next != null && intent.getStringExtra("sessionId") == next.id) {
+                if (intent.action == ACTION_RECONNECT) requestReconnect(next) else requestStop(next)
+            } else if (request == null) stopSelf(startId)
             return START_NOT_STICKY
         }
         if (intent?.action != ACTION_START || next == null || intent.getStringExtra("sessionId") != next.id) {
-            stopSelf(); return START_NOT_STICKY
+            if (request == null) stopSelf(startId)
+            return START_NOT_STICKY
         }
         if (request != null) return START_NOT_STICKY
         request = next
@@ -150,7 +162,7 @@ class MixCoordinatorService : VpnService() {
                 ensureLive(next)
                 startChain(next)
             } catch (error: Throwable) {
-                next.connected.completeExceptionally(error)
+                if (reconnectFrom !== next) next.connected.completeExceptionally(error)
                 next.cancelled.set(true)
                 cleanup(next)
             }
@@ -291,6 +303,7 @@ class MixCoordinatorService : VpnService() {
         uplink = 0L
         downlink = 0L
         isRunning = true
+        isReconnecting = false
         showNotification("${hops.length()} stages active${if (supportsUdp) "" else " · TCP-only"}")
         current.connected.complete(delay)
     }
@@ -329,13 +342,24 @@ class MixCoordinatorService : VpnService() {
         requestStop(current)
     }
 
+    private fun requestReconnect(current: Request) {
+        if (request !== current || destroyed.get() || isReconnecting ||
+            !current.cancelled.compareAndSet(false, true)) return
+        isReconnecting = true
+        reconnectFrom = current
+        if (!executor.isShutdown) executor.execute { cleanup(current) }
+    }
+
     private fun requestStop(current: Request) {
+        reconnectFrom = null
+        isReconnecting = false
         current.cancelled.set(true)
         current.connected.completeExceptionally(IllegalStateException("Mix connection cancelled"))
         if (!executor.isShutdown) executor.execute { cleanup(current) }
     }
 
     private fun cleanup(current: Request) {
+        if (request !== current) return
         if (!cleaned.compareAndSet(false, true)) return
         current.cancelled.set(true)
         isRunning = false
@@ -363,31 +387,73 @@ class MixCoordinatorService : VpnService() {
             runCatching { startService(stop) }
             runCatching { worker.stopped.get(8, TimeUnit.SECONDS) }
             stopService(Intent(this, MixWorkerService.CLASSES[worker.slot]))
+            if (reconnectFrom === current && !worker.stopped.isDone) {
+                // stopService is asynchronous. Never reuse an occupied native worker.
+                val stopped = runCatching { worker.stopped.get(8, TimeUnit.SECONDS) }.isSuccess
+                if (!stopped) {
+                    reconnectFrom = null
+                    isReconnecting = false
+                }
+            }
         }
         workers.clear()
         runCatching { router?.stopLoop() }
         router = null
+        main.post { finishCleanup(current) }
+    }
+
+    private fun finishCleanup(current: Request) {
+        if (request !== current) return
+        if (reconnectFrom === current && !destroyed.get() && active === current) {
+            // Deep-copy the actual running plan: strategy, ordered blocks and all configs.
+            val next = Request(UUID.randomUUID().toString(), JSONObject(current.plan.toString()),
+                if (!current.connected.isDone) current.connected else CompletableFuture())
+            reconnectFrom = null
+            current.stopped.complete(Unit)
+            active = next
+            request = next
+            cleaned.set(false)
+            showNotification("Reconnecting the complete chain")
+            executor.execute {
+                try { ensureLive(next); startChain(next) }
+                catch (error: Throwable) {
+                    if (reconnectFrom !== next) next.connected.completeExceptionally(error)
+                    next.cancelled.set(true)
+                    isReconnecting = false
+                    cleanup(next)
+                }
+            }
+            return
+        }
         if (receiverRegistered) {
             runCatching { unregisterReceiver(statusReceiver) }
             receiverRegistered = false
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        current.connected.completeExceptionally(IllegalStateException("Mix connection stopped"))
         if (destroyed.get()) current.stopped.complete(Unit)
     }
 
     private fun showNotification(text: String) {
+        val session = request?.id ?: active?.id ?: ""
         val stop = PendingIntent.getService(this, 0,
-            Intent(this, MixCoordinatorService::class.java).setAction(ACTION_STOP),
+            notificationIntent(this, ACTION_STOP, session),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val reconnect = PendingIntent.getService(this, 1,
+            notificationIntent(this, ACTION_RECONNECT, session),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         startForeground(NOTIFICATION, NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.mipmap.ic_launcher).setContentTitle(VpnNotificationLabels.MIX_PROTOCOL).setContentText(text)
-            .setOngoing(true).addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", stop).build())
+            .setOngoing(true).addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", stop)
+            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnect).build())
     }
 
     override fun onRevoke() { request?.let { requestStop(it) }; super.onRevoke() }
     override fun onDestroy() {
         destroyed.set(true)
+        reconnectFrom = null
+        isReconnecting = false
         request?.let { current ->
             if (cleaned.get()) current.stopped.complete(Unit) else requestStop(current)
         }
@@ -396,3 +462,9 @@ class MixCoordinatorService : VpnService() {
         super.onDestroy()
     }
 }
+
+/** Unique PendingIntent identity prevents an old notification from controlling a new chain. */
+internal fun notificationIntent(context: Context, action: String, session: String): Intent =
+    Intent(context, MixCoordinatorService::class.java).setAction(action)
+        .setData(Uri.parse("forwin-mix://notification/$session/$action"))
+        .putExtra("sessionId", session)

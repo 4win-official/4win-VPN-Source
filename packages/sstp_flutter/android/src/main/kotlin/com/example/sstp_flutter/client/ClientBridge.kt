@@ -1,6 +1,6 @@
 package com.example.sstp_flutter.client
 
-import androidx.preference.PreferenceManager
+import android.content.SharedPreferences
 import com.example.sstp_flutter.preference.AppString
 import com.example.sstp_flutter.preference.OscPrefKey
 import com.example.sstp_flutter.preference.accessor.getBooleanPrefValue
@@ -8,6 +8,7 @@ import com.example.sstp_flutter.preference.accessor.getIntPrefValue
 import com.example.sstp_flutter.preference.accessor.getStringPrefValue
 import com.example.sstp_flutter.preference.getValidAllowedAppInfos
 import com.example.sstp_flutter.service.SstpVpnService
+import com.example.sstp_flutter.service.SessionPreferences
 import com.example.sstp_flutter.terminal.IPTerminal
 import com.example.sstp_flutter.terminal.SSLTerminal
 import com.example.sstp_flutter.unit.ppp.option.AuthOption
@@ -87,8 +88,13 @@ internal enum class Result {
     ERR_INVALID_PACKET_SIZE,
 }
 
-internal class ClientBridge(internal val service: SstpVpnService) {
-    internal val prefs = PreferenceManager.getDefaultSharedPreferences(service)
+internal class ClientBridge(
+    internal val service: SstpVpnService,
+    private val frozenPrefs: Map<String, *> = emptyMap<String, Any?>(),
+    sessionPrefs: SharedPreferences? = null,
+) {
+    /** A bridge must never read mutable application preferences after connect. */
+    internal val prefs: SharedPreferences = sessionPrefs ?: SessionPreferences(frozenPrefs)
     internal val builder = service.Builder()
     internal lateinit var handler: CoroutineExceptionHandler
 
@@ -97,14 +103,25 @@ internal class ClientBridge(internal val service: SstpVpnService) {
     internal var sslTerminal: SSLTerminal? = null
     internal var ipTerminal: IPTerminal? = null
 
-    internal val HOME_USERNAME = getStringPrefValue(OscPrefKey.HOME_USERNAME, prefs)
-    internal val HOME_PASSWORD = getStringPrefValue(OscPrefKey.HOME_PASSWORD, prefs)
-    internal val PPP_MRU = getIntPrefValue(OscPrefKey.PPP_MRU, prefs)
-    internal val PPP_MTU = getIntPrefValue(OscPrefKey.PPP_MTU, prefs)
-    internal val PPP_PAP_ENABLED = getBooleanPrefValue(OscPrefKey.PPP_PAP_ENABLED, prefs)
-    internal val PPP_MSCHAPv2_ENABLED = getBooleanPrefValue(OscPrefKey.PPP_MSCHAPv2_ENABLED, prefs)
-    internal val PPP_IPv4_ENABLED = getBooleanPrefValue(OscPrefKey.PPP_IPv4_ENABLED, prefs)
-    internal val PPP_IPv6_ENABLED = getBooleanPrefValue(OscPrefKey.PPP_IPv6_ENABLED, prefs)
+    private fun stringPref(key: OscPrefKey): String = getStringPrefValue(key, prefs)
+    private fun intPref(key: OscPrefKey): Int = when (val value = frozenPrefs[key.name]) {
+        is Number -> value.toInt()
+        is String -> value.toIntOrNull() ?: getIntPrefValue(key, prefs)
+        else -> getIntPrefValue(key, prefs)
+    }
+    private fun booleanPref(key: OscPrefKey): Boolean =
+        getBooleanPrefValue(key, prefs)
+    internal fun frozenIntPref(key: OscPrefKey): Int = intPref(key)
+    internal fun frozenBooleanPref(key: OscPrefKey): Boolean = booleanPref(key)
+
+    internal val HOME_USERNAME = stringPref(OscPrefKey.HOME_USERNAME)
+    internal val HOME_PASSWORD = stringPref(OscPrefKey.HOME_PASSWORD)
+    internal val PPP_MRU = intPref(OscPrefKey.PPP_MRU)
+    internal val PPP_MTU = intPref(OscPrefKey.PPP_MTU)
+    internal val PPP_PAP_ENABLED = booleanPref(OscPrefKey.PPP_PAP_ENABLED)
+    internal val PPP_MSCHAPv2_ENABLED = booleanPref(OscPrefKey.PPP_MSCHAPv2_ENABLED)
+    internal val PPP_IPv4_ENABLED = booleanPref(OscPrefKey.PPP_IPv4_ENABLED)
+    internal val PPP_IPv6_ENABLED = booleanPref(OscPrefKey.PPP_IPv6_ENABLED)
 
     internal lateinit var chapMessage: ChapMessage
     internal val nonce = ByteArray(32)
@@ -121,7 +138,7 @@ internal class ClientBridge(internal val service: SstpVpnService) {
     internal val currentProposedDNS = ByteArray(4)
 
     internal val allowedApps: List<AppString> = mutableListOf<AppString>().also {
-        if (getBooleanPrefValue(OscPrefKey.ROUTE_DO_ENABLE_APP_BASED_RULE, prefs)) {
+        if (booleanPref(OscPrefKey.ROUTE_DO_ENABLE_APP_BASED_RULE)) {
             getValidAllowedAppInfos(prefs, service.packageManager).forEach { info ->
                 it.add(
                     AppString(

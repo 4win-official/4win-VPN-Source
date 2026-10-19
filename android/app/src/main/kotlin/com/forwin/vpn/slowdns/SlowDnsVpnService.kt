@@ -22,6 +22,8 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /** Owns one standalone TUN and one separately executed dnstt Go runtime. */
@@ -31,6 +33,9 @@ class SlowDnsVpnService : VpnService() {
         @Volatile var cancelled = false
         @Volatile var failed = false
         @Volatile var resolver = ""
+        var rawConfig: String = ""
+        var generation: String = ""
+        var pinnedResolver: SlowDnsConfig.Resolver? = null
         var process: Process? = null
         var tun: ParcelFileDescriptor? = null
         var coreTun: ParcelFileDescriptor? = null
@@ -39,6 +44,9 @@ class SlowDnsVpnService : VpnService() {
 
     private val worker = Executors.newSingleThreadExecutor()
     @Volatile private var session: Session? = null
+    private val reconnectInFlight = AtomicBoolean(false)
+    @Volatile private var reconnecting = false
+    @Volatile private var connectionGeneration: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -59,19 +67,67 @@ class SlowDnsVpnService : VpnService() {
                     if (session == null) stopSelf()
                     return START_NOT_STICKY
                 }
-                cancelCurrent()
-                val next = Session(id, future)
-                session = next
-                state = snapshot(false, "", "Connecting")
-                notifyState("Connecting; traffic is blocked until ready")
                 val raw = intent.getStringExtra(EXTRA_CONFIG) ?: ""
-                worker.execute { connect(next, raw) }
+                val generation = UUID.randomUUID().toString()
+                connectionGeneration = generation
+                session?.cancelled = true
+                reconnectInFlight.set(false)
+                reconnecting = false
+                worker.execute {
+                    cancelCurrent()
+                    if (connectionGeneration != generation) {
+                        future.completeExceptionally(IllegalStateException("Slow DNS connection cancelled."))
+                        return@execute
+                    }
+                    val next = Session(id, future).also { it.rawConfig = raw; it.generation = generation }
+                    session = next
+                    state = snapshot(false, "", "Connecting")
+                    notifyState("Connecting; traffic is blocked until ready")
+                    connect(next, raw)
+                }
+            }
+            ACTION_RECONNECT -> {
+                val current = session
+                val token = intent.getStringExtra(EXTRA_GENERATION)
+                if (current == null || token == null || token != connectionGeneration) return START_NOT_STICKY
+                if (!reconnectInFlight.compareAndSet(false, true)) return START_NOT_STICKY
+                current.cancelled = true
+                val reconnectGeneration = UUID.randomUUID().toString()
+                connectionGeneration = reconnectGeneration
+                reconnecting = true
+                state = snapshot(false, current.resolver, "Reconnecting")
+                notifyState("Reconnecting; traffic is blocked until ready")
+                worker.execute {
+                    try {
+                        val raw = current.rawConfig
+                        cancelCurrent(preserveReconnect = true)
+                        if (!reconnectInFlight.get() || connectionGeneration != reconnectGeneration) return@execute
+                        val result = if (!current.result.isDone) current.result else CompletableFuture()
+                        val next = Session(current.id, result).also {
+                            it.rawConfig = raw; it.generation = reconnectGeneration
+                            it.pinnedResolver = current.pinnedResolver
+                        }
+                        session = next
+                        state = snapshot(false, "", "Connecting")
+                        notifyState("Reconnecting; traffic is blocked until ready")
+                        connect(next, raw)
+                    } finally { /* held until ready or failure */ }
+                }
             }
             ACTION_DISCONNECT -> {
-                cancelCurrent()
-                state = snapshot(false, "", "Disconnected")
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                val current = session
+                val token = intent.getStringExtra(EXTRA_GENERATION)
+                if (token != null && connectionGeneration != token) return START_NOT_STICKY
+                connectionGeneration = null
+                current?.cancelled = true
+                reconnectInFlight.set(false)
+                reconnecting = false
+                worker.execute {
+                    cancelCurrent()
+                    state = snapshot(false, "", "Disconnected")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
             }
             else -> if (session == null) stopSelf()
         }
@@ -99,7 +155,7 @@ class SlowDnsVpnService : VpnService() {
             val localPort = ServerSocket().use {
                 it.bind(InetSocketAddress("127.0.0.1", 0)); it.localPort
             }
-            val candidates = if (cfg.dnsTransport == SlowDnsConfig.Transport.DOH)
+            val candidates = s.pinnedResolver?.let { listOf(it) } ?: if (cfg.dnsTransport == SlowDnsConfig.Transport.DOH)
                 cfg.resolvers.take(1) else cfg.resolvers
             var selected = false
             for (resolver in candidates) {
@@ -115,7 +171,7 @@ class SlowDnsVpnService : VpnService() {
                 selected = runCatching {
                     Socks5Probe.connectAndQuery(localPort, cfg.username, cfg.password, 15_000)
                 }.getOrDefault(false)
-                if (selected && active(s)) break
+                if (selected && active(s)) { s.pinnedResolver = resolver; break }
                 process.destroyForcibly()
                 synchronized(s.lock) { if (s.process === process) s.process = null }
             }
@@ -133,6 +189,8 @@ class SlowDnsVpnService : VpnService() {
             }
             check(controller.isRunning) { "The Slow DNS packet routing core did not start." }
             if (!active(s)) return
+            reconnecting = false
+            reconnectInFlight.set(false)
             state = snapshot(true, s.resolver, "")
             notifyState("Connected via ${s.resolver}")
             s.result.complete(state)
@@ -173,6 +231,8 @@ class SlowDnsVpnService : VpnService() {
     private fun failClosed(s: Session, failure: Throwable) {
         if (session !== s || s.cancelled || s.failed) return
         s.failed = true
+        reconnecting = false
+        reconnectInFlight.set(false)
         val blocked = synchronized(s.lock) { s.tun != null }
         val error = (failure.message ?: "Slow DNS failed.") + if (blocked)
             " Traffic remains blocked until you disconnect or retry." else " The VPN did not start."
@@ -183,11 +243,12 @@ class SlowDnsVpnService : VpnService() {
         closeResources(s, keepTun = true)
     }
 
-    private fun cancelCurrent() {
+    private fun cancelCurrent(preserveReconnect: Boolean = false) {
         val previous = session ?: return
         session = null
+        if (!preserveReconnect) reconnecting = false
         previous.cancelled = true
-        previous.result.completeExceptionally(IllegalStateException("Slow DNS connection cancelled."))
+        if (!preserveReconnect) previous.result.completeExceptionally(IllegalStateException("Slow DNS connection cancelled."))
         closeResources(previous, keepTun = false)
     }
 
@@ -221,18 +282,39 @@ class SlowDnsVpnService : VpnService() {
 
     private fun notifyState(text: String) {
         val launch = packageManager.getLaunchIntentForPackage(packageName) ?: Intent()
-        val disconnect = PendingIntent.getService(this, 0,
-            Intent(this, SlowDnsVpnService::class.java).setAction(ACTION_DISCONNECT), PendingIntent.FLAG_IMMUTABLE)
+        val current = session
+        val generation = connectionGeneration
+        val requestCode = (generation?.hashCode() ?: 0) and 0x7fffffff
+        val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        val disconnectIntent = Intent(this, SlowDnsVpnService::class.java).setAction(ACTION_DISCONNECT)
+        val reconnectIntent = Intent(this, SlowDnsVpnService::class.java).setAction(ACTION_RECONNECT)
+        if (generation != null) {
+            disconnectIntent.putExtra(EXTRA_GENERATION, generation)
+            reconnectIntent.putExtra(EXTRA_GENERATION, generation)
+            disconnectIntent.data = android.net.Uri.parse("forwin-slowdns://disconnect/$generation")
+            reconnectIntent.data = android.net.Uri.parse("forwin-slowdns://reconnect/$generation")
+        }
+        val disconnect = PendingIntent.getService(this, requestCode, disconnectIntent, piFlags)
+        val reconnect = PendingIntent.getService(this, requestCode xor 0x40000000, reconnectIntent, piFlags)
         val notification = NotificationCompat.Builder(this, CHANNEL).setContentTitle("Slow DNS")
             .setContentText(text).setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE))
+            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnect)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnect)
             .setOngoing(true).setPriority(NotificationCompat.PRIORITY_LOW).build()
         startForeground(NOTIFICATION_ID, notification)
     }
 
-    override fun onRevoke() { cancelCurrent(); state = snapshot(false, "", "VPN permission revoked."); stopSelf(); super.onRevoke() }
+    private fun invalidateSession() {
+        connectionGeneration = null
+        reconnectInFlight.set(false)
+        reconnecting = false
+        session?.cancelled = true
+    }
+
+    override fun onRevoke() { invalidateSession(); cancelCurrent(); state = snapshot(false, "", "VPN permission revoked."); stopSelf(); super.onRevoke() }
     override fun onDestroy() {
+        invalidateSession()
         cancelCurrent(); worker.shutdownNow()
         if (instance === this) { instance = null; state = snapshot(false, "", "Disconnected") }
         super.onDestroy()
@@ -241,6 +323,8 @@ class SlowDnsVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "com.forwin.vpn.SLOWDNS_CONNECT"
         const val ACTION_DISCONNECT = "com.forwin.vpn.SLOWDNS_DISCONNECT"
+        const val ACTION_RECONNECT = "com.forwin.vpn.SLOWDNS_RECONNECT"
+        const val EXTRA_GENERATION = "generation"
         private const val EXTRA_CONFIG = "config_json"
         private const val EXTRA_REQUEST = "request_id"
         private const val CHANNEL = "SlowDnsVpn"
@@ -250,7 +334,8 @@ class SlowDnsVpnService : VpnService() {
         @Volatile private var instance: SlowDnsVpnService? = null
         @Volatile private var state = snapshot(false, "", "Disconnected")
         private fun snapshot(ready: Boolean, resolver: String, error: String): Map<String, Any> =
-            mapOf("ready" to ready, "connected" to ready, "resolver" to resolver, "error" to error)
+            mapOf("ready" to ready, "connected" to ready, "resolver" to resolver, "error" to error,
+                "reconnecting" to (instance?.reconnecting == true))
 
         fun start(context: Context, config: JSONObject): CompletableFuture<Map<String, Any>> {
             SlowDnsConfig.fromJson(config)
@@ -270,6 +355,7 @@ class SlowDnsVpnService : VpnService() {
             requests.values.forEach { it.completeExceptionally(IllegalStateException("Slow DNS cancelled.")) }
             requests.clear()
             instance?.let {
+                it.invalidateSession()
                 it.cancelCurrent(); state = snapshot(false, "", "Disconnected")
                 it.stopForeground(STOP_FOREGROUND_REMOVE); it.stopSelf()
             }

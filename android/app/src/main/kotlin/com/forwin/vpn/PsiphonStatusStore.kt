@@ -20,6 +20,7 @@ object PsiphonStatusStore {
     @Volatile private var running = false
     @Volatile private var connected = false
     @Volatile private var killSwitch = false
+    @Volatile private var reconnecting = false
     @Volatile private var uplink = 0L
     @Volatile private var downlink = 0L
     @Volatile private var statusText = ""
@@ -38,6 +39,8 @@ object PsiphonStatusStore {
     @JvmStatic fun isConnected(): Boolean = connected && !isStale()
 
     @JvmStatic fun isKillSwitchActive(): Boolean = killSwitch && !isStale()
+
+    @JvmStatic fun isReconnecting(): Boolean = reconnecting && !isStale()
 
     @JvmStatic fun queryTrafficStats(): LongArray = longArrayOf(uplink, downlink)
 
@@ -59,6 +62,7 @@ object PsiphonStatusStore {
         running = false
         connected = false
         killSwitch = false
+        reconnecting = false
         uplink = 0L
         downlink = 0L
         statusText = ""
@@ -79,6 +83,7 @@ object PsiphonStatusStore {
             running = intent.getBooleanExtra(PsiphonVpnService.EXTRA_RUNNING, running)
             connected = intent.getBooleanExtra(PsiphonVpnService.EXTRA_CONNECTED, connected)
             killSwitch = intent.getBooleanExtra(PsiphonVpnService.EXTRA_KILLSWITCH, killSwitch)
+            reconnecting = intent.getBooleanExtra(PsiphonVpnService.EXTRA_RECONNECTING, false)
             uplink = intent.getLongExtra(PsiphonVpnService.EXTRA_UPLINK, uplink)
             downlink = intent.getLongExtra(PsiphonVpnService.EXTRA_DOWNLINK, downlink)
             intent.getStringExtra(PsiphonVpnService.EXTRA_STATUS_TEXT)?.let { statusText = it }

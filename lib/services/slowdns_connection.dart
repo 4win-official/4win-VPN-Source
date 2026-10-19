@@ -92,6 +92,9 @@ class SlowDnsConnection {
     try {
       final state = await platform.invokeMapMethod<String, dynamic>('status');
       if (generation != _generation) return;
+      // Native reconnect is transient: keep the authenticated config and
+      // monitor alive while the service restores the tunnel.
+      if (state?['reconnecting'] == true) return;
       if (state?['ready'] != true || state?['connected'] != true) {
         _monitor?.cancel();
         _monitor = null;

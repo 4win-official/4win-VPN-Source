@@ -22,6 +22,7 @@ import java.util.Locale
 import java.util.concurrent.Semaphore
 import java.util.concurrent.Executors
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Psiphon VPN service. Runs in the dedicated `:psiphon` process (see
@@ -60,6 +61,10 @@ class PsiphonVpnService : VpnService() {
     @Volatile private var activeSession: String? = null
     @Volatile private var bridgeRequested = false
     @Volatile private var lastBridgeHeartbeatMs = 0L
+    private var activeConnectIntent: Intent? = null
+    @Volatile private var connectionGeneration: String? = null
+    private val reconnectInFlight = AtomicBoolean(false)
+    @Volatile private var reconnecting = false
     private val commands = Executors.newSingleThreadExecutor()
 
     @Volatile private var heartbeatRunning = false
@@ -75,6 +80,7 @@ class PsiphonVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.forwin.vpn.PSIPHON_DISCONNECT"
         const val ACTION_RECONNECT = "com.forwin.vpn.PSIPHON_RECONNECT"
         const val EXTRA_EGRESS_REGION = "egress_region"
+        const val EXTRA_GENERATION = "generation"
 
         /** Cross-process state snapshot broadcast (consumed via PsiphonStatusStore). */
         const val ACTION_STATUS = "com.forwin.vpn.PSIPHON_STATUS"
@@ -88,6 +94,7 @@ class PsiphonVpnService : VpnService() {
         const val EXTRA_LOG_LINES = "log_lines"
         /** Exit regions currently reported available by the Psiphon core. */
         const val EXTRA_EGRESS_REGIONS = "egress_regions"
+        const val EXTRA_RECONNECTING = "reconnecting"
 
         /** Fire-and-forget native log broadcast (also from the bridge service). */
         const val ACTION_LOG = "com.forwin.vpn.PSIPHON_LOG"
@@ -158,6 +165,7 @@ class PsiphonVpnService : VpnService() {
                 setPackage(packageName)
                 putExtra(EXTRA_RUNNING, tunnelRunning || killSwitchActive)
                 putExtra(EXTRA_CONNECTED, isTunnelConnected)
+                putExtra(EXTRA_RECONNECTING, reconnecting)
                 putExtra(EXTRA_KILLSWITCH, killSwitchActive)
                 putExtra(EXTRA_UPLINK, totalUplink)
                 putExtra(EXTRA_DOWNLINK, totalDownlink)
@@ -265,6 +273,10 @@ class PsiphonVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        connectionGeneration = null
+        reconnectInFlight.set(false)
+        reconnecting = false
+        activeConnectIntent = null
         // A service destruction is not necessarily preceded by ACTION_DISCONNECT.
         // Serialize cleanup after pending commands, and release both runtimes/TUN.
         commands.execute {
@@ -285,6 +297,10 @@ class PsiphonVpnService : VpnService() {
 
     /** Another VPN took over (or permission was revoked): tear everything down. */
     override fun onRevoke() {
+        connectionGeneration = null
+        reconnectInFlight.set(false)
+        reconnecting = false
+        activeConnectIntent = null
         try {
             plog("VPN revoked by system — stopping")
         } catch (_: Throwable) {}
@@ -301,28 +317,45 @@ class PsiphonVpnService : VpnService() {
         val prefs = getSharedPreferences("psiphon_service", MODE_PRIVATE)
         when (intent?.action) {
             ACTION_CONNECT -> {
+                activeConnectIntent = Intent(intent)
+                connectionGeneration = UUID.randomUUID().toString()
+                reconnectInFlight.set(false)
+                reconnecting = false
                 currentRegion = intent.getStringExtra(EXTRA_EGRESS_REGION) ?: ""
                 prefs.edit().putBoolean("wanted", true).putString("region", currentRegion).apply()
                 val region = currentRegion
-                try {
-                    showNotification("Connecting to Psiphon...", true)
-                } catch (_: Throwable) {}
+                try { showNotification("Connecting to Psiphon...", true) } catch (_: Throwable) {}
                 commands.execute { startPsiphon(region) }
             }
             ACTION_DISCONNECT -> {
+                val token = intent.getStringExtra(EXTRA_GENERATION)
+                if (token != null && token != connectionGeneration) return START_STICKY
+                connectionGeneration = null
+                reconnectInFlight.set(false)
+                reconnecting = false
+                activeConnectIntent = null
                 prefs.edit().putBoolean("wanted", false).apply()
                 commands.execute { stopPsiphon(fullStop = true) }
             }
             ACTION_RECONNECT -> {
-                currentRegion = prefs.getString("region", currentRegion) ?: currentRegion
+                val token = intent.getStringExtra(EXTRA_GENERATION)
+                if (token != null && token != connectionGeneration) return START_STICKY
+                if (!reconnectInFlight.compareAndSet(false, true)) return START_STICKY
+                reconnecting = true
+                connectionGeneration = UUID.randomUUID().toString()
+                val reconnectGeneration = connectionGeneration
+                val reconnectIntent = activeConnectIntent?.let { Intent(it).apply { action = ACTION_CONNECT } }
+                currentRegion = reconnectIntent?.getStringExtra(EXTRA_EGRESS_REGION)
+                    ?: prefs.getString("region", currentRegion) ?: currentRegion
                 prefs.edit().putBoolean("wanted", true).apply()
-                // Meet the foreground-service deadline before asynchronous teardown.
-                try {
-                    showNotification("Connecting to Psiphon...", true)
-                } catch (_: Throwable) {}
+                // Keep this foreground service alive while teardown and restart are serialized.
+                try { showNotification("Reconnecting to Psiphon...", true) } catch (_: Throwable) {}
                 commands.execute {
-                    stopPsiphon(fullStop = false)
-                    startPsiphon(currentRegion)
+                    try {
+                        stopPsiphon(fullStop = false)
+                        if (connectionGeneration != reconnectGeneration || !prefs.getBoolean("wanted", false)) return@execute
+                        startPsiphon(currentRegion)
+                    } finally { sendStatus() }
                 }
             }
             null -> if (prefs.getBoolean("wanted", false)) {
@@ -354,7 +387,8 @@ class PsiphonVpnService : VpnService() {
             }
 
             isServiceRunning = true
-            activeSession = UUID.randomUUID().toString()
+            activeSession = connectionGeneration ?: UUID.randomUUID().toString()
+            connectionGeneration = activeSession
             bridgeRequested = false
             psiphonCoreConnected = false
             bridgeConfirmed = false
@@ -419,6 +453,8 @@ class PsiphonVpnService : VpnService() {
             Log.e(TAG, "Psiphon startup failed", t)
             activeSession = null
             bridgeRequested = false
+            reconnecting = false
+            reconnectInFlight.set(false)
             tunnelRunning = false
             psiphonCoreConnected = false
             bridgeConfirmed = false
@@ -467,6 +503,11 @@ class PsiphonVpnService : VpnService() {
             lifecycleLock.acquire()
             locked = true
             activeSession = null // invalidate callbacks before SDK stop waits for Go
+            if (fullStop) {
+                connectionGeneration = null
+                reconnectInFlight.set(false)
+                reconnecting = false
+            }
             bridgeRequested = false
             val keepBlackhole = !fullStop && KillSwitch.isEnabled(applicationContext) && vpnInterface != null
             tunnelRunning = false
@@ -531,6 +572,8 @@ class PsiphonVpnService : VpnService() {
             updateConnectedState()
             if (success && !changed) return // liveness heartbeat, not a new transition
             if (success) {
+                reconnecting = false
+                reconnectInFlight.set(false)
                 lastStatusText = if (!psiphonCoreConnected) "Connecting to Psiphon..."
                 else if (currentRegion.isBlank()) "Connected to Psiphon"
                 else "Connected to $currentRegion"
@@ -570,6 +613,8 @@ class PsiphonVpnService : VpnService() {
      */
     private fun enterBlackhole(reason: String) {
         activeSession = null
+        reconnecting = false
+        reconnectInFlight.set(false)
         bridgeRequested = false
         tunnelRunning = false
         killSwitchActive = true
@@ -805,13 +850,27 @@ class PsiphonVpnService : VpnService() {
             .setPackage(packageName)
             .addCategory(Intent.CATEGORY_LAUNCHER)
         val pending = PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE)
-        val disconnect = Intent(this, PsiphonVpnService::class.java).apply { action = ACTION_DISCONNECT }
-        val disconnectPending = PendingIntent.getService(this, 0, disconnect, PendingIntent.FLAG_IMMUTABLE)
+        val generation = connectionGeneration
+        val requestCode = (generation?.hashCode() ?: 0) and 0x7fffffff
+        val disconnect = Intent(this, PsiphonVpnService::class.java).apply {
+            action = ACTION_DISCONNECT
+            data = android.net.Uri.parse("forwin-psiphon://disconnect/$generation")
+            if (generation != null) putExtra(EXTRA_GENERATION, generation)
+        }
+        val reconnect = Intent(this, PsiphonVpnService::class.java).apply {
+            action = ACTION_RECONNECT
+            data = android.net.Uri.parse("forwin-psiphon://reconnect/$generation")
+            if (generation != null) putExtra(EXTRA_GENERATION, generation)
+        }
+        val piFlags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        val disconnectPending = PendingIntent.getService(this, requestCode, disconnect, piFlags)
+        val reconnectPending = PendingIntent.getService(this, requestCode xor 0x40000000, reconnect, piFlags)
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🔐 Psiphon VPN")
             .setContentText(status)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pending)
+            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPending)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPending)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(foreground)

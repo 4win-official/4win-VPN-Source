@@ -206,6 +206,7 @@ internal class SstpClient(val bridge: ClientBridge) {
         withContext(Dispatchers.Main) {
             FlutterCaller().connect()
             connectionStatus = OscPrefKey.Connected.name
+            bridge.service.onReconnectFinished()
         }
         bridge.sslTerminal!!.sendDataUnit(call)
     }

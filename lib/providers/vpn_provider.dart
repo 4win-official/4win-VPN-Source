@@ -83,9 +83,12 @@ class VpnProvider with ChangeNotifier {
       _testSstpServer(groupId, server);
   Future<void> testSstpGroup(String groupId) => _testSstpGroup(groupId);
   Future<void> refreshSstpGroup(String id) => _refreshSstpGroup(id);
-  Future<void> addSstpGroup(String name, String content,
-          {String username = 'vpn', String password = 'vpn'}) =>
-      _addSstpGroup(name, content, username: username, password: password);
+  Future<void> addSstpGroup(
+    String name,
+    String content, {
+    String username = 'vpn',
+    String password = 'vpn',
+  }) => _addSstpGroup(name, content, username: username, password: password);
   Future<void> removeSstpGroup(String id) => _removeSstpGroup(id);
   Future<void> selectSstpGroup(String id) => _selectSstpGroup(id);
   final VpnService _vpnService = VpnService();
@@ -308,8 +311,8 @@ class VpnProvider with ChangeNotifier {
   }
 
   VpnProvider({ServerService? serverService, SstpServerStore? sstpStore})
-      : _serverService = serverService ?? ServerService(),
-        _sstpStore = sstpStore ?? SstpServerStore(serverService: serverService) {
+    : _serverService = serverService ?? ServerService(),
+      _sstpStore = sstpStore ?? SstpServerStore(serverService: serverService) {
     _mixLoaded = _loadMixStrategies();
     _init();
     // بارگیری پروتکل انتخابی و در صورت نیاز اتصال خودکار به آخرین سرور OpenVPN
@@ -371,7 +374,7 @@ class VpnProvider with ChangeNotifier {
     _statusSubscription = _vpnService.statusStream.listen((status) {
       if (_selectedProtocol != 'sstp' || _mixDisposed) return;
       if ((_status == VpnConnectionStatus.disconnecting ||
-           _status == VpnConnectionStatus.disconnected) &&
+              _status == VpnConnectionStatus.disconnected) &&
           status != VpnConnectionStatus.disconnected) {
         return;
       }
@@ -394,7 +397,8 @@ class VpnProvider with ChangeNotifier {
         _currentPing = null;
       } else if (status == VpnConnectionStatus.error) {
         // خطا در اتصال - تلاش برای سرور بعدی
-        _errorMessage = 'SSTP connection failed. Select another server or retry.';
+        _errorMessage =
+            'SSTP connection failed. Select another server or retry.';
       }
 
       notifyListeners();
@@ -931,8 +935,10 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
-    if (sstpToken == null || sstpToken != _sstpConnectGen ||
-        _selectedProtocol != 'sstp' || _mixDisposed) {
+    if (sstpToken == null ||
+        sstpToken != _sstpConnectGen ||
+        _selectedProtocol != 'sstp' ||
+        _mixDisposed) {
       return;
     }
     await _connectSstp();
@@ -1000,7 +1006,8 @@ class VpnProvider with ChangeNotifier {
         if (cancelled()) return;
         if (attempt > 0) {
           final backoff = policy.delayForAttempt(attempt);
-          _errorMessage = 'Retrying… (attempt ${attempt + 1}/${policy.maxAttempts})';
+          _errorMessage =
+              'Retrying… (attempt ${attempt + 1}/${policy.maxAttempts})';
           log.warning('psiphon', _errorMessage!);
           notifyListeners();
           await Future<void>.delayed(backoff);
@@ -1017,7 +1024,8 @@ class VpnProvider with ChangeNotifier {
           return;
         }
         if (!started) {
-          failure = 'Psiphon could not start. Approve VPN permission, then retry.';
+          failure =
+              'Psiphon could not start. Approve VPN permission, then retry.';
           break;
         }
 
@@ -1054,7 +1062,9 @@ class VpnProvider with ChangeNotifier {
           }
           if (await _psiphonService.isKillSwitchActive) {
             if (cancelled()) return;
-            failure = nativeStatus.isEmpty ? 'Psiphon tunnel failed' : nativeStatus;
+            failure = nativeStatus.isEmpty
+                ? 'Psiphon tunnel failed'
+                : nativeStatus;
             break;
           }
           if (cancelled()) return;
@@ -1118,8 +1128,10 @@ class VpnProvider with ChangeNotifier {
           _status == VpnConnectionStatus.disconnected ||
           _status == VpnConnectionStatus.disconnecting;
       try {
+        if (await _psiphonService.isReconnecting) return;
         final healthy = await _psiphonService.isConnected;
         if (monitorCancelled()) return;
+        if (await _psiphonService.isReconnecting) return;
         if (healthy) {
           if (_status != VpnConnectionStatus.connected) {
             _psiphonFailCount = 0;
@@ -1143,12 +1155,14 @@ class VpnProvider with ChangeNotifier {
         _psiphonFailCount++;
         final killSwitch = await isKillSwitchEnabled();
         if (monitorCancelled()) return;
+        if (await _psiphonService.isReconnecting) return;
         final policy = killSwitch
             ? RetryPolicy.psiphonMonitorKillSwitch
             : RetryPolicy.psiphonMonitor;
         final log = ConnectionLogger.instance;
 
         if (!policy.shouldRetry(_psiphonFailCount - 1)) {
+          if (await _psiphonService.isReconnecting) return;
           log.error(
             'psiphon',
             'Connection lost — recovery failed ${_psiphonFailCount - 1} times, giving up',
@@ -1181,13 +1195,16 @@ class VpnProvider with ChangeNotifier {
                 _status != VpnConnectionStatus.error)) {
           return;
         }
+        if (await _psiphonService.isReconnecting) return;
         await _psiphonService.reconnect();
         if (monitorCancelled()) return;
         for (var i = 0; i < 180; i++) {
           await Future<void>.delayed(const Duration(seconds: 1));
           if (monitorCancelled()) return;
+          if (await _psiphonService.isReconnecting) return;
           final recovered = await _psiphonService.isConnected;
           if (monitorCancelled()) return;
+          if (await _psiphonService.isReconnecting) return;
           if (recovered) {
             _psiphonFailCount = 0;
             _status = VpnConnectionStatus.connected;
@@ -1606,8 +1623,10 @@ class VpnProvider with ChangeNotifier {
       return;
     }
     final generation = ++_slowDnsConnectGen;
-    bool cancelled() => generation != _slowDnsConnectGen ||
-        _selectedProtocol != 'slowdns' || _mixDisposed;
+    bool cancelled() =>
+        generation != _slowDnsConnectGen ||
+        _selectedProtocol != 'slowdns' ||
+        _mixDisposed;
     _status = VpnConnectionStatus.connecting;
     _errorMessage = null;
     notifyListeners();
@@ -1621,7 +1640,8 @@ class VpnProvider with ChangeNotifier {
     if (cancelled()) return;
     if (!granted) {
       _status = VpnConnectionStatus.error;
-      _errorMessage = SlowDnsConnection.lastError ??
+      _errorMessage =
+          SlowDnsConnection.lastError ??
           'Approve the VPN permission, then connect again.';
       notifyListeners();
       return;
@@ -1647,7 +1667,8 @@ class VpnProvider with ChangeNotifier {
     if (cancelled()) return;
     if (!connected) {
       _status = VpnConnectionStatus.error;
-      _errorMessage = SlowDnsConnection.lastError ?? 'Slow DNS connection failed.';
+      _errorMessage =
+          SlowDnsConnection.lastError ?? 'Slow DNS connection failed.';
       notifyListeners();
     }
   }
@@ -3025,7 +3046,9 @@ class VpnProvider with ChangeNotifier {
           debugPrint('🔌 Disconnecting WARP...');
         }
       } else {
-        try { await _sstpNativeOperation; } catch (_) {}
+        try {
+          await _sstpNativeOperation;
+        } catch (_) {}
         await _vpnService.disconnect();
       }
 

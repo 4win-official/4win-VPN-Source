@@ -82,4 +82,25 @@ void main() {
     expect(await service.getNativeLogs(), isEmpty);
     expect(await service.getServers(), {'count': 0, 'regions': <String>[]});
   });
+
+  test(
+    'reconnect status map preserves diagnostic text and transition state',
+    () async {
+      final service = PsiphonService();
+      responses['getStatus'] = {
+        'statusText': 'Reconnecting to Psiphon...',
+        'reconnecting': true,
+      };
+      expect(await service.isReconnecting, isTrue);
+      expect(await service.statusText, 'Reconnecting to Psiphon...');
+      responses['getStatus'] = {
+        'statusText': 'Psiphon tunnel core exited',
+        'reconnecting': false,
+      };
+      expect(await service.isReconnecting, isFalse);
+      expect(await service.statusText, 'Psiphon tunnel core exited');
+      responses['getStatus'] = 'Connecting to Psiphon...';
+      expect(await service.isReconnecting, isFalse);
+    },
+  );
 }

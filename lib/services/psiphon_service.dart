@@ -71,9 +71,26 @@ class PsiphonService {
   /// for distinguishing a terminal native startup error from a slow startup.
   Future<String> get statusText async {
     try {
-      return await _channel.invokeMethod<String>('getStatus') ?? '';
+      final raw = await _channel.invokeMethod<Object?>('getStatus');
+      if (raw is String) return raw;
+      if (raw is Map) {
+        return (raw['statusText'] ?? raw['status'] ?? raw['text'] ?? '')
+            .toString();
+      }
+      return '';
     } catch (_) {
       return '';
+    }
+  }
+
+  /// True while the native service is temporarily restoring the tunnel.
+  /// Older native builds return a status string, so treat those as false.
+  Future<bool> get isReconnecting async {
+    try {
+      final raw = await _channel.invokeMethod<Object?>('getStatus');
+      return raw is Map && raw['reconnecting'] == true;
+    } catch (_) {
+      return false;
     }
   }
 

@@ -77,6 +77,9 @@ repositories {
     maven { url = uri("https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master") }
 }
 
+configurations.configureEach {
+    exclude(group = "com.github.nizwar", module = "openvpn_library")
+}
 // ── Psiphon runtime isolation (go → gi relocation) ──────────────────────────
 //
 // This app embeds TWO gomobile-built Go runtimes: Xray (libv2ray + jniLibs'
@@ -123,6 +126,40 @@ dependencies {
     testImplementation("org.json:json:20240303")
 
     add("psiphonOriginal", "ca.psiphon:psiphontunnel:2.0.40")
+}
+
+// Patch the upstream service notification itself; a dependency drift is a hard error.
+val openVpnAsm by configurations.creating {
+    isVisible = false
+    isCanBeConsumed = false
+    isTransitive = false
+}
+dependencies { add("openVpnAsm", "org.ow2.asm:asm:9.8") }
+
+val instrumentOpenVpnAar = tasks.register("instrumentOpenVpnAar") {
+    group = "build"
+    description = "Adds Reconnect to the upstream OpenVPN foreground notification."
+    val transformer = rootProject.file("../tools/OpenVpnAarTransformer.java")
+    val sourceAar = configurations.detachedConfiguration(
+        dependencies.create("com.github.nizwar:openvpn_library:b3941ef040")
+    ).apply { isTransitive = false }.singleFile
+    val output = layout.buildDirectory.file("openvpn/openvpn_library-instrumented.aar")
+    inputs.file(transformer)
+    inputs.file(sourceAar)
+    inputs.files(openVpnAsm)
+    outputs.file(output)
+    doLast {
+        val asm = openVpnAsm.singleFile
+        val classes = layout.buildDirectory.file("openvpn/transformer").get().asFile.apply { mkdirs() }
+        exec {
+            commandLine("javac", "-cp", asm.absolutePath, "-d", classes.absolutePath, transformer.absolutePath)
+        }
+        output.get().asFile.parentFile.mkdirs()
+        exec {
+            commandLine("java", "-cp", classes.absolutePath + File.pathSeparator + asm.absolutePath,
+                "OpenVpnAarTransformer", sourceAar.absolutePath, output.get().asFile.absolutePath)
+        }
+    }
 }
 
 val relocatePsiphonAar = tasks.register("relocatePsiphonAar") {
@@ -207,8 +244,7 @@ val trimLibv2rayAar = tasks.register("trimLibv2rayAar") {
 
 dependencies {
     implementation(files(trimLibv2rayAar.map { it.outputs.files.singleFile }))
-
-    compileOnly("com.github.nizwar:openvpn_library:b3941ef040")
+    implementation(files(instrumentOpenVpnAar.map { it.outputs.files.singleFile }))
 
     // The relocated Psiphon AAR produced by relocatePsiphonAar (always built;
     // wiring the task output here makes every compile/dex task depend on it).
@@ -243,6 +279,7 @@ val buildSlowDns = tasks.register("buildSlowDns") {
 }
 
 tasks.named("preBuild") {
+    dependsOn(instrumentOpenVpnAar)
     dependsOn(relocatePsiphonAar)
     dependsOn(trimLibv2rayAar)
     dependsOn(buildSlowDns)

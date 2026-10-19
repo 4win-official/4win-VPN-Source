@@ -30,6 +30,7 @@ import com.example.sstp_flutter.unit.sstp.SSTP_MESSAGE_TYPE_CALL_DISCONNECT_ACK
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -53,9 +54,9 @@ internal class ControlClient(internal val bridge: ClientBridge) {
 
     private val mutex = Mutex()
 
-    private val isReconnectionEnabled = getBooleanPrefValue(OscPrefKey.RECONNECTION_ENABLED, bridge.prefs)
+    private val isReconnectionEnabled = bridge.frozenBooleanPref(OscPrefKey.RECONNECTION_ENABLED)
     private val isReconnectionAvailable: Boolean
-        get() = getIntPrefValue(OscPrefKey.RECONNECTION_LIFE, bridge.prefs) > 0
+        get() = bridge.frozenIntPref(OscPrefKey.RECONNECTION_LIFE) > 0
 
     private fun attachHandler() {
         bridge.handler = CoroutineExceptionHandler { _, throwable ->
@@ -248,24 +249,31 @@ internal class ControlClient(internal val bridge: ClientBridge) {
     }
 
     internal fun kill(isReconnectionRequested: Boolean, cleanup: (suspend () -> Unit)?) {
-        if (!mutex.tryLock()) return
-
         bridge.service.scope.launch {
-            observer?.close()
-
-            jobMain?.cancel()
-            cancelClients()
-
-            cleanup?.invoke()
-
-            closeTerminals()
-
-            if (isReconnectionRequested && isReconnectionAvailable) {
-                bridge.service.launchJobReconnect()
-            } else {
-                bridge.service.close()
-            }
+            mutex.lock()
+            try {
+                observer?.close()
+                jobMain?.cancelAndJoin()
+                cancelClients()
+                cleanup?.invoke()
+                closeTerminals()
+                if (isReconnectionRequested && isReconnectionAvailable) bridge.service.launchJobReconnect()
+                else {
+                    bridge.service.onReconnectFinished()
+                    bridge.service.closeIfCurrent(this@ControlClient)
+                }
+            } finally { mutex.unlock() }
         }
+    }
+
+    internal suspend fun shutdownForReconnect() {
+        mutex.lock()
+        try {
+            observer?.close()
+            jobMain?.cancelAndJoin()
+            cancelClients()
+            closeTerminals()
+        } finally { mutex.unlock() }
     }
 
     private fun cancelClients() {

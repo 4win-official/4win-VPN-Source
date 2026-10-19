@@ -33,8 +33,8 @@ class MixNotificationContractTest(unittest.TestCase):
         # Preparation, per-stage progress, probing and connected state must all
         # flow through the same builder, never an engine-specific notification.
         calls = re.findall(r'showNotification\("([^"\n]*)', coordinator)
-        self.assertEqual(len(calls), 4)
-        for expected in ("Preparing", "Connecting stage", "Testing", "${hops.length()} stages active"):
+        self.assertEqual(len(calls), 5)
+        for expected in ("Preparing", "Connecting stage", "Testing", "Reconnecting", "${hops.length()} stages active"):
             self.assertTrue(any(text.startswith(expected) for text in calls), expected)
 
     def test_existing_mix_channels_are_renamed_without_changing_ids(self):
@@ -61,8 +61,9 @@ class MixNotificationContractTest(unittest.TestCase):
         self.assertEqual(service.count(".setContentTitle("), 1)
         self.assertEqual(service.count("NotificationCompat.Builder("), 1)
         start = method_body(service, "onStartCommand")
-        mode_assignment = "mixMode = intent.getBooleanExtra(EXTRA_MIX_MODE, false)"
-        self.assertLess(start.index(mode_assignment), start.index("showNotification()"))
+        mode_assignment = re.search(r"mixMode\s*=\s*intent\.getBooleanExtra\(EXTRA_MIX_MODE,\s*false\)", start)
+        self.assertIsNotNone(mode_assignment)
+        self.assertLess(mode_assignment.start(), start.index("showNotification(token)"))
         # Status/traffic/core callbacks may not change the selected identity.
         self.assertEqual(len(re.findall(r"\bmixMode\s*=(?!=)", service)), 2)
 

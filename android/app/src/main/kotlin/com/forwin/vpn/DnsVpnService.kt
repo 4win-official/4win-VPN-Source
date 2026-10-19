@@ -16,6 +16,8 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteBuffer
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Direct DNS VPN Service
@@ -25,15 +27,26 @@ import java.nio.ByteBuffer
 class DnsVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnThread: Thread? = null
-    private var isRunning = false
+    @Volatile private var isRunning = false
+    private val lifecycleLock = Any()
+    @Volatile private var generation = System.nanoTime()
+    private var reconnectInProgress = false
+    private var activeConnectIntent: Intent? = null
+    private val lifecycleExecutor: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "DnsVpnLifecycle") }
     
     companion object {
         const val ACTION_CONNECT = "com.forwin.vpn.dns.CONNECT"
         const val ACTION_DISCONNECT = "com.forwin.vpn.dns.DISCONNECT"
+        const val ACTION_RECONNECT = "com.forwin.vpn.dns.RECONNECT"
+        private const val EXTRA_GENERATION = "connection_generation"
         const val EXTRA_DNS_PRIMARY = "dns_primary"
         const val EXTRA_DNS_SECONDARY = "dns_secondary"
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "dns_vpn_channel"
+
+        @Volatile
+        var isReconnecting = false
+            private set
 
         // ارجاع به نمونه‌ی فعال سرویس تا MainActivity بتواند پینگ protected بگیرد
         @Volatile
@@ -52,65 +65,77 @@ class DnsVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
-                val primaryDns = intent.getStringExtra(EXTRA_DNS_PRIMARY) ?: "8.8.8.8"
-                val secondaryDns = intent.getStringExtra(EXTRA_DNS_SECONDARY) ?: "8.8.4.4"
-                startVpn(primaryDns, secondaryDns)
+                val token: Long
+                val primary: String; val secondary: String
+                synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); primary=intent.getStringExtra(EXTRA_DNS_PRIMARY) ?: "8.8.8.8"; secondary=intent.getStringExtra(EXTRA_DNS_SECONDARY) ?: "8.8.4.4" }
+                lifecycleExecutor.execute { stopVpn(false); if (token == generation) startVpn(primary, secondary, token) }
             }
-            ACTION_DISCONNECT -> {
-                stopVpn()
-                stopSelf()
-            }
+            ACTION_DISCONNECT -> if (isCurrentToken(intent)) { synchronized(lifecycleLock) { invalidateConnectionLocked() }; lifecycleExecutor.execute { stopVpn(true) } }
+            ACTION_RECONNECT -> reconnect(intent)
         }
         return START_STICKY
     }
-    
-    private fun startVpn(primaryDns: String, secondaryDns: String) {
+
+    private fun showNotification(primaryDns: String, token: Long) {
+        // Create notification for foreground service
+        createNotificationChannel()
+
+        // Create disconnect intent
+        val disconnectIntent = Intent(this, DnsVpnService::class.java).apply {
+            action = ACTION_DISCONNECT
+            data = android.net.Uri.parse("forwin-dns-vpn://disconnect/$token")
+            putExtra(EXTRA_GENERATION, token)
+        }
+        val reconnectIntent = Intent(this, DnsVpnService::class.java).apply {
+            action = ACTION_RECONNECT
+            data = android.net.Uri.parse("forwin-dns-vpn://reconnect/$token")
+            putExtra(EXTRA_GENERATION, token)
+        }
+        val disconnectPendingIntent = PendingIntent.getService(
+            this,
+            token.toInt(),
+            disconnectIntent,
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val reconnectPendingIntent = PendingIntent.getService(
+            this,
+            token.toInt() + 1,
+            reconnectIntent,
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Create main activity intent (when user taps notification)
+        val mainIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val mainPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("DNS VPN")
+            .setContentText("DNS: $primaryDns • Reconnect or disconnect")
+            .setSmallIcon(R.mipmap.ic_launcher) // لوگو اپ
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true) // Cannot be dismissed
+            .setContentIntent(mainPendingIntent) // Open app when tapped
+            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
+            .build()
+
+        startForeground(NOTIFICATION_ID, notification)
+    }
+
+    private fun startVpn(primaryDns: String, secondaryDns: String, token: Long = generation) {
+        if (token != generation) return
         if (isRunning) {
             return
         }
         
-        stopVpn()
-        
         try {
-            // Create notification for foreground service
-            createNotificationChannel()
-            
-            // Create disconnect intent
-            val disconnectIntent = Intent(this, DnsVpnService::class.java).apply {
-                action = ACTION_DISCONNECT
-            }
-            val disconnectPendingIntent = PendingIntent.getService(
-                this,
-                0,
-                disconnectIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            
-            // Create main activity intent (when user taps notification)
-            val mainIntent = packageManager.getLaunchIntentForPackage(packageName)
-            val mainPendingIntent = PendingIntent.getActivity(
-                this,
-                0,
-                mainIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            
-            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("🔒 VPN Connected")
-                .setContentText("DNS: $primaryDns • Tap to disconnect")
-                .setSmallIcon(R.mipmap.ic_launcher) // لوگو اپ
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true) // Cannot be dismissed
-                .setContentIntent(mainPendingIntent) // Open app when tapped
-                .addAction(
-                    android.R.drawable.ic_menu_close_clear_cancel,
-                    "Disconnect",
-                    disconnectPendingIntent
-                )
-                .build()
-            
-            startForeground(NOTIFICATION_ID, notification)
-            
+            showNotification(primaryDns, token)
+
             // Configure VPN with minimal routing - only DNS interception
             val builder = Builder()
                 .setSession("4win DNS VPN")
@@ -127,6 +152,7 @@ class DnsVpnService : VpnService() {
             // .addRoute("0.0.0.0", 0) // REMOVED - this blocks all traffic!
             
             vpnInterface = builder.establish()
+            if (token != generation) { stopVpn(false); return }
             
             if (vpnInterface != null) {
                 isRunning = true
@@ -141,12 +167,11 @@ class DnsVpnService : VpnService() {
                     start()
                 }
             } else {
-                stopSelf()
+                stopVpn(false)
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            stopVpn()
-            stopSelf()
+            stopVpn(false)
         }
     }
     
@@ -184,13 +209,52 @@ class DnsVpnService : VpnService() {
         }
     }
     
-    private fun stopVpn() {
+    private fun reconnect(intent: Intent?) {
+        if (!isCurrentToken(intent)) return
+        val token: Long
+        val restart: Intent
+        synchronized(lifecycleLock) {
+            val current = activeConnectIntent ?: return
+            if (reconnectInProgress) return
+            reconnectInProgress = true
+            isReconnecting = true
+            generation++
+            token = generation
+            restart = Intent(current)
+        }
+        runCatching { showNotification(restart.getStringExtra(EXTRA_DNS_PRIMARY) ?: "8.8.8.8", token) }
+        lifecycleExecutor.execute {
+            stopVpn(false)
+            if (token == generation) {
+                val primary=restart.getStringExtra(EXTRA_DNS_PRIMARY) ?: "8.8.8.8"
+                val secondary=restart.getStringExtra(EXTRA_DNS_SECONDARY) ?: "8.8.4.4"
+                startVpn(primary, secondary, token)
+            }
+            synchronized(lifecycleLock) { if (generation==token) { reconnectInProgress=false; isReconnecting=false } }
+        }
+    }
+
+    private fun isCurrentToken(intent: Intent?): Boolean =
+        intent == null || !intent.hasExtra(EXTRA_GENERATION) ||
+            intent.getLongExtra(EXTRA_GENERATION, Long.MIN_VALUE) == generation
+
+    private fun invalidateConnectionLocked() {
+        generation++
+        reconnectInProgress = false
+        isReconnecting = false
+        activeConnectIntent = null
+    }
+
+    private fun stopVpn(stopService: Boolean) {
         isRunning = false
         if (instance === this) {
             instance = null // پاک کردن نمونه‌ی فعال
         }
         
-        vpnThread?.interrupt()
+        val oldThread = vpnThread
+        oldThread?.interrupt()
+        runCatching { vpnInterface?.close() }
+        if (oldThread != null && oldThread !== Thread.currentThread()) runCatching { oldThread.join(5_000) }
         vpnThread = null
         
         try {
@@ -200,7 +264,10 @@ class DnsVpnService : VpnService() {
         }
         vpnInterface = null
         
-        stopForeground(true)
+        if (stopService) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true)
+            stopSelf()
+        }
     }
     
     private fun createNotificationChannel() {
@@ -299,8 +366,15 @@ class DnsVpnService : VpnService() {
         return out.toByteArray()
     }
 
+    override fun onRevoke() {
+        synchronized(lifecycleLock) { invalidateConnectionLocked() }
+        lifecycleExecutor.execute { stopVpn(true); lifecycleExecutor.shutdown() }
+        super.onRevoke()
+    }
+
     override fun onDestroy() {
+        synchronized(lifecycleLock) { invalidateConnectionLocked() }
+        lifecycleExecutor.execute { stopVpn(true); lifecycleExecutor.shutdown() }
         super.onDestroy()
-        stopVpn()
     }
 }

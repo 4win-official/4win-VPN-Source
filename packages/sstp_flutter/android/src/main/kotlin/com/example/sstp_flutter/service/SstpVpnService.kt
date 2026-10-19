@@ -42,14 +42,17 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 
 internal const val ACTION_VPN_CONNECT = "com.example.sstp_flutter.connect"
 internal const val ACTION_VPN_DISCONNECT = "com.example.sstp_flutter.disconnect"
+internal const val ACTION_VPN_RECONNECT = "com.example.sstp_flutter.reconnect"
+private const val EXTRA_NOTIFICATION_SESSION =
+    "com.example.sstp_flutter.notification_session"
 
 internal const val NOTIFICATION_CHANNEL_NAME = "com.example.sstp_flutter.notification.channel"
 
@@ -67,6 +70,11 @@ internal class SstpVpnService : VpnService() {
     private var controlClient: ControlClient?  = null
 
     private var jobReconnect: Job? = null
+    private var notificationSessionToken: String? = null
+    private var lastReconnectToken: String? = null
+    private var notificationActionInProgress = false
+    private var activeSessionPrefs: SessionPreferences? = null
+    private var sessionGeneration = 0L
 
     private fun setRootState(state: Boolean) {
         setBooleanPrefValue(state, OscPrefKey.ROOT_STATE, prefs)
@@ -127,35 +135,66 @@ internal class SstpVpnService : VpnService() {
         }
         return when (intent.action) {
             ACTION_VPN_CONNECT -> {
+                val token = intent.getStringExtra(EXTRA_NOTIFICATION_SESSION)
+                if (token != null && token != notificationSessionToken) {
+                    return Service.START_STICKY
+                }
                 manuallyDisconnected = false
 
                 FlutterCaller().connecting()
+                sessionGeneration++
                 controlClient?.kill(false, null)
+                activeSessionPrefs = SessionPreferences(prefs.all.toMap())
 
                 beForegrounded()
-                resetReconnectionLife(prefs)
-                if (getBooleanPrefValue(OscPrefKey.LOG_DO_SAVE_LOG, prefs)) {
+                resetReconnectionLife(activeSessionPrefs ?: prefs)
+                if (getBooleanPrefValue(OscPrefKey.LOG_DO_SAVE_LOG, activeSessionPrefs ?: prefs)) {
                     prepareLogWriter()
                 }
 
                 logWriter?.write("Establish VPN connection")
 
-                initializeClient()
+                initializeClient(activeSessionPrefs ?: return Service.START_STICKY)
 
                 setRootState(true)
 
                 Service.START_STICKY
             }
 
+            ACTION_VPN_RECONNECT -> {
+                // Only the displayed notification may restart this session.
+                val token = intent.getStringExtra(EXTRA_NOTIFICATION_SESSION)
+                if (token != notificationSessionToken || !getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs) ||
+                    token == lastReconnectToken || notificationActionInProgress) return Service.START_STICKY
+                lastReconnectToken = token
+                notificationActionInProgress = true
+                val generation = sessionGeneration
+                scope.launch {
+                    jobReconnect?.cancelAndJoin()
+                    controlClient?.shutdownForReconnect()
+                    if (generation != sessionGeneration || !getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)) return@launch
+                    controlClient = null
+                    beForegrounded()
+                    initializeClient(activeSessionPrefs ?: return@launch)
+                    setRootState(true)
+                    notificationActionInProgress = false
+                }
+                Service.START_STICKY
+            }
+
             else -> {
+                val token = intent.getStringExtra(EXTRA_NOTIFICATION_SESSION)
+                if (token != null && token != notificationSessionToken) {
+                    return Service.START_STICKY
+                }
                 if(intent?.getBooleanExtra("manuallyDisconnected",false) == true){
                     manuallyDisconnected = true
                 }
+                sessionGeneration++
+                notificationActionInProgress = false
+                jobReconnect?.cancel()
                 setRootState(false)
                 connectionStatus = OscPrefKey.Disconnected.name
-                // ensure that reconnection has been completely canceled or done
-                runBlocking { jobReconnect?.cancelAndJoin() }
-
                 controlClient?.disconnect()
                 controlClient = null
 
@@ -176,8 +215,9 @@ internal class SstpVpnService : VpnService() {
         }
     }
 
-    private fun initializeClient() {
-        controlClient = ControlClient(ClientBridge(this)).also {
+    private fun initializeClient(sessionPrefs: SharedPreferences = activeSessionPrefs ?: SessionPreferences(prefs.all.toMap())) {
+        activeSessionPrefs = sessionPrefs as? SessionPreferences ?: activeSessionPrefs
+        controlClient = ControlClient(ClientBridge(this, sessionPrefs = sessionPrefs)).also {
             it.launchJobMain()
         }
     }
@@ -214,20 +254,24 @@ internal class SstpVpnService : VpnService() {
     }
 
     internal fun launchJobReconnect() {
+        val generation = sessionGeneration
         jobReconnect = scope.launch {
             try {
-                getIntPrefValue(OscPrefKey.RECONNECTION_LIFE, prefs).also {
-                    val life = it - 1
-                    setIntPrefValue(life, OscPrefKey.RECONNECTION_LIFE, prefs)
+                    val sessionPrefs = activeSessionPrefs ?: return@launch
+                    getIntPrefValue(OscPrefKey.RECONNECTION_LIFE, sessionPrefs).also {
+                        val life = it - 1
+                        setIntPrefValue(life, OscPrefKey.RECONNECTION_LIFE, sessionPrefs)
 
                     val message = "Reconnection will be tried (LIFE = $life)"
                     makeNotification(NOTIFICATION_RECONNECT_ID, message)
                     logWriter?.report(message)
                 }
 
-                delay(getIntPrefValue(OscPrefKey.RECONNECTION_INTERVAL, prefs) * 1000L)
+                delay(getIntPrefValue(OscPrefKey.RECONNECTION_INTERVAL, sessionPrefs) * 1000L)
 
-                initializeClient()
+                if (generation == sessionGeneration && getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)) {
+                    initializeClient(sessionPrefs)
+                }
             } catch (_: CancellationException) { }
             finally {
                 cancelNotification(NOTIFICATION_RECONNECT_ID)
@@ -246,11 +290,28 @@ internal class SstpVpnService : VpnService() {
             }
         }
 
+        notificationSessionToken = UUID.randomUUID().toString()
+        val sessionToken = notificationSessionToken
+        val disconnectIntent = Intent(this, SstpVpnService::class.java)
+            .setAction(ACTION_VPN_DISCONNECT)
+            .setData(android.net.Uri.parse("sstp://disconnect/$sessionToken"))
+            .putExtra(EXTRA_NOTIFICATION_SESSION, sessionToken)
+            .putExtra("manuallyDisconnected", true)
+        val reconnectIntent = Intent(this, SstpVpnService::class.java)
+            .setAction(ACTION_VPN_RECONNECT)
+            .setData(android.net.Uri.parse("sstp://reconnect/$sessionToken"))
+            .putExtra(EXTRA_NOTIFICATION_SESSION, sessionToken)
         val pendingIntent = PendingIntent.getService(
             this,
-            0,
-            Intent(this, SstpVpnService::class.java).setAction(ACTION_VPN_DISCONNECT).putExtra("manuallyDisconnected",true),
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            301,
+            disconnectIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val reconnectPendingIntent = PendingIntent.getService(
+            this,
+            302,
+            reconnectIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notificationText = prefs.getString(OscPrefKey.NotificationText.name,"")
         val showNotification = prefs.getBoolean(OscPrefKey.NOTIFICATION_DO_SHOW_DISCONNECT.name,false)
@@ -266,7 +327,8 @@ internal class SstpVpnService : VpnService() {
             it.setSmallIcon(R.drawable.baseline_vpn_key_24)
             it.setContentTitle(notificationText)
             if(showNotification){
-                it.addAction(0, "DISCONNECT", pendingIntent)
+                it.addAction(0, "Reconnect", reconnectPendingIntent)
+                it.addAction(0, "Disconnect", pendingIntent)
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -285,6 +347,14 @@ internal class SstpVpnService : VpnService() {
 
     internal fun cancelNotification(id: Int) {
         notificationManager.cancel(id)
+    }
+
+    internal fun onReconnectFinished() {
+        notificationActionInProgress = false
+    }
+
+    internal fun closeIfCurrent(owner: ControlClient) {
+        if (controlClient === owner) close()
     }
 
     internal fun close() {

@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import android.app.PendingIntent
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.Executors
@@ -130,12 +131,34 @@ class PsiphonTunBridgeService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 try {
+                    val session = intent.getStringExtra(EXTRA_BRIDGE_SESSION)
+                    val reconnect = Intent(this, PsiphonVpnService::class.java).apply {
+                        action = PsiphonVpnService.ACTION_RECONNECT
+                        data = android.net.Uri.parse("forwin-psiphon://reconnect/$session")
+                        if (!session.isNullOrBlank()) putExtra(PsiphonVpnService.EXTRA_GENERATION, session)
+                    }
+                    val requestCode = (session?.hashCode() ?: 0) and 0x7fffffff
+                    val reconnectPending = PendingIntent.getService(
+                        this, requestCode, reconnect,
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+                    val disconnect = Intent(this, PsiphonVpnService::class.java).apply {
+                        action = PsiphonVpnService.ACTION_DISCONNECT
+                        data = android.net.Uri.parse("forwin-psiphon://disconnect/$session")
+                        if (!session.isNullOrBlank()) putExtra(PsiphonVpnService.EXTRA_GENERATION, session)
+                    }
+                    val disconnectPending = PendingIntent.getService(
+                        this, requestCode xor 0x40000000, disconnect,
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
                     startForeground(
                         NOTIFICATION_ID,
                         NotificationCompat.Builder(this, CHANNEL_ID)
                             .setSmallIcon(android.R.drawable.ic_lock_lock)
                             .setContentTitle("4win VPN")
                             .setContentText("Psiphon traffic bridge active")
+                            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPending)
+                            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPending)
                             .setPriority(NotificationCompat.PRIORITY_LOW)
                             .setOngoing(true)
                             .build()

@@ -97,6 +97,7 @@ void main() {
       'connectMixPlan': 42,
       'disconnectMixPlan': true,
       'isXrayRunning': true,
+      'isXrayReconnecting': false,
       'disconnectXray': true,
       'queryXrayStats': <String, int>{'uplink': 0, 'downlink': 0},
     };
@@ -265,6 +266,45 @@ void main() {
     expect(provider.status, VpnConnectionStatus.disconnected);
     provider.dispose();
   });
+
+  test(
+    'Mix monitor leaves a notification reconnect and its strategy intact',
+    () async {
+      final provider = await providerWith(_nativeStrategy());
+      await provider.connect();
+      calls.clear();
+      responses['isXrayRunning'] = false;
+      responses['isXrayReconnecting'] = true;
+      await Future<void>.delayed(const Duration(milliseconds: 2200));
+      expect(calls, contains('isXrayReconnecting'));
+      expect(calls, isNot(contains('disconnectMixPlan')));
+      expect(calls, isNot(contains('disconnectXray')));
+      expect(provider.status, VpnConnectionStatus.connected);
+      expect(provider.selectedMixStrategy?.id, _nativeStrategy().id);
+
+      responses['isXrayRunning'] = true;
+      responses['isXrayReconnecting'] = false;
+      await Future<void>.delayed(const Duration(milliseconds: 2200));
+      expect(provider.status, VpnConnectionStatus.connected);
+      expect(calls, isNot(contains('disconnectMixPlan')));
+      provider.dispose();
+    },
+  );
+
+  test(
+    'Mix monitor still reports a terminal failure after reconnect ends',
+    () async {
+      final provider = await providerWith(_nativeStrategy());
+      await provider.connect();
+      calls.clear();
+      responses['isXrayRunning'] = false;
+      responses['isXrayReconnecting'] = false;
+      await Future<void>.delayed(const Duration(milliseconds: 2200));
+      expect(calls, contains('disconnectMixPlan'));
+      expect(provider.status, VpnConnectionStatus.error);
+      provider.dispose();
+    },
+  );
 
   test(
     'switching protocol during late native connect drains cleanup',
