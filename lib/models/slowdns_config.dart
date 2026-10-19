@@ -53,8 +53,9 @@ class SlowDnsConfig {
       errors.add('Port must be between 1 and 65535.');
     }
     if (dnsTransport.toLowerCase() == 'doh') {
-      if (!isValidDohUrl(dohUrl))
+      if (!isValidDohUrl(dohUrl)) {
         errors.add('DoH URL must be a valid HTTPS URL.');
+      }
     } else {
       if (!isValidResolverEndpoint(nameServer) ||
           resolvers.any((value) => !isValidResolverEndpoint(value))) {
@@ -89,6 +90,30 @@ class SlowDnsConfig {
   static bool isValidPublicKey(String? value) =>
       value != null && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(value.trim());
 
+  /// Profile UI accepts host:port; storage/native APIs still use separate fields.
+  static ({String host, int port})? parseResolverAddress(
+    String value, {
+    int defaultPort = 53,
+  }) {
+    final text = value.trim();
+    if (defaultPort < 1 || defaultPort > 65535 || text.isEmpty) return null;
+    String host = text;
+    int port = defaultPort;
+    if (':'.allMatches(text).length > 1 ||
+        text.contains('[') ||
+        text.contains(']')) {
+      return null;
+    }
+    if (text.contains(':')) {
+      final parts = text.split(':');
+      host = parts.first;
+      if (!RegExp(r'^[0-9]+$').hasMatch(parts.last)) return null;
+      port = int.tryParse(parts.last) ?? 0;
+    }
+    if (!isValidResolverEndpoint(host) || port < 1 || port > 65535) return null;
+    return (host: host, port: port);
+  }
+
   static bool isValidDnsName(String value) {
     final v = value.trim().replaceFirst(RegExp(r'\.$'), '');
     if (v.isEmpty || v.length > 253) return false;
@@ -103,19 +128,10 @@ class SlowDnsConfig {
         );
   }
 
-  /// Bare IPv4/IPv6 or hostname only. No hidden port, URL, or credentials.
+  /// IPv4 or hostname only. IPv6 is intentionally excluded from Slow DNS.
   static bool isValidResolverEndpoint(String value) {
-    var v = value.trim();
-    if (v.startsWith('[') && v.endsWith(']')) v = v.substring(1, v.length - 1);
-    if (v.isEmpty || v.contains(RegExp(r'[\s/@?#%]'))) return false;
-    if (v.contains(':')) {
-      try {
-        Uri.parseIPv6Address(v);
-        return true;
-      } on FormatException {
-        return false;
-      }
-    }
+    final v = value.trim();
+    if (v.isEmpty || v.contains(RegExp(r'[\s/@?#%:\[\]]'))) return false;
     if (RegExp(r'^[0-9.]+$').hasMatch(v)) {
       final parts = v.split('.');
       return parts.length == 4 &&

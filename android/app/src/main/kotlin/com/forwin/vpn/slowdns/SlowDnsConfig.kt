@@ -1,8 +1,6 @@
 package com.forwin.vpn.slowdns
 
 import org.json.JSONObject
-import java.net.Inet6Address
-import java.net.InetAddress
 import java.net.URI
 
 /** The native boundary validates again; it never resolves a hostname to validate it. */
@@ -24,8 +22,8 @@ data class SlowDnsConfig(
         }
         private fun bareHost(value: String): String = value.removePrefix("[").removeSuffix("]")
         private fun validHost(value: String): Boolean {
-            if (value.contains(':')) return value.matches(Regex("[0-9a-fA-F:]+")) &&
-                runCatching { InetAddress.getByName(value) is Inet6Address }.getOrDefault(false)
+            // Slow DNS intentionally supports IPv4/hostnames, never IPv6 literals.
+            if (value.contains(':') || value.contains('[') || value.contains(']')) return false
             if (value.matches(Regex("[0-9.]+"))) {
                 val parts = value.split('.')
                 return parts.size == 4 && parts.all {

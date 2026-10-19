@@ -1,36 +1,44 @@
 import 'dart:convert';
-
+import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
 import '../services/dns_scanner_service.dart';
+import '../services/operator_ipv4_catalog.dart';
 
 class DnsScannerScreen extends StatefulWidget {
   final String? probeDomain;
-  const DnsScannerScreen({super.key, this.probeDomain});
-
+  final int initialPort;
+  final ValueChanged<int>? onPortSelected;
+  const DnsScannerScreen({
+    super.key,
+    this.probeDomain,
+    this.initialPort = 53,
+    this.onPortSelected,
+  });
   @override
   State<DnsScannerScreen> createState() => _DnsScannerScreenState();
 }
 
 class _DnsScannerScreenState extends State<DnsScannerScreen> {
-  final _scanner = DnsScannerService();
-  final _custom = TextEditingController();
   final _cidrs = TextEditingController();
   final _fromIp = TextEditingController();
   final _toIp = TextEditingController();
   final _randomCount = TextEditingController(text: '100');
   final _domain = TextEditingController();
+  final _port = TextEditingController();
+  final _timeout = TextEditingController(text: '2500');
   final _parallel = TextEditingController(text: '64');
-  bool _scanning = false;
-  bool _cancel = false;
+  final _scanner = DnsScannerService();
+  // 0 = user-provided operator IPv4 ranges, 1 = generated public IPv4.
   int _mode = 0;
-  int _tested = 0;
-  int _total = 0;
+  String _operatorId = 'custom';
+  int _operatorBatch = 0;
+  String? _scanScope;
+  bool _scanning = false, _cancel = false, _shuffle = false, _nearby = false;
+  int _resultPort = 53, _tested = 0, _total = 0;
   double _progress = 0;
-  String? _countryLabel;
-  String? _error;
+  String? _sourceLabel, _error;
   List<DnsScanResult> _results = [];
 
   @override
@@ -39,37 +47,25 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     _domain.text = widget.probeDomain?.trim().isNotEmpty == true
         ? widget.probeDomain!.trim()
         : 'google.com';
+    _port.text = '${widget.initialPort}';
   }
 
   @override
   void dispose() {
     _cancel = true;
     for (final c in [
-      _custom,
       _cidrs,
       _fromIp,
       _toIp,
       _randomCount,
       _domain,
+      _port,
+      _timeout,
       _parallel,
     ]) {
       c.dispose();
     }
     super.dispose();
-  }
-
-  int get _parallelValue => (int.tryParse(_parallel.text.trim()) ?? 64).clamp(
-    1,
-    DnsScannerService.maxParallel,
-  );
-
-  void _stop() {
-    if (!mounted) return;
-    setState(() {
-      _cancel = true;
-      _error =
-          'Stopping after the current native batch; no further batches will start.';
-    });
   }
 
   void _message(String text) {
@@ -78,100 +74,142 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     }
   }
 
-  Future<void> _importCidrs() async {
+  void _stop() {
+    if (mounted) {
+      setState(() {
+        _cancel = true;
+        _error =
+            'Stopping after the current batch; no further batches will start.';
+      });
+    }
+  }
+
+  Future<void> _importRanges() async {
     try {
       final picked = await FilePicker.platform.pickFiles(
         withData: true,
         type: FileType.custom,
         allowedExtensions: ['txt', 'csv', 'cidr'],
       );
-      if (!mounted || picked == null || picked.files.single.bytes == null)
-        return;
-      final bytes = picked.files.single.bytes!;
-      if (bytes.length > 2 * 1024 * 1024) {
-        _message('CIDR file is too large (maximum 2 MB).');
+      if (!mounted || picked == null || picked.files.single.bytes == null) {
         return;
       }
-      final text = utf8.decode(bytes, allowMalformed: false);
-      if (!mounted) return;
+      final bytes = picked.files.single.bytes!;
+      if (bytes.length > 2 * 1024 * 1024) {
+        _message('Range file is too large (maximum 2 MB).');
+        return;
+      }
       setState(() {
-        _cidrs.text = text;
-        _countryLabel = picked.files.single.name;
-        _mode = 3;
+        _cidrs.text = utf8.decode(bytes, allowMalformed: false);
+        _sourceLabel = picked.files.single.name;
+        _mode = 0;
+        _operatorId = 'custom';
       });
-    } catch (e) {
-      _message('Could not read the CIDR file: $e');
+    } catch (_) {
+      _message('Could not read the range file.');
     }
   }
 
   List<String> _targets() {
-    switch (_mode) {
-      case 0:
-        return DnsScannerService.expandTargets([
-          ...DnsScannerService.defaultServers,
-          _custom.text,
-        ]);
-      case 1:
-        final from = _fromIp.text.trim();
-        final to = _toIp.text.trim();
-        if (DnsScannerService.parseIp(from) == null ||
-            DnsScannerService.parseIp(to) == null) {
-          throw const FormatException(
-            'Enter valid From IP and To IP addresses.',
-          );
-        }
-        final targets = DnsScannerService.generateRange(from, to);
-        if (targets.isEmpty)
-          throw const FormatException('The IP range is empty.');
-        return targets;
-      case 2:
-        final count = int.tryParse(_randomCount.text.trim());
-        if (count == null || count < 1) {
-          throw const FormatException(
-            'Enter a random IP count from 1 to 200000.',
-          );
-        }
-        return DnsScannerService.generateRandom(count);
-      case 3:
-        final entries = _cidrs.text
-            .split(RegExp(r'[\s,;\n]+'))
-            .where((x) => x.isNotEmpty);
-        final targets = DnsScannerService.expandTargets(entries);
-        if (targets.isEmpty)
-          throw const FormatException('Enter at least one CIDR or IP.');
-        return targets;
-      default:
-        throw const FormatException('Unknown scan mode.');
+    if (_mode == 1) {
+      final count = int.tryParse(_randomCount.text.trim());
+      if (count == null || count < 1 || count > DnsScannerService.maxTargets) {
+        throw const FormatException(
+          'Enter a random IPv4 count from 1 to 200000.',
+        );
+      }
+      return DnsScannerService.generateRandom(count);
     }
+    if (_operatorId != 'custom') {
+      return OperatorIpv4Catalog.operators
+          .firstWhere((operator) => operator.id == _operatorId)
+          .targetsForBatch(_operatorBatch);
+    }
+    final targets = <String>[];
+    final from = _fromIp.text.trim(), to = _toIp.text.trim();
+    if (from.isNotEmpty || to.isNotEmpty) {
+      if (DnsScannerService.parseIp(from) == null ||
+          DnsScannerService.parseIp(to) == null) {
+        throw const FormatException(
+          'Enter valid operator From IPv4 and To IPv4 addresses. IPv6 is not supported.',
+        );
+      }
+      targets.addAll(DnsScannerService.generateRange(from, to));
+    }
+    if (_cidrs.text.trim().isNotEmpty) {
+      try {
+        targets.addAll(
+          DnsScannerService.expandTargets(
+            _cidrs.text.split(RegExp(r'[\s,;\n]+')).where((e) => e.isNotEmpty),
+          ),
+        );
+      } on FormatException catch (e) {
+        throw FormatException(
+          '${e.message} IPv4 ranges only; IPv6 is not supported.',
+        );
+      }
+    }
+    final unique = DnsScannerService.expandTargets(targets);
+    if (unique.isEmpty) {
+      throw const FormatException(
+        'Provide From/To IPv4 addresses or paste at least one IPv4 address/CIDR.',
+      );
+    }
+    return unique;
+  }
+
+  int _int(TextEditingController c, String label, int min, int max) {
+    final value = int.tryParse(c.text.trim());
+    if (value == null || value < min || value > max) {
+      throw FormatException('$label must be between $min and $max.');
+    }
+    return value;
   }
 
   Future<void> _start() async {
     if (_scanning) return;
     try {
-      final targets = _targets();
-      if (targets.isEmpty)
-        throw const FormatException('Enter at least one IP or CIDR.');
+      var targets = _targets();
+      final scope = _mode == 1
+          ? 'Random public IPv4 sample: ${targets.length} targets; not an exhaustive Internet scan.'
+          : _operatorId == 'custom'
+          ? 'Custom ranges: ${targets.length} queued targets. Inputs are limited to the first 200000 unique IPv4 addresses; larger inputs are not fully scanned.'
+          : _operatorScope();
+      final port = _int(_port, 'Port', 1, 65535),
+          timeout = _int(_timeout, 'Timeout', 100, 10000),
+          workers = _int(
+            _parallel,
+            'Workers',
+            1,
+            DnsScannerService.maxParallel,
+          );
+      if (_shuffle) targets = [...targets]..shuffle(Random());
       setState(() {
         _scanning = true;
         _cancel = false;
         _error = null;
+        _scanScope = scope;
         _results = [];
         _tested = 0;
         _total = targets.length;
+        _resultPort = port;
         _progress = 0;
       });
-      final result = await _scanner.scanRange(
+      final found = await _scanner.scanRange(
         targets: targets,
         domain: _domain.text.trim(),
-        parallel: _parallelValue,
-        chunkSize: _parallelValue,
+        parallel: workers,
+        chunkSize: workers,
+        port: port,
+        timeoutMs: timeout,
+        expandNearby: _nearby && _mode == 0 && _operatorId == 'custom',
         isCancelled: () => _cancel || !mounted,
         onProgress: (done, total) {
           if (!mounted || _cancel) return;
           setState(() {
             _tested = done;
             _total = total;
-            _progress = total == 0 ? 0 : done / total;
+            _progress = total == 0 ? 0 : (done / total).clamp(0, 1);
           });
         },
         onFound: (batch) {
@@ -182,16 +220,16 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           });
         },
       );
-      if (!mounted || _cancel) return;
-      setState(() {
-        _results = result;
-        _tested = targets.length;
-        _progress = 1;
-      });
-    } catch (e) {
+      if (mounted && !_cancel) {
+        setState(() {
+          _results = found;
+          _progress = _total == 0 ? 1 : _progress;
+        });
+      }
+    } catch (error) {
       if (mounted) {
         setState(
-          () => _error = e.toString().replaceFirst('FormatException: ', ''),
+          () => _error = error.toString().replaceFirst('FormatException: ', ''),
         );
       }
     } finally {
@@ -206,52 +244,130 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     );
   }
 
-  String _latency(int n) => n < 0 ? '—' : '$n ms';
+  String _latency(int value) => value < 0 ? '—' : '$value ms';
 
-  Widget _status(DnsScanResult r) => Wrap(
-    spacing: 6,
-    runSpacing: 3,
-    children: [
-      Text(r.ednsSupported ? 'EDNS ${r.ednsPayload}' : 'EDNS unsupported'),
-      Text(
-        '· ${r.nxdomainSafe
-            ? 'NXDOMAIN safe'
-            : r.nxdomainHijacked
-            ? 'NXDOMAIN hijacked'
-            : 'NXDOMAIN unknown'}',
-      ),
-      Text('· UDP ${_latency(r.udpMs)} / TCP ${_latency(r.tcpMs)}'),
-      Text('· ${r.responseBytes} B'),
-    ],
-  );
-
-  Future<void> _copy(DnsScanResult r) async {
-    if (!r.isCandidate) return;
-    await Clipboard.setData(ClipboardData(text: r.ip));
-    if (mounted) _message('Copied ${r.ip}');
+  String _operatorScope() {
+    final operator = OperatorIpv4Catalog.operators.firstWhere(
+      (operator) => operator.id == _operatorId,
+    );
+    return '${operator.label} · ${operator.asn}\n'
+        'RIPE NCC snapshot: ${operator.updatedAt}\n'
+        '${operator.totalAddresses} announced IPv4 addresses. '
+        'Batch ${_operatorBatch + 1} of ${operator.batchCount}: '
+        '${operator.batchSize(_operatorBatch)} targets only. '
+        'Choose another batch to continue; batches do not run automatically. '
+        'Restarting a batch repeats it. No saved continuation.\n'
+        'Routing data is not a list of working DNS servers and may change.\n'
+        'Source: ${operator.sourceUrl}';
   }
 
-  Widget _modeControls() {
-    switch (_mode) {
-      case 0:
-        return TextField(
-          controller: _custom,
-          maxLines: 2,
-          decoration: const InputDecoration(
-            labelText: 'Additional DNS IPs (optional)',
-            hintText: 'IP addresses only; domains are rejected',
-            border: OutlineInputBorder(),
-            isDense: true,
+  Widget _operatorChoice() => DropdownButtonFormField<String>(
+    key: ValueKey('operator-$_operatorId'),
+    initialValue: _operatorId,
+    isExpanded: true,
+    decoration: const InputDecoration(
+      labelText: 'Operator / range source',
+      border: OutlineInputBorder(),
+    ),
+    items: [
+      const DropdownMenuItem(
+        value: 'custom',
+        child: Text('Custom IPv4 ranges'),
+      ),
+      ...OperatorIpv4Catalog.operators.map(
+        (operator) =>
+            DropdownMenuItem(value: operator.id, child: Text(operator.label)),
+      ),
+    ],
+    onChanged: _scanning
+        ? null
+        : (value) {
+            if (value == null) return;
+            setState(() {
+              _operatorId = value;
+              _operatorBatch = 0;
+            });
+          },
+  );
+
+  Widget _modeChoice(int value, String title, String subtitle, IconData icon) =>
+      RadioListTile<int>(
+        value: value,
+        title: Text(title),
+        subtitle: Text(subtitle),
+        secondary: Icon(icon),
+        contentPadding: EdgeInsets.zero,
+      );
+  Widget _sourceFields() {
+    if (_mode == 1) {
+      return TextField(
+        controller: _randomCount,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(
+          labelText: 'Random public IPv4 count (max 200000)',
+          border: OutlineInputBorder(),
+          isDense: true,
+        ),
+      );
+    }
+    if (_operatorId != 'custom') {
+      final operator = OperatorIpv4Catalog.operators.firstWhere(
+        (operator) => operator.id == _operatorId,
+      );
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _operatorChoice(),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<int>(
+            key: ValueKey('$_operatorId-$_operatorBatch'),
+            initialValue: _operatorBatch,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'IPv4 batch (max 200000 targets)',
+              border: OutlineInputBorder(),
+            ),
+            items: List.generate(
+              operator.batchCount,
+              (index) => DropdownMenuItem(
+                value: index,
+                child: Text(
+                  'Batch ${index + 1} / ${operator.batchCount} · ${operator.batchSize(index)} IPs',
+                ),
+              ),
+            ),
+            onChanged: _scanning
+                ? null
+                : (value) {
+                    if (value != null) {
+                      setState(() => _operatorBatch = value);
+                    }
+                  },
           ),
-        );
-      case 1:
-        return Row(
+          const SizedBox(height: 8),
+          Text(_operatorScope()),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _operatorChoice(),
+        const SizedBox(height: 8),
+        const Text(
+          'Enter your own IPv4 ranges, or choose a built-in operator above. '
+          'Custom inputs use at most the first 200000 unique targets; '
+          'shuffle changes their order, not the capped selection.',
+        ),
+        const SizedBox(height: 8),
+        Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _fromIp,
+                keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  labelText: 'From IP',
+                  labelText: 'From IPv4',
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -261,244 +377,252 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
             Expanded(
               child: TextField(
                 controller: _toIp,
+                keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  labelText: 'To IP',
+                  labelText: 'To IPv4',
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
               ),
             ),
           ],
-        );
-      case 2:
-        return TextField(
-          controller: _randomCount,
-          keyboardType: TextInputType.number,
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _cidrs,
+          minLines: 2,
+          maxLines: 4,
+          keyboardType: TextInputType.multiline,
+          decoration: InputDecoration(
+            labelText: 'Paste IPv4 addresses or CIDR ranges',
+            hintText: '198.51.100.1\n203.0.113.0/24',
+            helperText: _sourceLabel == null
+                ? 'IPv4 only; separate entries with spaces, commas, or new lines.'
+                : 'Imported: $_sourceLabel',
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _scanning ? null : _importRanges,
+          icon: const Icon(Icons.upload_file),
+          label: const Text('Import IPv4 ranges'),
+        ),
+      ],
+    );
+  }
+
+  Widget _fieldRow() => Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    children: [
+      SizedBox(
+        width: 150,
+        child: TextField(
+          controller: _domain,
           decoration: const InputDecoration(
-            labelText: 'Random public IP count (max 200000)',
+            labelText: 'Probe domain',
             border: OutlineInputBorder(),
             isDense: true,
           ),
-        );
-      default:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _cidrs,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'User-provided country CIDRs or IPs',
-                hintText: 'No built-in country database',
-                border: OutlineInputBorder(),
-                isDense: true,
+        ),
+      ),
+      SizedBox(
+        width: 90,
+        child: TextField(
+          controller: _port,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Port',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+      ),
+      SizedBox(
+        width: 120,
+        child: TextField(
+          controller: _timeout,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Timeout ms',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+      ),
+      SizedBox(
+        width: 125,
+        child: TextField(
+          controller: _parallel,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Workers (1–64)',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+      ),
+    ],
+  );
+  Widget _resultsView() {
+    if (_results.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: Text('No reachable resolvers yet.')),
+      );
+    }
+    return Column(
+      children: _results.map((r) {
+        final safe = r.isCandidate;
+        return Card(
+          child: InkWell(
+            onTap: safe
+                ? () {
+                    widget.onPortSelected?.call(_resultPort);
+                    Navigator.of(context).pop<String>(r.ip);
+                  }
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        safe ? Icons.verified : Icons.dns,
+                        color: safe ? Colors.green : Colors.grey,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${r.ip}${r.name == null ? '' : ' · ${r.name}'}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Text(_latency(r.bestMs)),
+                      if (safe)
+                        IconButton(
+                          onPressed: () async {
+                            await Clipboard.setData(ClipboardData(text: r.ip));
+                            if (mounted) _message('Copied ${r.ip}');
+                          },
+                          icon: const Icon(Icons.copy),
+                          tooltip: 'Copy resolver',
+                        ),
+                    ],
+                  ),
+                  Text(
+                    safe
+                        ? 'Candidate · UDP port $_resultPort · Tap to use'
+                        : 'Not selectable · DNS capability checks incomplete or unsafe',
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _scanning ? null : _importCidrs,
-                  icon: const Icon(Icons.file_upload),
-                  label: const Text('Import offline file'),
-                ),
-                if (_countryLabel != null)
-                  Text(_countryLabel!, style: const TextStyle(fontSize: 12)),
-              ],
-            ),
-          ],
+          ),
         );
-    }
+      }).toList(),
+    );
   }
 
   @override
-  Widget build(BuildContext context) {
-    final candidates = _results.where((r) => r.isCandidate).length;
-    final height = MediaQuery.sizeOf(context).height;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('DNS Scanner'),
-        backgroundColor: Colors.orange,
-        foregroundColor: Colors.white,
-        actions: [
-          if (_scanning)
-            IconButton(
-              onPressed: _stop,
-              tooltip: 'Stop',
-              icon: const Icon(Icons.stop),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('DNS resolver discovery'),
+      actions: [
+        if (_scanning)
+          IconButton(
+            onPressed: _stop,
+            icon: const Icon(Icons.stop),
+            tooltip: 'Stop',
+          ),
+      ],
+    ),
+    body: ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        const Text(
+          'Choose one IPv4 discovery approach.',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        RadioGroup<int>(
+          groupValue: _mode,
+          onChanged: _scanning
+              ? (_) {}
+              : (v) {
+                  if (v != null) setState(() => _mode = v);
+                },
+          child: Column(
+            children: [
+              _modeChoice(
+                0,
+                'Operator IPv4 ranges',
+                'Choose MCI or Irancell, or enter/import your own IPv4 ranges.',
+                Icons.business,
+              ),
+              _modeChoice(
+                1,
+                'Random public IPv4',
+                'Generate and test random public IPv4 addresses when ranges are unavailable.',
+                Icons.shuffle,
+              ),
+            ],
+          ),
+        ),
+        const Divider(),
+        _sourceFields(),
+        const SizedBox(height: 12),
+        _fieldRow(),
+        CheckboxListTile(
+          value: _shuffle,
+          onChanged: _scanning
+              ? null
+              : (v) => setState(() => _shuffle = v ?? false),
+          title: const Text('Shuffle targets'),
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          value: _nearby,
+          onChanged: _scanning || _mode == 1 || _operatorId != 'custom'
+              ? null
+              : (v) => setState(() => _nearby = v ?? false),
+          title: const Text('Include nearby IPv4 addresses'),
+          subtitle: Text(
+            _mode == 1 || _operatorId != 'custom'
+                ? 'Available only for custom ranges; built-in batches stay within their announced ranges.'
+                : 'Expand each safe resolver to its nearby /24 addresses.',
+          ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        const Text(
+          'IPv6 is not supported. Only IPv4 addresses and CIDR ranges are accepted.',
+        ),
+        const SizedBox(height: 8),
+        if (_error != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+            padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Candidates require reachable UDP, EDNS, and safe NXDOMAIN behavior. TCP-only or unsafe resolvers cannot be selected. This does not verify a tunnel; connection verification happens separately.',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
-          Card(
-            margin: const EdgeInsets.fromLTRB(8, 0, 8, 6),
-            child: ExpansionTile(
-              initiallyExpanded: true,
-              title: const Text('Scan controls'),
-              children: [
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: height * .42),
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    child: Column(
-                      children: [
-                        DropdownButtonFormField<int>(
-                          value: _mode,
-                          isDense: true,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Scan mode',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 0,
-                              child: Text('Public DNS list'),
-                            ),
-                            DropdownMenuItem(
-                              value: 1,
-                              child: Text('From IP / To IP range'),
-                            ),
-                            DropdownMenuItem(
-                              value: 2,
-                              child: Text('Random public IPs'),
-                            ),
-                            DropdownMenuItem(
-                              value: 3,
-                              child: Text('Imported country CIDRs'),
-                            ),
-                          ],
-                          onChanged: _scanning
-                              ? null
-                              : (v) => setState(() => _mode = v ?? 0),
-                        ),
-                        const SizedBox(height: 8),
-                        _modeControls(),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _domain,
-                                decoration: const InputDecoration(
-                                  labelText: 'Probe domain',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            SizedBox(
-                              width: 104,
-                              child: TextField(
-                                controller: _parallel,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'Parallel 1–64',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _scanning ? _stop : _start,
-                            icon: Icon(_scanning ? Icons.stop : Icons.radar),
-                            label: Text(
-                              _scanning
-                                  ? 'Stop (finish current batch)'
-                                  : 'Start scan',
-                            ),
-                          ),
-                        ),
-                        const Text(
-                          'Country ranges are user-provided; there is no built-in country database. Expansion is capped at 200,000 unique targets.',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_scanning) LinearProgressIndicator(value: _progress),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _error ??
-                        (_scanning
-                            ? 'Scanning $_tested / $_total…'
-                            : '${_results.length} reachable · $candidates safe candidates'),
-                  ),
-                ),
-                if (!_scanning)
-                  IconButton(
-                    onPressed: _start,
-                    icon: const Icon(Icons.refresh),
-                    tooltip: 'Rescan',
-                  ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: _results.isEmpty
-                ? const Center(child: Text('No reachable resolvers yet.'))
-                : ListView.builder(
-                    itemCount: _results.length,
-                    itemBuilder: (context, i) {
-                      final r = _results[i];
-                      final safe = r.isCandidate;
-                      return ListTile(
-                        leading: Icon(
-                          safe ? Icons.verified : Icons.dns,
-                          color: safe ? Colors.green : Colors.grey,
-                        ),
-                        title: Text(
-                          r.name == null ? r.ip : '${r.ip} · ${r.name}',
-                        ),
-                        subtitle: _status(r),
-                        isThreeLine: true,
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(_latency(r.bestMs)),
-                            if (safe)
-                              IconButton(
-                                onPressed: () => _copy(r),
-                                icon: const Icon(Icons.copy),
-                                tooltip: 'Copy resolver',
-                              ),
-                          ],
-                        ),
-                        onTap: safe
-                            ? () => Navigator.of(context).pop<String>(r.ip)
-                            : null,
-                      );
-                    },
-                  ),
-          ),
+        FilledButton.icon(
+          onPressed: _scanning ? null : _start,
+          icon: const Icon(Icons.play_arrow),
+          label: Text(_scanning ? 'Scanning…' : 'Start scan'),
+        ),
+        if (_scanning || _total > 0) ...[
+          const SizedBox(height: 10),
+          LinearProgressIndicator(value: _progress),
+          const SizedBox(height: 4),
+          Text('Tested $_tested / $_total'),
+          if (_scanScope != null) Text(_scanScope!),
         ],
-      ),
-    );
-  }
+        const SizedBox(height: 8),
+        _resultsView(),
+      ],
+    ),
+  );
 }

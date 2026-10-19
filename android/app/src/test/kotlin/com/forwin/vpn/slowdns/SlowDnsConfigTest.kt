@@ -34,9 +34,13 @@ class SlowDnsConfigTest {
         assertEquals("-doh", args[1]); assertEquals("https://dns.example/dns-query", args[2])
         assertFalse(args.contains("-udp")); assertFalse(args.contains("-dot"))
     }
-    @Test fun ipv6IsBracketedOnlyInCommandAuthority() {
-        val cfg = SlowDnsConfig.fromJson(profile().put("nameServer", "[2001:4860:4860::8888]"))
-        assertEquals("[2001:4860:4860::8888]:53", cfg.resolvers.first().authority())
+    @Test fun ipv6ResolversAreRejectedForEveryTransport() {
+        for (transport in listOf("udp", "dot", "doh")) {
+            val input = profile(transport).put("nameServer", "[2001:db8::1]")
+            if (transport == "doh") input.put("dohUrl", "https://[2001:db8::1]/dns-query")
+            try { SlowDnsConfig.fromJson(input); fail("Accepted IPv6 resolver") }
+            catch (_: IllegalArgumentException) { }
+        }
     }
     @Test fun rejectsBadKeysDomainsResolversAndCredentialPairs() {
         for (invalid in listOf(

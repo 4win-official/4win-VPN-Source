@@ -39,8 +39,9 @@ class DnsScanResult {
       !nxdomainHijacked;
   factory DnsScanResult.fromJson(Map<String, dynamic> j, {String? name}) {
     final ip = j['ip'];
-    if (ip is! String || DnsScannerService.parseIp(ip) == null)
+    if (ip is! String || DnsScannerService.parseIp(ip) == null) {
       throw const FormatException('Native scanner returned an invalid IP');
+    }
     return DnsScanResult(
       ip: ip,
       udpMs: (j['udpMs'] as num?)?.toInt() ?? -1,
@@ -121,30 +122,50 @@ class DnsScannerService {
     List<String>? servers,
     String domain = 'google.com',
     int parallel = 100,
+    int port = 53,
+    int timeoutMs = 2500,
   }) async {
     final targets = expandTargets(servers ?? defaultServers);
     _validateDomain(domain);
-    return _scanChunk(targets, domain, parallel);
+    if (port < 1 || port > 65535) {
+      throw const FormatException('Port must be between 1 and 65535.');
+    }
+    if (timeoutMs < 100 || timeoutMs > 10000) {
+      throw const FormatException('Timeout must be between 100 and 10000 ms.');
+    }
+    return _scanChunk(
+      targets,
+      domain,
+      parallel,
+      port: port,
+      timeoutMs: timeoutMs,
+    );
   }
 
   Future<List<DnsScanResult>> _scanChunk(
     List<String> targets,
     String domain,
-    int parallel,
-  ) async {
+    int parallel, {
+    int port = 53,
+    int timeoutMs = 2500,
+  }) async {
     final raw = await DnsVpnConnection.scanDns(
       targets,
       domain: domain,
       parallel: parallel.clamp(1, maxParallel),
+      port: port,
+      timeoutMs: timeoutMs,
     );
-    if (raw == null)
+    if (raw == null) {
       throw const DnsScanUnavailableException(
         'DNS scanning is not supported on this platform.',
       );
+    }
     try {
       final list = jsonDecode(raw);
-      if (list is! List)
+      if (list is! List) {
         throw const FormatException('Unexpected scanner response');
+      }
       return list
           .map(
             (e) => DnsScanResult.fromJson(
@@ -166,7 +187,7 @@ class DnsScannerService {
     if (p.length != 4) return null;
     var n = 0;
     for (final s in p) {
-      if (!RegExp(r'^\d{1,3}').hasMatch('$s')) {}
+      if (!RegExp(r'^(0|[1-9][0-9]{0,2})$').hasMatch(s)) return null;
       final x = int.tryParse(s);
       if (x == null || x < 0 || x > 255 || s.isEmpty) return null;
       n = (n << 8) | x;
@@ -186,7 +207,9 @@ class DnsScannerService {
     final a = parseIp(fromIp), b = parseIp(toIp), lim = _limit(max);
     if (a == null || b == null || lim == 0) return [];
     final lo = a < b ? a : b, hi = a < b ? b : a, out = <String>[];
-    for (var v = lo; v <= hi && out.length < lim; v++) out.add(_intToIp(v));
+    for (var v = lo; v <= hi && out.length < lim; v++) {
+      out.add(_intToIp(v));
+    }
     return out;
   }
 
@@ -195,8 +218,9 @@ class DnsScannerService {
     final base = p.length == 2 ? parseIp(p[0]) : null;
     final bits = p.length == 2 ? int.tryParse(p[1]) : null;
     final lim = _limit(max);
-    if (base == null || bits == null || bits < 0 || bits > 32 || lim == 0)
+    if (base == null || bits == null || bits < 0 || bits > 32 || lim == 0) {
       return [];
+    }
     final network = bits == 0
             ? 0
             : base & ((0xffffffff << (32 - bits)) & 0xffffffff),
@@ -205,8 +229,9 @@ class DnsScannerService {
     final first = exclude ? 1 : 0,
         last = exclude ? size - 2 : size - 1,
         out = <String>[];
-    for (var i = first; i <= last && out.length < lim; i++)
+    for (var i = first; i <= last && out.length < lim; i++) {
       out.add(_intToIp(network + i));
+    }
     return out;
   }
 
@@ -243,12 +268,13 @@ class DnsScannerService {
         (a == 169 && b == 254) ||
         (a == 172 && b >= 16 && b <= 31) ||
         (a == 192 && b == 168) ||
-        (a == 192 && b == 0) ||
-        (a == 192 && b == 2) ||
-        (a == 198 && (b == 18 || b == 19 || b == 51)) ||
-        (a == 203 && b == 0 && c == 113) ||
-        (a == 198 && b == 100))
+        (a == 192 && b == 0 && (c == 0 || c == 2)) ||
+        (a == 192 && b == 88 && c == 99) ||
+        (a == 198 && (b == 18 || b == 19)) ||
+        (a == 198 && b == 51 && c == 100) ||
+        (a == 203 && b == 0 && c == 113)) {
       return false;
+    }
     return true;
   }
 
@@ -280,10 +306,11 @@ class DnsScannerService {
         d.length > 253 ||
         d.contains(RegExp(r'[^A-Za-z0-9.\-_]')) ||
         d.startsWith('.') ||
-        d.endsWith('.'))
+        d.endsWith('.')) {
       throw const FormatException(
         'Enter a valid DNS probe domain, not an IP or URL.',
       );
+    }
   }
 
   Future<List<DnsScanResult>> scanRange({
@@ -291,23 +318,58 @@ class DnsScannerService {
     String domain = 'google.com',
     int parallel = 100,
     int chunkSize = 128,
+    int port = 53,
+    int timeoutMs = 2500,
     void Function(int, int)? onProgress,
     void Function(List<DnsScanResult>)? onFound,
     bool Function()? isCancelled,
+    bool expandNearby = false,
   }) async {
     _validateDomain(domain);
+    if (port < 1 || port > 65535) {
+      throw const FormatException('Port must be between 1 and 65535.');
+    }
+    if (timeoutMs < 100 || timeoutMs > 10000) {
+      throw const FormatException('Timeout must be between 100 and 10000 ms.');
+    }
     final all = expandTargets(targets), found = <DnsScanResult>[];
     final wave = chunkSize.clamp(1, maxParallel),
         p = parallel.clamp(1, maxParallel);
+    final seen = all.toSet();
+    final expandedSubnets = <int>{};
     var scanned = 0;
-    for (var i = 0; i < all.length; i += wave) {
+    // Advance by the actual wave length: a successful short wave may enqueue
+    // neighbours, and incrementing by the maximum wave size would skip them.
+    while (scanned < all.length) {
       if (isCancelled?.call() == true) break;
-      final part = all.sublist(i, (i + wave).clamp(0, all.length));
-      final res = await _scanChunk(part, domain, p);
+      final part = all.sublist(scanned, (scanned + wave).clamp(0, all.length));
+      final res = await _scanChunk(
+        part,
+        domain,
+        p,
+        port: port,
+        timeoutMs: timeoutMs,
+      );
       if (isCancelled?.call() == true) break;
-      final good = res.where((r) => r.reachable).toList();
+      final good = res
+          .where((r) => r.reachable && part.contains(r.ip))
+          .toList();
       found.addAll(good);
       if (good.isNotEmpty) onFound?.call(good);
+      if (expandNearby && isCancelled?.call() != true) {
+        for (final result in good.where((r) => r.isCandidate)) {
+          final network = parseIp(result.ip)! & 0xffffff00;
+          if (!expandedSubnets.add(network)) continue;
+          for (
+            var offset = 0;
+            offset < 256 && all.length < maxTargets;
+            offset++
+          ) {
+            final ip = _intToIp(network + offset);
+            if (seen.add(ip)) all.add(ip);
+          }
+        }
+      }
       scanned += part.length;
       onProgress?.call(scanned, all.length);
     }

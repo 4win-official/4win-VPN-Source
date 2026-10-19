@@ -16,16 +16,19 @@ import kotlin.math.min
 
 /** Strict, protocol-only DNS capability scanner. It does not authenticate a tunnel. */
 object DnsResolverScanner {
-    private const val TIMEOUT_MS = 2500
+    private const val DEFAULT_TIMEOUT_MS = 2500
+    private const val MAX_TIMEOUT_MS = 10000
     private const val MAX_PACKET = 4096
     private const val MAX_PARALLEL = 64
-    private const val MAX_INPUT = 500
+    private const val MAX_INPUT = 200000
     private const val EDNS_PAYLOAD = 1232
     private const val TXT = 16
     private const val A = 1
     private val random = SecureRandom()
 
-    fun scan(ips: List<String>, domain: String, parallel: Int): String {
+    fun scan(ips: List<String>, domain: String, parallel: Int, port: Int = 53, timeoutMs: Int = DEFAULT_TIMEOUT_MS): String {
+        require(port in 1..65535)
+        val timeout = timeoutMs.coerceIn(100, MAX_TIMEOUT_MS)
         val targets = ips.asSequence().map { it.trim() }.filter { isNumericIp(it) }
             .distinct().take(MAX_INPUT).toList()
         val executor = Executors.newFixedThreadPool(parallel.coerceIn(1, MAX_PARALLEL))
@@ -33,7 +36,7 @@ object DnsResolverScanner {
         val out = JSONArray()
         try {
             for (ip in targets) {
-                pending.add(ip to executor.submit<String> { scanEndpoint(ip, domain, 53, 53) })
+                pending.add(ip to executor.submit<String> { scanEndpoint(ip, domain, port, port, timeout) })
                 if (pending.size >= parallel.coerceIn(1, MAX_PARALLEL)) { val first = pending.removeFirst(); out.put(JSONObject(getSafely(first.second, first.first))) }
             }
             while (pending.isNotEmpty()) { val first = pending.removeFirst(); out.put(JSONObject(getSafely(first.second, first.first))) }
@@ -45,7 +48,7 @@ object DnsResolverScanner {
     }
 
     /** Internal fixture hook: probes the supplied UDP and TCP ports without DNS resolution. */
-    internal fun scanEndpoint(ip: String, domain: String, udpPort: Int, tcpPort: Int): String {
+    internal fun scanEndpoint(ip: String, domain: String, udpPort: Int, tcpPort: Int, timeoutMs: Int = DEFAULT_TIMEOUT_MS): String {
         val base = JSONObject().put("ip", ip).put("udpMs", -1).put("tcpMs", -1)
             .put("reachable", false).put("txtSupported", false).put("responseBytes", 0)
             .put("ednsSupported", false).put("ednsPayload", EDNS_PAYLOAD)
@@ -54,14 +57,14 @@ object DnsResolverScanner {
         val address = try { numericAddress(ip) } catch (_: Exception) { return base.toString() }
         var udp: Reply? = null
         var tcp: Reply? = null
-        try { udp = queryUdp(address, udpPort, domain, TXT) } catch (_: Exception) { }
-        try { tcp = queryTcp(address, tcpPort, domain, TXT) } catch (_: Exception) { }
+        try { udp = queryUdp(address, udpPort, domain, TXT, timeoutMs) } catch (_: Exception) { }
+        try { tcp = queryTcp(address, tcpPort, domain, TXT, timeoutMs) } catch (_: Exception) { }
         val primary = udp ?: tcp
         var nx: Reply? = null
         var udpNx: Reply? = null
         // NXDOMAIN must use an actually available transport; UDP is preferred.
-        if (udp != null) try { udpNx = queryUdp(address, udpPort, randomLabel(), A); nx = udpNx } catch (_: Exception) { }
-        if (nx == null && tcp != null) try { nx = queryTcp(address, tcpPort, randomLabel(), A) } catch (_: Exception) { }
+        if (udp != null) try { udpNx = queryUdp(address, udpPort, randomLabel(), A, timeoutMs); nx = udpNx } catch (_: Exception) { }
+        if (nx == null && tcp != null) try { nx = queryTcp(address, tcpPort, randomLabel(), A, timeoutMs) } catch (_: Exception) { }
         val edns = (udp?.edns == true) || (tcp?.edns == true) || (nx?.edns == true)
         val safe = nx?.rcode == 3
         val hijacked = nx?.let { it.rcode != 3 } ?: false
@@ -86,10 +89,10 @@ object DnsResolverScanner {
     }
 
     private data class Reply(val ms: Int, val bytes: Int, val txt: Boolean, val edns: Boolean, val rcode: Int, val payload: Int)
-    private fun queryUdp(address: InetAddress, port: Int, name: String, type: Int): Reply {
+    private fun queryUdp(address: InetAddress, port: Int, name: String, type: Int, timeoutMs: Int): Reply {
         val id = random.nextInt(65536); val packet = query(id, name, type)
         DatagramSocket().use { socket ->
-            socket.soTimeout = TIMEOUT_MS
+            socket.soTimeout = timeoutMs
             socket.connect(InetSocketAddress(address, port)) // fixes source peer and avoids unrelated replies
             val sent = System.nanoTime(); socket.send(DatagramPacket(packet, packet.size))
             val buf = ByteArray(MAX_PACKET); val received = DatagramPacket(buf, buf.size); socket.receive(received)
@@ -99,13 +102,13 @@ object DnsResolverScanner {
         }
     }
 
-    private fun queryTcp(address: InetAddress, port: Int, name: String, type: Int): Reply {
+    private fun queryTcp(address: InetAddress, port: Int, name: String, type: Int, timeoutMs: Int): Reply {
         val id = random.nextInt(65536); val packet = query(id, name, type)
         Socket().use { socket ->
-            socket.soTimeout = TIMEOUT_MS; socket.connect(InetSocketAddress(address, port), TIMEOUT_MS)
+            socket.soTimeout = timeoutMs; socket.connect(InetSocketAddress(address, port), timeoutMs)
             val sent = System.nanoTime(); val output = socket.getOutputStream()
             output.write(packet.size ushr 8); output.write(packet.size); output.write(packet); output.flush()
-            val input = DataInputStream(DeadlineInputStream(socket, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TIMEOUT_MS.toLong()))); val length = input.readUnsignedShort()
+            val input = DataInputStream(DeadlineInputStream(socket, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.toLong()))); val length = input.readUnsignedShort()
             require(length in 12..MAX_PACKET); val answer = ByteArray(length); input.readFully(answer)
             val parsed = parse(answer, id, name, type, false)
             return Reply(elapsed(sent), length, parsed.txt, parsed.edns, parsed.rcode, parsed.payload)
@@ -201,7 +204,7 @@ object DnsResolverScanner {
     private fun u32(b: ByteArray, p: Int) = ((b[p].toLong() and 255) shl 24) or ((b[p + 1].toLong() and 255) shl 16) or ((b[p + 2].toLong() and 255) shl 8) or (b[p + 3].toLong() and 255)
     private fun randomLabel() = "${java.lang.Long.toUnsignedString(random.nextLong(), 16)}-${java.lang.Long.toUnsignedString(random.nextLong(), 16)}.invalid"
     private fun isNumericIp(s: String): Boolean {
-        if (s.contains(':')) return s.matches(Regex("[0-9a-fA-F:]+")) && runCatching { InetAddress.getByName(s) is java.net.Inet6Address }.getOrDefault(false)
+        if (s.contains(':')) return false // IPv4-only resolver discovery.
         val p = s.split('.')
         return p.size == 4 && p.all { it.matches(Regex("0|[1-9][0-9]{0,2}")) && (it.toIntOrNull() ?: 256) <= 255 }
     }

@@ -266,10 +266,16 @@ class MainActivity: FlutterActivity() {
                     // This discovers candidates, never authenticated tunnel readiness.
                     val ips = call.argument<List<String>>("ips") ?: emptyList()
                     val domain = call.argument<String>("domain") ?: "google.com"
-                    val parallel = call.argument<Int>("parallel") ?: 100
+                    val parallel = (call.argument<Int>("parallel") ?: 64).coerceIn(1, 64)
+                    val port = call.argument<Int>("port") ?: 53
+                    val timeoutMs = call.argument<Int>("timeoutMs") ?: 2500
                     Thread {
-                        val json = scanDnsServers(ips, domain, parallel)
-                        runOnUiThread { result.success(json) }
+                        try {
+                            val json = scanDnsServers(ips, domain, parallel, port, timeoutMs)
+                            runOnUiThread { result.success(json) }
+                        } catch (_: Exception) {
+                            runOnUiThread { result.error("DNS_SCAN", "DNS scan failed. Check the scan configuration.", null) }
+                        }
                     }.start()
                 }
                 "setSstpMtu" -> {
@@ -943,8 +949,8 @@ class MainActivity: FlutterActivity() {
     }
 
     /** Independent TXT/EDNS/NXDOMAIN capability scanner, not tunnel readiness. */
-    private fun scanDnsServers(ips: List<String>, domain: String, parallel: Int = 100): String =
-        com.forwin.vpn.dnsscan.DnsResolverScanner.scan(ips, domain, parallel)
+    private fun scanDnsServers(ips: List<String>, domain: String, parallel: Int = 64, port: Int = 53, timeoutMs: Int = 2500): String =
+        com.forwin.vpn.dnsscan.DnsResolverScanner.scan(ips, domain, parallel, port, timeoutMs)
 
     /** ساخت یک بسته‌ی استاندارد DNS query (نوع A) برای دامنه‌ی داده‌شده */
     private fun buildDnsQuery(domain: String): ByteArray {

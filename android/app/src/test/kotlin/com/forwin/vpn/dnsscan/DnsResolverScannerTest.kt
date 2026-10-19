@@ -88,6 +88,22 @@ class DnsResolverScannerTest {
             assertFalse(result.getBoolean("tunnelVerified"))
         }
     }
+    @Test fun publicScannerApiUsesConfiguredPortAndTimeout() {
+        Fixture(false,::reply).use { f ->
+            val results = org.json.JSONArray(DnsResolverScanner.scan(
+                listOf("127.0.0.1"), "example.com", 1, f.udp.localPort, 200))
+            assertEquals(1, results.length())
+            assertTrue(results.getJSONObject(0).getBoolean("tunnelCandidate"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DnsResolverScanner.scan(listOf("127.0.0.1"), "example.com", 1, 0, 200)
+        }
+    }
+    @Test fun ipv6ScanTargetsAreNeverScheduled() {
+        val results = org.json.JSONArray(DnsResolverScanner.scan(
+            listOf("::1", "2001:db8::1"), "example.com", 1, 53, 100))
+        assertEquals(0, results.length())
+    }
     @Test fun nxDomainHijackingNeverQualifiesAsTunnelCandidate() {
         Fixture(true,::reply).use { f ->
             val result=JSONObject(DnsResolverScanner.scanEndpoint("127.0.0.1","example.com",f.udp.localPort,f.tcp.localPort))

@@ -62,7 +62,7 @@ void main() {
     expect(SlowDnsConfig.isValidResolverEndpoint('1.1.1.1:53'), isFalse);
     expect(
       SlowDnsConfig.isValidResolverEndpoint('2001:4860:4860::8888'),
-      isTrue,
+      isFalse,
     );
   });
 
@@ -90,4 +90,35 @@ void main() {
     final restored = SlowDnsConfig.fromJson(original.toJson());
     expect(restored.toJson(), original.toJson());
   });
+
+  test(
+    'profile resolver input separates IPv4 host and port and rejects IPv6',
+    () {
+      expect(SlowDnsConfig.parseResolverAddress('1.1.1.1:5353'), (
+        host: '1.1.1.1',
+        port: 5353,
+      ));
+      expect(
+        SlowDnsConfig.parseResolverAddress('dns.example', defaultPort: 853),
+        (host: 'dns.example', port: 853),
+      );
+      expect(SlowDnsConfig.parseResolverAddress('[2001:db8::1]:853'), isNull);
+      expect(SlowDnsConfig.parseResolverAddress('2001:db8::1'), isNull);
+      for (final invalid in [
+        '1.1.1.1:0',
+        'dns.example:65536',
+        'dns.example:',
+        'https://dns.example',
+        '[1.1.1.1]:53',
+        'dns.example:-1',
+        '1.1.1.1:53:54',
+      ]) {
+        expect(
+          SlowDnsConfig.parseResolverAddress(invalid),
+          isNull,
+          reason: invalid,
+        );
+      }
+    },
+  );
 }

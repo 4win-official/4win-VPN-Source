@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 
 class DnsVpnConnection {
   static const platform = MethodChannel('com.forwin.vpn/dns');
-  
+
   /// Start DNS VPN with specified DNS servers
   static Future<bool> connect({
     required String primaryDns,
@@ -22,7 +22,7 @@ class DnsVpnConnection {
       return false;
     }
   }
-  
+
   /// Stop DNS VPN
   static Future<bool> disconnect() async {
     try {
@@ -35,7 +35,7 @@ class DnsVpnConnection {
       return false;
     }
   }
-  
+
   /// Check if DNS VPN permission is granted
   static Future<bool> requestPermission() async {
     try {
@@ -71,13 +71,20 @@ class DnsVpnConnection {
   /// UDP DNS query + TCP/53 probe (concurrently). Returns the raw JSON string
   /// the native side produces (array of {ip, udpMs, tcpMs, reachable}), or
   /// null on failure. [domain] is the name queried during the probe.
-  static Future<String?> scanDns(List<String> ips,
-      {String domain = 'google.com', int parallel = 100}) async {
+  static Future<String?> scanDns(
+    List<String> ips, {
+    String domain = 'google.com',
+    int parallel = 100,
+    int port = 53,
+    int timeoutMs = 2500,
+  }) async {
     try {
       final result = await platform.invokeMethod('scanDns', {
         'ips': ips,
         'domain': domain,
         'parallel': parallel,
+        'port': port,
+        'timeoutMs': timeoutMs,
       });
       return result is String ? result : null;
     } catch (e) {
