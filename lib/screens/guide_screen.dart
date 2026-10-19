@@ -187,7 +187,7 @@ class GuideScreen extends StatelessWidget {
               description:
                   'Tap the palette icon at the top to open VPN Themes. Switch '
                   'between the day / night toggle and pick a theme: Liquid Glass, '
-                  'Pixel, Pink, and the Seasonal group (Rain, Snow, Summer, '
+                  'Pixel, Pink, and the Seasonal group (Rain, Snow, Day & Night, '
                   'Autumn). Some themes use a fixed mode. The System Default '
                   'theme has its own gear ⚙ where you can set a custom '
                   'background image for day and for night.',

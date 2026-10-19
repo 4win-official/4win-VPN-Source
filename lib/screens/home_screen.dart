@@ -14,7 +14,7 @@ import '../widgets/pixel_effect.dart';
 import '../widgets/rain_animation.dart';
 import '../widgets/rain_button_surface.dart';
 import '../widgets/autumn_animation.dart';
-import '../widgets/summer_animation.dart';
+import '../widgets/day_night_animation.dart';
 import '../widgets/heart_burst.dart';
 import '../widgets/protocol_selector_dialog.dart';
 import '../widgets/rainbow_heart_button.dart';
@@ -210,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isPixelTheme = themeProvider.selectedTheme == AppTheme.pixel;
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
     final isRainTheme = themeProvider.selectedTheme == AppTheme.rain;
-    final isSummerTheme = themeProvider.selectedTheme == AppTheme.summer;
+    final isDayNightTheme = themeProvider.selectedTheme == AppTheme.summer;
     final isAutumnTheme = themeProvider.selectedTheme == AppTheme.autumn;
     final isLiquidGlassTheme =
         themeProvider.selectedTheme == AppTheme.liquidGlass;
@@ -232,11 +232,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       textColor = isDark
           ? const Color(0xFFFFB6D9)
           : const Color(0xFFFF1493);
-    } else if (isSummerTheme) {
-      // تابستانی همیشه لایت است: آسمان آبی روشن با ته‌رنگ گرم آفتابی
-      bgColor = const Color(0xFFFFFDF5);
-      iconColor = const Color(0xFFEF6C00); // نارنجی گرم
-      textColor = const Color(0xFFE65100);
+    } else if (isDayNightTheme) {
+      bgColor = isDark ? const Color(0xFF080F25) : const Color(0xFFFFFDF5);
+      iconColor = isDark ? const Color(0xFFB8CFFF) : const Color(0xFFAD5100);
+      textColor = isDark ? const Color(0xFFE5EDFF) : const Color(0xFF8A4000);
     } else if (isAutumnTheme) {
       bgColor = isDark
           ? const Color(0xFF20140B) // قهوه‌ای خیلی تیره
@@ -455,10 +454,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     child: RepaintBoundary(child: PixelEffect()),
                   ),
 
-                // انیمیشن خورشید تابستانی (فقط لایت مود)
-                if (isSummerTheme)
+                // Adaptive sky: golden sun in light mode, moon and stars in dark mode.
+                if (isDayNightTheme)
                   const Positioned.fill(
-                    child: RepaintBoundary(child: SummerAnimation()),
+                    child: RepaintBoundary(child: DayNightAnimation()),
                   ),
 
                 // انیمیشن برگ‌ریزان پاییزی

@@ -7,7 +7,7 @@ enum AppTheme {
   pixel,       // تم پیکسلی
   pink,        // تم صورتی کیوت
   rain,        // تم بارانی (فصلی)
-  summer,      // تم تابستانی - خورشید نور می‌زند (فقط لایت مود)
+  summer,      // Day & Night; keep this index for existing saved selections.
   autumn,      // تم پاییزی - برگ‌ها می‌ریزند (فصلی)
   liquidGlass, // تم لیکویید گلس (دارک + لایت)
 }
@@ -74,13 +74,8 @@ class ThemeProvider with ChangeNotifier {
   }
 
   Future<void> toggleTheme() async {
-    // تم‌هایی که حالت ثابت دارند و دکمه‌ی روز/شب برایشان غیرفعال است:
-    //   • برفی و بارانی: همیشه دارک.
-    //   • تابستانی: همیشه لایت (خورشید نور می‌زند، دارک مود ندارد).
-    // بقیه‌ی تم‌ها (صورتی، پیکسلی، پاییزی، لیکویید گلس، دیفالت) روز/شب دارند.
-    if (_selectedTheme == AppTheme.snow ||
-        _selectedTheme == AppTheme.rain ||
-        _selectedTheme == AppTheme.summer) {
+    // Only the weather themes have a fixed brightness.
+    if (isModeLocked) {
       return;
     }
 
@@ -93,8 +88,7 @@ class ThemeProvider with ChangeNotifier {
   /// Whether the day/night toggle is locked for the currently-selected theme.
   bool get isModeLocked =>
       _selectedTheme == AppTheme.snow ||
-      _selectedTheme == AppTheme.rain ||
-      _selectedTheme == AppTheme.summer;
+      _selectedTheme == AppTheme.rain;
 
   Future<void> setTheme(AppTheme theme) async {
     _selectedTheme = theme;
@@ -116,14 +110,7 @@ class ThemeProvider with ChangeNotifier {
       await prefs.setBool(_darkModeKey, true);
     }
 
-    // تم تابستانی: همیشه لایت مود (خورشید نور می‌زند، دارک مود ندارد)
-    if (theme == AppTheme.summer) {
-      _isDarkMode = false;
-      await prefs.setBool(_darkModeKey, false);
-    }
-
-    // تم پاییزی و لیکویید گلس: هر دو حالت روز و شب را دارند و حالت فعلی
-    // کاربر حفظ می‌شود.
+    // Day & Night and other adaptive themes preserve the current brightness.
 
     notifyListeners();
   }
@@ -139,7 +126,9 @@ class ThemeProvider with ChangeNotifier {
       case AppTheme.snow:
         return const Color(0xFF4FC3F7);
       case AppTheme.summer:
-        return const Color(0xFFFF9800);
+        return _isDarkMode
+            ? const Color(0xFF9AB8FF)
+            : const Color(0xFFFF9800);
       case AppTheme.autumn:
         return const Color(0xFFD35400);
       case AppTheme.liquidGlass:

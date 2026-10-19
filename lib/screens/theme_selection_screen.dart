@@ -173,7 +173,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                 // ── Seasonal Themes group ──────────────────────────────────
                 _GroupHeader(
                   title: 'Seasonal Themes',
-                  subtitle: 'Rain · Snow · Summer · Autumn',
+                  subtitle: 'Rain · Snow · Day & Night · Autumn',
                   icon: Icons.calendar_today,
                   isDark: isDark,
                 ),
@@ -317,10 +317,10 @@ class _SeasonalGroup extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _ThemeCard(
-            title: 'Summer Theme ☀️',
-            description: 'Bright shining sun (Light mode only)',
-            icon: Icons.wb_sunny,
-            color: const Color(0xFFFF9800),
+            title: 'Day & Night',
+            description: 'Golden sun by day, moonlit sky by night',
+            icon: isDark ? Icons.nightlight_round : Icons.wb_sunny,
+            color: isDark ? const Color(0xFF9AB8FF) : const Color(0xFFFF9800),
             warningColor: const Color(0xFFFFB300),
             isSelected: themeProvider.selectedTheme == AppTheme.summer,
             onTap: () => themeProvider.setTheme(AppTheme.summer),
