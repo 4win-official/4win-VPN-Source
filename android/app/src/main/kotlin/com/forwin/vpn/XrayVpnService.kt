@@ -300,7 +300,7 @@ class XrayVpnService : VpnService() {
 
         val isWarp = configJson?.contains("__APP_FILES__") == true
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(if (isWarp) "🔒 WARP Connected" else "🔒 Xray Connected")
+            .setContentTitle(VpnNotificationLabels.xrayTitle(mixMode, isWarp))
             .setContentText("Tap to open • Tap disconnect to stop")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)

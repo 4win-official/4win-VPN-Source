@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.forwin.vpn.R
+import com.forwin.vpn.VpnNotificationLabels
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
@@ -30,10 +31,10 @@ open class MixWorkerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val channel = NotificationChannel(CHANNEL, "Mix engine", NotificationManager.IMPORTANCE_LOW)
+        val channel = NotificationChannel(CHANNEL, VpnNotificationLabels.MIX_PROTOCOL, NotificationManager.IMPORTANCE_LOW)
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         startForeground(NOTIFICATION + (javaClass.simpleName.removePrefix("MixWorker").toIntOrNull() ?: 0), NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.mipmap.ic_launcher).setContentTitle("Mix engine")
+            .setSmallIcon(R.mipmap.ic_launcher).setContentTitle(VpnNotificationLabels.MIX_PROTOCOL)
             .setContentText("Preparing an isolated tunnel stage").setOngoing(true).build())
     }
 

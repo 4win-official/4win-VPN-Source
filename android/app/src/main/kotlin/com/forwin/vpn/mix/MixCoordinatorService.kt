@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import com.forwin.vpn.R
+import com.forwin.vpn.VpnNotificationLabels
 import go.Seq
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
@@ -124,7 +125,7 @@ class MixCoordinatorService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        val channel = NotificationChannel(CHANNEL, "Mix VPN", NotificationManager.IMPORTANCE_LOW)
+        val channel = NotificationChannel(CHANNEL, VpnNotificationLabels.MIX_PROTOCOL, NotificationManager.IMPORTANCE_LOW)
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         showNotification("Preparing the complete chain")
         val filter = IntentFilter(MixWorkerService.ACTION_STATUS)
@@ -380,7 +381,7 @@ class MixCoordinatorService : VpnService() {
             Intent(this, MixCoordinatorService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         startForeground(NOTIFICATION, NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.mipmap.ic_launcher).setContentTitle("Mix VPN").setContentText(text)
+            .setSmallIcon(R.mipmap.ic_launcher).setContentTitle(VpnNotificationLabels.MIX_PROTOCOL).setContentText(text)
             .setOngoing(true).addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", stop).build())
     }
 
