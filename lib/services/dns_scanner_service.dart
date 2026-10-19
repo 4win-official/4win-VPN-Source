@@ -5,7 +5,11 @@ import 'dns_vpn_connection.dart';
 class DnsScanResult {
   final String ip;
   final int udpMs, tcpMs, responseBytes, ednsPayload;
-  final bool reachable, ednsSupported, txtSupported, tunnelVerified;
+  final bool reachable,
+      ednsSupported,
+      txtSupported,
+      tunnelVerified,
+      targetResolved;
   final bool nxdomainSafe, nxdomainHijacked, tunnelCandidate;
   final String? name;
   const DnsScanResult({
@@ -18,6 +22,7 @@ class DnsScanResult {
     this.txtSupported = false,
     this.responseBytes = 0,
     this.tunnelVerified = false,
+    this.targetResolved = false,
     this.nxdomainSafe = false,
     this.nxdomainHijacked = false,
     this.tunnelCandidate = false,
@@ -36,6 +41,7 @@ class DnsScanResult {
       udpOk &&
       ednsSupported &&
       nxdomainSafe &&
+      targetResolved &&
       !nxdomainHijacked;
   factory DnsScanResult.fromJson(Map<String, dynamic> j, {String? name}) {
     final ip = j['ip'];
@@ -52,6 +58,7 @@ class DnsScanResult {
       txtSupported: j['txtSupported'] == true,
       responseBytes: (j['responseBytes'] as num?)?.toInt() ?? 0,
       tunnelVerified: j['tunnelVerified'] == true,
+      targetResolved: j['targetResolved'] == true,
       nxdomainSafe: j['nxdomainSafe'] == true,
       nxdomainHijacked: j['nxdomainHijacked'] == true,
       tunnelCandidate: j['tunnelCandidate'] == true,
@@ -121,12 +128,12 @@ class DnsScannerService {
   Future<List<DnsScanResult>> scan({
     List<String>? servers,
     String domain = 'google.com',
-    int parallel = 100,
+    int parallel = 64,
     int port = 53,
     int timeoutMs = 2500,
   }) async {
     final targets = expandTargets(servers ?? defaultServers);
-    _validateDomain(domain);
+    final normalizedTarget = validateTestTarget(domain);
     if (port < 1 || port > 65535) {
       throw const FormatException('Port must be between 1 and 65535.');
     }
@@ -135,7 +142,7 @@ class DnsScannerService {
     }
     return _scanChunk(
       targets,
-      domain,
+      normalizedTarget,
       parallel,
       port: port,
       timeoutMs: timeoutMs,
@@ -300,23 +307,48 @@ class DnsScannerService {
     return out.toList();
   }
 
-  static void _validateDomain(String domain) {
-    final d = domain.trim();
+  /// Validates and normalizes a DNS test target. IPv4 targets are used for
+  /// PTR probes; hostnames are used for A probes.
+  static String validateTestTarget(String value) {
+    final d = value.trim().toLowerCase();
+    if (parseIp(d) != null) return d;
     if (d.isEmpty ||
         d.length > 253 ||
-        d.contains(RegExp(r'[^A-Za-z0-9.\-_]')) ||
+        d.contains(':') ||
+        d.contains('/') ||
+        d.contains(RegExp(r'[^a-z0-9.-]')) ||
         d.startsWith('.') ||
-        d.endsWith('.')) {
+        d.endsWith('.') ||
+        d.startsWith('-') ||
+        d.endsWith('-')) {
       throw const FormatException(
-        'Enter a valid DNS probe domain, not an IP or URL.',
+        'Enter a valid DNS probe domain or IPv4 address, not a URL or IPv6 address.',
       );
     }
+    final labels = d.split('.');
+    if (RegExp(r'^[0-9.]+$').hasMatch(d)) {
+      throw const FormatException(
+        'Enter a valid IPv4 address or DNS probe domain.',
+      );
+    }
+    if (labels.any(
+      (label) =>
+          label.isEmpty ||
+          label.length > 63 ||
+          label.startsWith('-') ||
+          label.endsWith('-'),
+    )) {
+      throw const FormatException('Enter a valid DNS probe domain.');
+    }
+    return d;
   }
+
+  static bool _targetIsIpv4(String value) => parseIp(value) != null;
 
   Future<List<DnsScanResult>> scanRange({
     required List<String> targets,
     String domain = 'google.com',
-    int parallel = 100,
+    int parallel = 64,
     int chunkSize = 128,
     int port = 53,
     int timeoutMs = 2500,
@@ -325,7 +357,7 @@ class DnsScannerService {
     bool Function()? isCancelled,
     bool expandNearby = false,
   }) async {
-    _validateDomain(domain);
+    final normalizedTarget = validateTestTarget(domain);
     if (port < 1 || port > 65535) {
       throw const FormatException('Port must be between 1 and 65535.');
     }
@@ -345,7 +377,7 @@ class DnsScannerService {
       final part = all.sublist(scanned, (scanned + wave).clamp(0, all.length));
       final res = await _scanChunk(
         part,
-        domain,
+        normalizedTarget,
         p,
         port: port,
         timeoutMs: timeoutMs,
@@ -383,5 +415,75 @@ class DnsScannerService {
     return (a.bestMs < 0 ? 1 << 30 : a.bestMs).compareTo(
       b.bestMs < 0 ? 1 << 30 : b.bestMs,
     );
+  }
+}
+
+class DnsScanExport {
+  static List<DnsScanResult> candidates(Iterable<DnsScanResult> results) {
+    final byIp = <String, DnsScanResult>{};
+    for (final result in results) {
+      if (!result.isCandidate) continue;
+      final prior = byIp[result.ip];
+      if (prior == null || _sort(prior, result) > 0) byIp[result.ip] = result;
+    }
+    final out = byIp.values.toList()..sort(_sort);
+    return out;
+  }
+
+  static String toText(Iterable<DnsScanResult> results, {required int port}) {
+    if (port < 1 || port > 65535) {
+      throw const FormatException('Port must be between 1 and 65535.');
+    }
+    final items = candidates(results).map((r) => '${r.ip}:$port').toList();
+    return items.isEmpty ? '' : '${items.join('\n')}\n';
+  }
+
+  static String toJson(
+    Iterable<DnsScanResult> results, {
+    required String testTarget,
+    required int port,
+    required int timeoutMs,
+    required int workers,
+    bool cancelled = false,
+  }) {
+    final target = DnsScannerService.validateTestTarget(testTarget);
+    if (port < 1 || port > 65535) {
+      throw const FormatException('Port must be between 1 and 65535.');
+    }
+    final items = candidates(results)
+        .map(
+          (r) => <String, dynamic>{
+            'ip': r.ip,
+            'port': port,
+            'udpMs': r.udpMs,
+            'tcpMs': r.tcpMs,
+            'ednsSupported': r.ednsSupported,
+            'ednsPayload': r.ednsPayload,
+            'txtSupported': r.txtSupported,
+            'nxdomainSafe': r.nxdomainSafe,
+            'targetResolved': r.targetResolved,
+            'tunnelVerified': false,
+            'status': 'candidate',
+          },
+        )
+        .toList();
+    return const JsonEncoder.withIndent('  ').convert({
+      'version': 1,
+      'testTarget': target,
+      'testMode': DnsScannerService._targetIsIpv4(target) ? 'PTR' : 'A',
+      'port': port,
+      'timeoutMs': timeoutMs,
+      'workers': workers,
+      'cancelled': cancelled,
+      'tunnelVerified': false,
+      'resolvers': items,
+    });
+  }
+
+  static int _sort(DnsScanResult a, DnsScanResult b) {
+    final am = a.bestMs < 0 ? 1 << 30 : a.bestMs;
+    final bm = b.bestMs < 0 ? 1 << 30 : b.bestMs;
+    final c = am.compareTo(bm);
+    return c != 0 ? c : a.ip.compareTo(b.ip);
   }
 }

@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/dns_scanner_service.dart';
@@ -37,6 +39,9 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
   String? _scanScope;
   bool _scanning = false, _cancel = false, _shuffle = false, _nearby = false;
   int _resultPort = 53, _tested = 0, _total = 0;
+  int _resultTimeout = 2500, _resultWorkers = 64;
+  String _resultTarget = 'google.com';
+  bool _exporting = false;
   double _progress = 0;
   String? _sourceLabel, _error;
   List<DnsScanResult> _results = [];
@@ -169,6 +174,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
   Future<void> _start() async {
     if (_scanning) return;
     try {
+      final target = DnsScannerService.validateTestTarget(_domain.text);
       var targets = _targets();
       final scope = _mode == 1
           ? 'Random public IPv4 sample: ${targets.length} targets; not an exhaustive Internet scan.'
@@ -193,11 +199,14 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         _tested = 0;
         _total = targets.length;
         _resultPort = port;
+        _resultTarget = target;
+        _resultTimeout = timeout;
+        _resultWorkers = workers;
         _progress = 0;
       });
       final found = await _scanner.scanRange(
         targets: targets,
-        domain: _domain.text.trim(),
+        domain: target,
         parallel: workers,
         chunkSize: workers,
         port: port,
@@ -245,6 +254,100 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
   }
 
   String _latency(int value) => value < 0 ? '—' : '$value ms';
+
+  Future<void> _copyCandidates() async {
+    try {
+      final text = DnsScanExport.toText(_results, port: _resultPort);
+      await Clipboard.setData(ClipboardData(text: text));
+      _message('Copied candidate resolver endpoints.');
+    } catch (_) {
+      _message('Could not copy candidate resolvers.');
+    }
+  }
+
+  Future<void> _exportCandidates(String extension) async {
+    if (_exporting) return;
+    final content = extension == 'json'
+        ? DnsScanExport.toJson(
+            _results,
+            testTarget: _resultTarget,
+            port: _resultPort,
+            timeoutMs: _resultTimeout,
+            workers: _resultWorkers,
+            cancelled: _cancel,
+          )
+        : DnsScanExport.toText(_results, port: _resultPort);
+    setState(() => _exporting = true);
+    try {
+      final bytes = Uint8List.fromList(utf8.encode(content));
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Export candidate resolvers',
+        fileName: 'candidate-resolvers.$extension',
+        type: FileType.custom,
+        allowedExtensions: [extension],
+        bytes: bytes,
+      );
+      if (path == null) return;
+      // Mobile/web save the bytes; desktop pickers only return a destination.
+      if (!kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.linux ||
+              defaultTargetPlatform == TargetPlatform.macOS ||
+              defaultTargetPlatform == TargetPlatform.windows)) {
+        await File(path).writeAsBytes(bytes, flush: true);
+      }
+      _message('Exported candidate resolvers as ${extension.toUpperCase()}.');
+    } catch (_) {
+      _message('Could not export candidate resolvers. Please try again.');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Widget _resultActions() {
+    final count = DnsScanExport.candidates(_results).length;
+    final enabled = count > 0 && !_scanning && !_exporting;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Candidate resolvers ($count)',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const Text(
+          'Candidates are not verified tunnels or proof that a website opens. '
+          'Copy and exports include only candidates, one IPv4:port per TXT line.',
+        ),
+        if (_total > 0)
+          Text(
+            'Test: $_resultTarget · ${DnsScannerService.parseIp(_resultTarget) == null ? 'A lookup' : 'reverse PTR lookup'}'
+            ' · Port $_resultPort · Timeout $_resultTimeout ms per probe'
+            ' · $_resultWorkers workers'
+            '${_cancel ? ' · Cancelled (partial results)' : ''}',
+          ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            OutlinedButton.icon(
+              onPressed: enabled ? _copyCandidates : null,
+              icon: const Icon(Icons.copy_all),
+              label: const Text('Copy all candidates'),
+            ),
+            OutlinedButton.icon(
+              onPressed: enabled ? () => _exportCandidates('txt') : null,
+              icon: const Icon(Icons.download),
+              label: const Text('Export TXT'),
+            ),
+            OutlinedButton.icon(
+              onPressed: enabled ? () => _exportCandidates('json') : null,
+              icon: const Icon(Icons.data_object),
+              label: const Text('Export JSON'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   String _operatorScope() {
     final operator = OperatorIpv4Catalog.operators.firstWhere(
@@ -420,8 +523,9 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         width: 150,
         child: TextField(
           controller: _domain,
+          enabled: !_scanning,
           decoration: const InputDecoration(
-            labelText: 'Probe domain',
+            labelText: 'Test domain or IPv4',
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -431,6 +535,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         width: 90,
         child: TextField(
           controller: _port,
+          enabled: !_scanning,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             labelText: 'Port',
@@ -443,6 +548,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         width: 120,
         child: TextField(
           controller: _timeout,
+          enabled: !_scanning,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             labelText: 'Timeout ms',
@@ -455,6 +561,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         width: 125,
         child: TextField(
           controller: _parallel,
+          enabled: !_scanning,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             labelText: 'Workers (1–64)',
@@ -515,7 +622,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
                   ),
                   Text(
                     safe
-                        ? 'Candidate · UDP port $_resultPort · Tap to use'
+                        ? 'Candidate resolver · UDP port $_resultPort · Tap to use'
                         : 'Not selectable · DNS capability checks incomplete or unsafe',
                   ),
                 ],
@@ -572,9 +679,15 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           ),
         ),
         const Divider(),
-        _sourceFields(),
+        AbsorbPointer(absorbing: _scanning, child: _sourceFields()),
         const SizedBox(height: 12),
         _fieldRow(),
+        const SizedBox(height: 8),
+        const Text(
+          'Domains use an A lookup; IPv4 targets use a reverse PTR lookup. '
+          'An IP without a PTR record will not qualify. No ping or website test is used. '
+          'Timeout applies to each DNS probe, not the whole scan.',
+        ),
         CheckboxListTile(
           value: _shuffle,
           onChanged: _scanning
@@ -621,6 +734,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           if (_scanScope != null) Text(_scanScope!),
         ],
         const SizedBox(height: 8),
+        _resultActions(),
         _resultsView(),
       ],
     ),

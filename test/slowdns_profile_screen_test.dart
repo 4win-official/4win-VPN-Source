@@ -113,6 +113,7 @@ void main() {
             'ednsSupported': true,
             'nxdomainSafe': true,
             'tunnelCandidate': true,
+            'targetResolved': true,
           },
         ]);
       });

@@ -23,6 +23,7 @@ void main() {
       'responseBytes': 145,
       'tunnelVerified': false,
       'tunnelCandidate': true,
+      'targetResolved': true,
       'nxdomainSafe': true,
     });
     expect(r.reachable, isTrue);
@@ -211,6 +212,7 @@ void main() {
                   'ednsSupported': true,
                   'nxdomainSafe': true,
                   'tunnelCandidate': true,
+                  'targetResolved': true,
                 },
               )
               .toList(),
@@ -271,6 +273,7 @@ void main() {
           'ednsSupported': true,
           'nxdomainSafe': true,
           'tunnelCandidate': true,
+          'targetResolved': true,
         },
       ]);
     });
@@ -281,5 +284,138 @@ void main() {
       onFound: (_) => cancelled = true,
     );
     expect(calls, 1);
+  });
+
+  test('normalizes valid targets and rejects URL, IPv6, malformed labels, and pseudo-IP input', () {
+    expect(DnsScannerService.validateTestTarget('  ExAmPle.COM '), 'example.com');
+    expect(DnsScannerService.validateTestTarget('  8.8.8.8 '), '8.8.8.8');
+    for (final value in [
+      'https://example.com',
+      '2001:db8::1',
+      'example..com',
+      '-example.com',
+      'example-.com',
+      'a..b',
+      '1.2.3.999',
+      '01.2.3.4',
+    ]) {
+      expect(() => DnsScannerService.validateTestTarget(value), throwsFormatException,
+          reason: value);
+    }
+  });
+
+  test('bridges the normalized target to the native scanner', () async {
+    final domains = <String>[];
+    messenger.setMockMethodCallHandler(DnsVpnConnection.platform, (call) async {
+      expect(call.method, 'scanDns');
+      domains.add((call.arguments as Map)['domain'] as String);
+      return '[]';
+    });
+    await DnsScannerService().scan(
+      servers: ['8.8.8.8'],
+      domain: '  ExAmPle.COM  ',
+    );
+    await DnsScannerService().scanRange(
+      targets: ['8.8.8.8'],
+      domain: '  TEST.Example  ',
+    );
+    expect(domains, ['example.com', 'test.example']);
+  });
+
+  test('targetResolved defaults false and excludes otherwise eligible candidates', () {
+    final result = DnsScanResult(
+      ip: '8.8.8.8',
+      udpMs: 4,
+      tcpMs: 5,
+      reachable: true,
+      ednsSupported: true,
+      nxdomainSafe: true,
+      tunnelCandidate: true,
+    );
+    expect(result.targetResolved, isFalse);
+    expect(result.isCandidate, isFalse);
+    expect(DnsScanExport.candidates([result]), isEmpty);
+  });
+
+  test('exports only safe candidates, sorted and deduplicated with port lines', () {
+    DnsScanResult candidate(String ip, int udp, {bool safe = true, bool tcp = true,
+        bool hijacked = false}) => DnsScanResult(
+          ip: ip,
+          udpMs: tcp ? udp : -1,
+          tcpMs: tcp ? udp + 1 : udp,
+          reachable: true,
+          ednsSupported: true,
+          nxdomainSafe: safe,
+          nxdomainHijacked: hijacked,
+          tunnelCandidate: true,
+          targetResolved: true,
+        );
+
+    final results = [
+      candidate('3.3.3.3', 20),
+      candidate('1.1.1.1', 8),
+      candidate('1.1.1.1', 3),
+      candidate('4.4.4.4', 1, safe: false),
+      candidate('5.5.5.5', 1, tcp: false),
+      candidate('6.6.6.6', 1, hijacked: true),
+    ];
+    expect(DnsScanExport.candidates(results).map((r) => r.ip), ['1.1.1.1', '3.3.3.3']);
+    expect(DnsScanExport.toText(results, port: 5353), '1.1.1.1:5353\n3.3.3.3:5353\n');
+  });
+
+  test('JSON export has A/PTR metadata and never claims tunnel verification', () {
+    final result = DnsScanResult(
+      ip: '9.9.9.9',
+      udpMs: 7,
+      tcpMs: 9,
+      reachable: true,
+      ednsSupported: true,
+      ednsPayload: 1232,
+      nxdomainSafe: true,
+      targetResolved: true,
+      tunnelCandidate: true,
+    );
+    final a = jsonDecode(DnsScanExport.toJson([result], testTarget: ' ExAmPle.COM ',
+        port: 5353, timeoutMs: 700, workers: 4, cancelled: true)) as Map;
+    expect(a['testTarget'], 'example.com');
+    expect(a['testMode'], 'A');
+    expect(a['cancelled'], isTrue);
+    expect(a['tunnelVerified'], isFalse);
+    expect(a['resolvers'], hasLength(1));
+    final resolver = (a['resolvers'] as List).single as Map;
+    expect(resolver['port'], 5353);
+    expect(resolver['status'], 'candidate');
+    expect(resolver['tunnelVerified'], isFalse);
+    final ptr = jsonDecode(DnsScanExport.toJson([result], testTarget: ' 9.9.9.9 ',
+        port: 53, timeoutMs: 2500, workers: 2)) as Map;
+    expect(ptr['testTarget'], '9.9.9.9');
+    expect(ptr['testMode'], 'PTR');
+  });
+
+  test('cancellation preserves a completed wave and starts no later wave', () async {
+    var calls = 0;
+    var cancelled = false;
+    messenger.setMockMethodCallHandler(DnsVpnConnection.platform, (call) async {
+      if (call.method != 'scanDns') return null;
+      calls++;
+      return jsonEncode([
+        {
+          'ip': calls == 1 ? '8.8.8.8' : '1.1.1.1',
+          'reachable': true,
+          'udpMs': 1,
+          'targetResolved': true,
+        },
+      ]);
+    });
+    final found = await DnsScannerService().scanRange(
+      targets: ['8.8.8.8', '1.1.1.1'],
+      chunkSize: 1,
+      isCancelled: () => cancelled,
+      onProgress: (done, total) {
+        if (done == 1) cancelled = true;
+      },
+    );
+    expect(calls, 1);
+    expect(found.map((r) => r.ip), ['8.8.8.8']);
   });
 }
