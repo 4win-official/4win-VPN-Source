@@ -12,9 +12,9 @@ import 'package:flutter/services.dart';
 class PsiphonService {
   static const MethodChannel _channel = MethodChannel('com.forwin.vpn/psiphon');
 
-  /// Requests VPN permission if needed. Returns true when already granted.
-  /// On first run this launches the system consent dialog and returns false —
-  /// the caller should retry after the user approves.
+  /// Requests VPN permission if needed. On first run, waits for the system
+  /// consent result; false means denial, Activity loss, or a platform error.
+  /// An already-granted permission resolves immediately.
   Future<bool> prepare() async {
     try {
       return await _channel.invokeMethod<bool>('prepare') ?? false;
@@ -67,6 +67,16 @@ class PsiphonService {
     }
   }
 
+  /// Last status text emitted by the native Psiphon service. This is useful
+  /// for distinguishing a terminal native startup error from a slow startup.
+  Future<String> get statusText async {
+    try {
+      return await _channel.invokeMethod<String>('getStatus') ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// True when the native kill-switch blackhole is holding the TUN interface
   /// (tunnel down, traffic blocked, service alive).
   Future<bool> get isKillSwitchActive async {
@@ -82,8 +92,7 @@ class PsiphonService {
     try {
       final raw = await _channel.invokeMethod<Map>('queryStats');
       if (raw == null) return const {'uplink': 0, 'downlink': 0};
-      int asInt(Object? v) =>
-          v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+      int asInt(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
       return {
         'uplink': asInt(raw['uplink']),
         'downlink': asInt(raw['downlink']),
@@ -115,11 +124,9 @@ class PsiphonService {
     try {
       final raw = await _channel.invokeMethod<Map>('getPsiphonServers');
       if (raw == null) return const {'count': 0, 'regions': <String>[]};
-      int asInt(Object? v) =>
-          v is num ? v.toInt() : int.tryParse('$v') ?? 0;
-      final regions = (raw['regions'] as List?)
-              ?.map((e) => e.toString())
-              .toList() ??
+      int asInt(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+      final regions =
+          (raw['regions'] as List?)?.map((e) => e.toString()).toList() ??
           <String>[];
       var count = asInt(raw['count']);
       if (count == 0 && regions.isNotEmpty) count = regions.length;

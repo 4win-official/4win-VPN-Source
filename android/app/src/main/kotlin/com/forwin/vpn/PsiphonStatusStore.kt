@@ -1,6 +1,7 @@
 package com.forwin.vpn
 
 import android.content.Intent
+import android.os.SystemClock
 
 /**
  * Main-process cache of the `:psiphon` [PsiphonVpnService] state.
@@ -69,7 +70,7 @@ object PsiphonStatusStore {
 
     private fun isStale(): Boolean {
         if (lastHeartbeatMs == 0L) return true
-        return System.currentTimeMillis() - lastHeartbeatMs > STALE_AFTER_MS
+        return SystemClock.elapsedRealtime() - lastHeartbeatMs > STALE_AFTER_MS
     }
 
     @JvmStatic
@@ -85,7 +86,7 @@ object PsiphonStatusStore {
             intent.getStringArrayListExtra(PsiphonVpnService.EXTRA_EGRESS_REGIONS)?.let {
                 egressRegions = ArrayList(it)
             }
-            lastHeartbeatMs = System.currentTimeMillis()
+            lastHeartbeatMs = SystemClock.elapsedRealtime()
             val lines = intent.getStringArrayListExtra(PsiphonVpnService.EXTRA_LOG_LINES)
             if (lines != null) appendLogs(lines)
         } catch (_: Throwable) {

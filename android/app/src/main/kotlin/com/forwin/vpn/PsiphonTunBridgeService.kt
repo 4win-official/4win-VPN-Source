@@ -11,6 +11,9 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Runs the TUN -> Psiphon SOCKS bridge in its own Android process.
@@ -26,18 +29,21 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class PsiphonTunBridgeService : Service() {
     private var tunPfd: ParcelFileDescriptor? = null
-    private var controllerStarted = false
+    @Volatile private var controllerStarted = false
+    @Volatile private var bridgeSession: String? = null
     private val stopping = AtomicBoolean(false)
+    private var heartbeatExecutor: ScheduledExecutorService? = null
 
     companion object {
         const val ACTION_START = "com.forwin.vpn.PSIPHON_BRIDGE_START"
         const val ACTION_STOP = "com.forwin.vpn.PSIPHON_BRIDGE_STOP"
         const val EXTRA_TUN_FD = "tun_fd"
         const val EXTRA_SOCKS_PORT = "socks_port"
+        const val EXTRA_BRIDGE_SESSION = "bridge_session"
 
         // Cross-process status broadcast: this service runs in :psiphonbridge,
         // while PsiphonVpnService (the thing Flutter polls "isConnected" on)
-        // runs in the main process. Without this signal, PsiphonVpnService has
+        // runs in :psiphon. Without this signal, PsiphonVpnService has
         // no way to know whether the actual device-wide TUN bridge succeeded —
         // it would report "connected" purely from Psiphon's own internal
         // tunnel-core callback even if packet routing never started.
@@ -65,16 +71,31 @@ class PsiphonTunBridgeService : Service() {
         }
     }
 
-    private fun reportBridgeStatus(success: Boolean) {
+    private fun reportBridgeStatus(success: Boolean, session: String? = bridgeSession) {
         try {
             val statusIntent = Intent(ACTION_BRIDGE_STATUS).apply {
                 setPackage(packageName)
                 putExtra(EXTRA_BRIDGE_SUCCESS, success)
+                if (!session.isNullOrBlank()) putExtra(EXTRA_BRIDGE_SESSION, session)
             }
             sendBroadcast(statusIntent)
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to report bridge status: ${t.message}")
         }
+    }
+
+    /** The isolated process can be killed without onDestroy; heartbeats expose that loss. */
+    private fun startHeartbeat() {
+        heartbeatExecutor?.shutdownNow()
+        heartbeatExecutor = Executors.newSingleThreadScheduledExecutor()
+        heartbeatExecutor?.scheduleAtFixedRate({
+            if (controllerStarted && PsiphonTunBridge.isRunning()) reportBridgeStatus(true)
+        }, 2, 2, TimeUnit.SECONDS)
+    }
+
+    private fun stopHeartbeat() {
+        heartbeatExecutor?.shutdownNow()
+        heartbeatExecutor = null
     }
 
     /** Forwards a timestamped line to the main process for the in-app log viewer. */
@@ -122,6 +143,8 @@ class PsiphonTunBridgeService : Service() {
                     startBridge(intent)
                 } catch (t: Throwable) {
                     Log.e(TAG, "Failed to start foreground bridge", t)
+                    reportBridgeStatus(false, intent.getStringExtra(EXTRA_BRIDGE_SESSION))
+                    blog("bridge failed: foreground start failed: ${t.message}")
                     stopSelf()
                 }
             }
@@ -131,7 +154,27 @@ class PsiphonTunBridgeService : Service() {
     }
 
     private fun startBridge(intent: Intent) {
-        if (controllerStarted) return
+        val requestedSession = intent.getStringExtra(EXTRA_BRIDGE_SESSION)
+        if (controllerStarted) {
+            val duplicate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(EXTRA_TUN_FD, ParcelFileDescriptor::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(EXTRA_TUN_FD)
+            }
+            try { duplicate?.close() } catch (_: Throwable) {}
+            if (requestedSession == bridgeSession && PsiphonTunBridge.isRunning()) {
+                reportBridgeStatus(true, bridgeSession)
+                blog("duplicate bridge start acknowledged for session=$bridgeSession")
+                return
+            }
+            blog("replacing stale bridge session=$bridgeSession with session=$requestedSession")
+            try { PsiphonTunBridge.stop() } catch (_: Throwable) {}
+            try { tunPfd?.close() } catch (_: Throwable) {}
+            tunPfd = null
+            controllerStarted = false
+            bridgeSession = null
+        }
         val pfd = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent.getParcelableExtra(EXTRA_TUN_FD, ParcelFileDescriptor::class.java)
         } else {
@@ -140,7 +183,7 @@ class PsiphonTunBridgeService : Service() {
         } ?: run {
             Log.e(TAG, "Missing TUN fd")
             blog("bridge failed: missing TUN fd")
-            reportBridgeStatus(false)
+            reportBridgeStatus(false, requestedSession)
             stopSelf()
             return
         }
@@ -149,25 +192,28 @@ class PsiphonTunBridgeService : Service() {
             Log.e(TAG, "Invalid SOCKS port: $port")
             blog("bridge failed: invalid SOCKS port $port")
             try { pfd.close() } catch (_: Throwable) {}
-            reportBridgeStatus(false)
+            reportBridgeStatus(false, requestedSession)
             stopSelf()
             return
         }
 
         tunPfd = pfd
+        bridgeSession = requestedSession
         stopping.set(false)
         try {
             PsiphonTunBridge.start(applicationContext, pfd.fd, port)
+            if (!PsiphonTunBridge.isRunning()) error("native bridge loop is not running")
             controllerStarted = true
             blog("bridge active: tunFd=${pfd.fd} -> 127.0.0.1:$port")
             reportBridgeStatus(true)
+            startHeartbeat()
         } catch (t: Throwable) {
             Log.e(TAG, "Bridge startup failed", t)
             blog("bridge startup failed: ${t.message}")
             controllerStarted = false
             try { pfd.close() } catch (_: Throwable) {}
             tunPfd = null
-            reportBridgeStatus(false)
+            reportBridgeStatus(false, requestedSession)
             stopSelf()
         }
     }
@@ -175,21 +221,28 @@ class PsiphonTunBridgeService : Service() {
     private fun stopBridge() {
         if (!stopping.compareAndSet(false, true)) return
         blog("bridge stopping")
+        stopHeartbeat()
         try { PsiphonTunBridge.stop() } catch (t: Throwable) {
             Log.w(TAG, "Bridge stop failed: ${t.message}")
         }
         controllerStarted = false
         try { tunPfd?.close() } catch (_: Throwable) {}
         tunPfd = null
+        bridgeSession = null
         stopForegroundCompat()
         stopSelf()
     }
 
     override fun onDestroy() {
+        val wasStarted = controllerStarted
+        val destroyedSession = bridgeSession
+        stopHeartbeat()
         try { PsiphonTunBridge.stop() } catch (_: Throwable) {}
         try { tunPfd?.close() } catch (_: Throwable) {}
         tunPfd = null
         controllerStarted = false
+        bridgeSession = null
+        if (wasStarted) reportBridgeStatus(false, destroyedSession)
         stopForegroundCompat()
         super.onDestroy()
     }

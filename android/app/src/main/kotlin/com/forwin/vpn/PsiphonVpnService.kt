@@ -10,6 +10,7 @@ import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import ca.psiphon.PsiphonTunnel
@@ -19,6 +20,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Semaphore
+import java.util.concurrent.Executors
+import java.util.UUID
 
 /**
  * Psiphon VPN service. Runs in the dedicated `:psiphon` process (see
@@ -50,10 +53,14 @@ class PsiphonVpnService : VpnService() {
     private var bridgeStatusReceiver: BroadcastReceiver? = null
     // True once Psiphon's own tunnel-core reports onConnected(). The public
     // isConnected() below additionally requires bridgeConfirmed, so "connected"
-    // means the device traffic is ACTUALLY being routed, not just that
-    // Psiphon's internal proxy is up.
+    // means the core and packet bridge are live, not just that
+    // Psiphon's internal proxy is up. It is not an internet reachability probe.
     @Volatile private var psiphonCoreConnected = false
     @Volatile private var bridgeConfirmed = false
+    @Volatile private var activeSession: String? = null
+    @Volatile private var bridgeRequested = false
+    @Volatile private var lastBridgeHeartbeatMs = 0L
+    private val commands = Executors.newSingleThreadExecutor()
 
     @Volatile private var heartbeatRunning = false
     private var heartbeatThread: Thread? = null
@@ -91,15 +98,14 @@ class PsiphonVpnService : VpnService() {
         private const val VPN_MTU = 1500
         private const val PRIVATE_VLAN4 = "10.8.0.1"
         private const val PSIPHON_NATIVE_LIBRARY = "psiphon-gojni"
-        private const val PSIPHON_SOCKS_PORT = 1080
-        private const val PSIPHON_HTTP_PORT = 8080
         private const val HEARTBEAT_MS = 2000L
+        private const val BRIDGE_STALE_MS = 8000L
         private const val MAX_PENDING_LOGS = 60
 
         @Volatile private var isServiceRunning = false
         // "Connected" as observed from OUTSIDE this service (polled by Flutter
         // via PsiphonStatusStore) means the device TUN bridge is confirmed
-        // active, NOT merely that Psiphon's own tunnel-core callback fired. See
+        // live, NOT merely that Psiphon's own tunnel-core callback fired. See
         // psiphonCoreConnected / bridgeConfirmed above.
         @Volatile private var isTunnelConnected = false
         @Volatile private var totalUplink = 0L
@@ -174,6 +180,12 @@ class PsiphonVpnService : VpnService() {
         val t = Thread({
             while (heartbeatRunning) {
                 try {
+                    if (bridgeRequested && SystemClock.elapsedRealtime() - lastBridgeHeartbeatMs > BRIDGE_STALE_MS) {
+                        val session = activeSession
+                        bridgeConfirmed = false
+                        updateConnectedState()
+                        commands.execute { onBridgeStatus(false, session) }
+                    }
                     sendStatus()
                 } catch (_: Throwable) {}
                 try {
@@ -229,8 +241,8 @@ class PsiphonVpnService : VpnService() {
                     val success = intent?.getBooleanExtra(
                         PsiphonTunBridgeService.EXTRA_BRIDGE_SUCCESS, false
                     ) ?: false
-                    plog("Bridge status report: success=$success")
-                    Thread { onBridgeStatus(success) }.start()
+                    val session = intent?.getStringExtra(PsiphonTunBridgeService.EXTRA_BRIDGE_SESSION)
+                    commands.execute { onBridgeStatus(success, session) }
                 } catch (t: Throwable) {
                     try {
                         Log.w(TAG, "bridge status handling failed: ${t.message}")
@@ -253,6 +265,14 @@ class PsiphonVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        // A service destruction is not necessarily preceded by ACTION_DISCONNECT.
+        // Serialize cleanup after pending commands, and release both runtimes/TUN.
+        commands.execute {
+            if (vpnInterface != null || psiphonTunnel != null || tunnelRunning || killSwitchActive) {
+                stopPsiphon(fullStop = true)
+            }
+        }
+        commands.shutdown()
         try {
             stopHeartbeat()
         } catch (_: Throwable) {}
@@ -269,7 +289,8 @@ class PsiphonVpnService : VpnService() {
             plog("VPN revoked by system — stopping")
         } catch (_: Throwable) {}
         try {
-            Thread { stopPsiphon(fullStop = true) }.start()
+            getSharedPreferences("psiphon_service", MODE_PRIVATE).edit().putBoolean("wanted", false).apply()
+            commands.execute { stopPsiphon(fullStop = true) }
         } catch (_: Throwable) {}
         try {
             super.onRevoke()
@@ -277,27 +298,40 @@ class PsiphonVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val prefs = getSharedPreferences("psiphon_service", MODE_PRIVATE)
         when (intent?.action) {
             ACTION_CONNECT -> {
                 currentRegion = intent.getStringExtra(EXTRA_EGRESS_REGION) ?: ""
+                prefs.edit().putBoolean("wanted", true).putString("region", currentRegion).apply()
+                val region = currentRegion
                 try {
                     showNotification("Connecting to Psiphon...", true)
                 } catch (_: Throwable) {}
-                Thread { startPsiphon(currentRegion) }.start()
+                commands.execute { startPsiphon(region) }
             }
-            ACTION_DISCONNECT -> Thread { stopPsiphon(fullStop = true) }.start()
-            ACTION_RECONNECT -> Thread {
-                stopPsiphon(fullStop = false)
-                try {
-                    Thread.sleep(500)
-                } catch (_: InterruptedException) {
-                    return@Thread
-                }
+            ACTION_DISCONNECT -> {
+                prefs.edit().putBoolean("wanted", false).apply()
+                commands.execute { stopPsiphon(fullStop = true) }
+            }
+            ACTION_RECONNECT -> {
+                currentRegion = prefs.getString("region", currentRegion) ?: currentRegion
+                prefs.edit().putBoolean("wanted", true).apply()
+                // Meet the foreground-service deadline before asynchronous teardown.
                 try {
                     showNotification("Connecting to Psiphon...", true)
                 } catch (_: Throwable) {}
-                startPsiphon(currentRegion)
-            }.start()
+                commands.execute {
+                    stopPsiphon(fullStop = false)
+                    startPsiphon(currentRegion)
+                }
+            }
+            null -> if (prefs.getBoolean("wanted", false)) {
+                currentRegion = prefs.getString("region", "") ?: ""
+                try {
+                    showNotification("Connecting to Psiphon...", true)
+                } catch (_: Throwable) {}
+                commands.execute { startPsiphon(currentRegion) }
+            } else stopSelf(startId)
         }
         return START_STICKY
     }
@@ -313,18 +347,15 @@ class PsiphonVpnService : VpnService() {
                 return
             }
 
-            // A previous kill-switch blackhole may still hold a stale TUN.
-            // Always re-establish a fresh interface for a new attempt.
+            // Keep a previous blackhole until establish() atomically replaces it.
+            // Closing it first would briefly route apps outside the VPN.
             if (killSwitchActive) {
-                plog("clearing previous kill-switch blackhole for new attempt")
-                try {
-                    vpnInterface?.close()
-                } catch (_: Throwable) {}
-                vpnInterface = null
-                killSwitchActive = false
+                plog("preserving kill-switch blackhole until replacement TUN is established")
             }
 
             isServiceRunning = true
+            activeSession = UUID.randomUUID().toString()
+            bridgeRequested = false
             psiphonCoreConnected = false
             bridgeConfirmed = false
             updateConnectedState()
@@ -345,10 +376,10 @@ class PsiphonVpnService : VpnService() {
                 .addDnsServer("8.8.8.8")
                 .addDnsServer("1.1.1.1")
 
-            try {
-                builder.addAddress("fc00::1", 128)
-                builder.addRoute("::", 0)
-            } catch (_: Throwable) {}
+            // Never silently continue after partially enabling the IPv6 family:
+            // an address without its default route can leave traffic outside VPN.
+            builder.addAddress("fc00::1", 128)
+            builder.addRoute("::", 0)
 
             // Split tunneling (same semantics as Xray): in INCLUDE mode the
             // helper owns the allow-list, so our own package must NOT be
@@ -370,9 +401,12 @@ class PsiphonVpnService : VpnService() {
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
 
+            val previousTun = vpnInterface
             val tun = builder.establish()
                 ?: throw IllegalStateException("VpnService.Builder.establish() returned null")
             vpnInterface = tun
+            killSwitchActive = false
+            try { previousTun?.close() } catch (_: Throwable) {}
             plog("Android TUN established fd=${tun.fd}")
 
             initializePsiphonTunnel(region)
@@ -383,6 +417,8 @@ class PsiphonVpnService : VpnService() {
         } catch (t: Throwable) {
             plog("startup failed: ${t.message ?: "unknown error"}")
             Log.e(TAG, "Psiphon startup failed", t)
+            activeSession = null
+            bridgeRequested = false
             tunnelRunning = false
             psiphonCoreConnected = false
             bridgeConfirmed = false
@@ -425,13 +461,16 @@ class PsiphonVpnService : VpnService() {
      * stops the service), false for an internal reconnect (keeps the foreground
      * service alive and just restarts the tunnel).
      */
-    private fun stopPsiphon(fullStop: Boolean) {
+    private fun stopPsiphon(fullStop: Boolean, finalStatus: String? = null) {
         var locked = false
         try {
             lifecycleLock.acquire()
             locked = true
+            activeSession = null // invalidate callbacks before SDK stop waits for Go
+            bridgeRequested = false
+            val keepBlackhole = !fullStop && KillSwitch.isEnabled(applicationContext) && vpnInterface != null
             tunnelRunning = false
-            killSwitchActive = false
+            killSwitchActive = keepBlackhole
             psiphonCoreConnected = false
             bridgeConfirmed = false
             updateConnectedState()
@@ -446,14 +485,16 @@ class PsiphonVpnService : VpnService() {
             psiphonTunnel = null
             psiphonSocksPort = 0
             egressRegions = emptyList()
-            try {
-                vpnInterface?.close()
-            } catch (_: Throwable) {}
-            vpnInterface = null
+            if (!keepBlackhole) {
+                try {
+                    vpnInterface?.close()
+                } catch (_: Throwable) {}
+                vpnInterface = null
+            }
 
             if (fullStop) {
                 isServiceRunning = false
-                lastStatusText = "Disconnected"
+                lastStatusText = finalStatus ?: "Disconnected"
                 plog("stopped")
                 sendStatus()
                 stopHeartbeat()
@@ -467,6 +508,8 @@ class PsiphonVpnService : VpnService() {
                 } catch (_: Throwable) {}
             } else {
                 plog("tunnel stopped for reconnect")
+                lastStatusText = if (keepBlackhole) "Reconnecting — traffic blocked" else "Reconnecting to Psiphon..."
+                sendStatus()
             }
         } catch (t: Throwable) {
             Log.e(TAG, "Psiphon stop failed", t)
@@ -476,18 +519,22 @@ class PsiphonVpnService : VpnService() {
     }
 
     /** Handles the :psiphonbridge TUN->SOCKS status report (background thread). */
-    private fun onBridgeStatus(success: Boolean) {
+    private fun onBridgeStatus(success: Boolean, session: String?) {
         var locked = false
         try {
             lifecycleLock.acquire()
             locked = true
-            if (!tunnelRunning) return // stale report after stop; ignore
+            if (!tunnelRunning || session == null || session != activeSession) return
+            val changed = bridgeConfirmed != success
+            if (success) lastBridgeHeartbeatMs = SystemClock.elapsedRealtime()
             bridgeConfirmed = success
             updateConnectedState()
+            if (success && !changed) return // liveness heartbeat, not a new transition
             if (success) {
-                lastStatusText = if (currentRegion.isBlank()) "Connected to Psiphon"
+                lastStatusText = if (!psiphonCoreConnected) "Connecting to Psiphon..."
+                else if (currentRegion.isBlank()) "Connected to Psiphon"
                 else "Connected to $currentRegion"
-                plog("device traffic bridge confirmed — connected")
+                plog("device traffic bridge confirmed; core connected=$psiphonCoreConnected")
                 try {
                     showNotification(lastStatusText, true)
                 } catch (_: Throwable) {}
@@ -504,7 +551,7 @@ class PsiphonVpnService : VpnService() {
                     // self-deadlock (stopPsiphon acquires the same semaphore).
                     lifecycleLock.release()
                     locked = false
-                    stopPsiphon(fullStop = true)
+                    stopPsiphon(fullStop = true, finalStatus = "Psiphon traffic bridge failed")
                     return
                 }
             }
@@ -522,6 +569,8 @@ class PsiphonVpnService : VpnService() {
      * traffic is dropped instead of leaking. Caller must hold [lifecycleLock].
      */
     private fun enterBlackhole(reason: String) {
+        activeSession = null
+        bridgeRequested = false
         tunnelRunning = false
         killSwitchActive = true
         psiphonCoreConnected = false
@@ -546,15 +595,17 @@ class PsiphonVpnService : VpnService() {
     }
 
     private fun initializePsiphonTunnel(region: String) {
+        val session = activeSession ?: throw IllegalStateException("Missing Psiphon session")
+        val bootstrap = assets.open("mix_psiphon_bootstrap.json").bufferedReader().use {
+            JSONObject(it.readText())
+        }
+        val config = PsiphonConfig.build(bootstrap, region).toString()
+        fun callback(tag: String, block: () -> Unit) {
+            runGuarded(tag) { if (activeSession == session) block() }
+        }
         val hostService = object : PsiphonTunnel.HostService {
             override fun getContext(): Context = applicationContext
-            override fun getPsiphonConfig(): String = JSONObject()
-                .put("EgressRegion", region)
-                .put("LocalSocksProxyPort", PSIPHON_SOCKS_PORT)
-                .put("LocalHttpProxyPort", PSIPHON_HTTP_PORT)
-                .put("EmitBytesTransferred", true)
-                .put("EstablishTunnelTimeoutSeconds", 0)
-                .toString()
+            override fun getPsiphonConfig(): String = config
             override fun loadLibrary(library: String) {
                 // Psiphon's Java layer asks the host to load its native
                 // runtime by the original name "gojni"; map it to the
@@ -569,7 +620,10 @@ class PsiphonVpnService : VpnService() {
             // each is individually guarded so a failure can never escape onto
             // a foreign thread and kill the process.
             override fun onConnecting() {
-                runGuarded("onConnecting") {
+                callback("onConnecting") {
+                    if (activeSession != session) return@callback
+                    psiphonCoreConnected = false
+                    updateConnectedState()
                     plog("tunnel connecting")
                     lastStatusText = "Connecting to Psiphon..."
                     showNotification(lastStatusText, true)
@@ -577,7 +631,8 @@ class PsiphonVpnService : VpnService() {
                 }
             }
             override fun onConnected() {
-                runGuarded("onConnected") {
+                callback("onConnected") {
+                    if (activeSession != session) return@callback
                     // NOTE: this only means Psiphon's own local proxy is up. The
                     // externally-visible connected flag stays false until the
                     // separate :psiphonbridge process confirms the device-wide
@@ -588,31 +643,34 @@ class PsiphonVpnService : VpnService() {
                     val port = psiphonSocksPort
                     if (port > 0) startTunBridge(port)
                     else plog("connected before SOCKS port notification — waiting for port")
-                    lastStatusText = "Psiphon core up — starting traffic bridge..."
+                    lastStatusText = if (bridgeConfirmed) "Connected to Psiphon"
+                    else "Psiphon core up — starting traffic bridge..."
                     showNotification(lastStatusText, true)
                     sendStatus()
                 }
             }
             override fun onListeningSocksProxyPort(port: Int) {
-                runGuarded("onListeningSocksProxyPort") {
+                callback("onListeningSocksProxyPort") {
+                    if (activeSession != session) return@callback
                     psiphonSocksPort = port
                     plog("SOCKS5 listening on 127.0.0.1:$port")
-                    startTunBridge(port)
+                    if (psiphonCoreConnected) startTunBridge(port)
                 }
             }
             override fun onListeningHttpProxyPort(port: Int) {
-                runGuarded("onListeningHttpProxyPort") {
+                callback("onListeningHttpProxyPort") {
                     plog("HTTP proxy listening on $port")
                 }
             }
             override fun onBytesTransferred(sent: Long, received: Long) {
                 try {
+                    if (activeSession != session) return
                     totalUplink += sent
                     totalDownlink += received
                 } catch (_: Throwable) {}
             }
             override fun onAvailableEgressRegions(regions: MutableList<String>?) {
-                runGuarded("onAvailableEgressRegions") {
+                callback("onAvailableEgressRegions") {
                     egressRegions = regions?.toList() ?: emptyList()
                     plog("available regions (${egressRegions.size}): $regions")
                     // Push the fresh server list to the main process so the
@@ -621,17 +679,17 @@ class PsiphonVpnService : VpnService() {
                 }
             }
             override fun onSplitTunnelRegions(regions: MutableList<String>?) {
-                runGuarded("onSplitTunnelRegions") {
+                callback("onSplitTunnelRegions") {
                     plog("split regions: $regions")
                 }
             }
             override fun onUpstreamProxyError(message: String?) {
-                runGuarded("onUpstreamProxyError") {
+                callback("onUpstreamProxyError") {
                     plog("upstream proxy error: $message")
                 }
             }
             override fun onStartedWaitingForNetworkConnectivity() {
-                runGuarded("onStartedWaitingForNetworkConnectivity") {
+                callback("onStartedWaitingForNetworkConnectivity") {
                     plog("waiting for network connectivity")
                     lastStatusText = "Waiting for network..."
                     try {
@@ -641,14 +699,33 @@ class PsiphonVpnService : VpnService() {
                 }
             }
             override fun onStoppedWaitingForNetworkConnectivity() {
-                runGuarded("onStoppedWaitingForNetworkConnectivity") {
+                callback("onStoppedWaitingForNetworkConnectivity") {
                     plog("network connectivity restored")
                     sendStatus()
                 }
             }
             override fun onDiagnosticMessage(message: String?) {
-                runGuarded("onDiagnosticMessage") {
+                callback("onDiagnosticMessage") {
                     if (!message.isNullOrBlank()) plog("core: $message")
+                }
+            }
+            override fun onExiting() {
+                callback("onExiting") {
+                    // Never stop/join the Go core from its own callback thread.
+                    psiphonCoreConnected = false
+                    updateConnectedState()
+                    plog("tunnel core exited")
+                    commands.execute {
+                        if (activeSession == session) {
+                            if (KillSwitch.isEnabled(applicationContext)) {
+                                lifecycleLock.acquire()
+                                try { enterBlackhole("tunnel core exited") }
+                                finally { lifecycleLock.release() }
+                            } else {
+                                stopPsiphon(fullStop = true, finalStatus = "Psiphon tunnel core exited")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -675,6 +752,8 @@ class PsiphonVpnService : VpnService() {
     }
 
     private fun startTunBridge(port: Int) {
+        if (bridgeRequested) return
+        val session = activeSession ?: return
         val tun = vpnInterface ?: run {
             plog("cannot start bridge: TUN is closed")
             return
@@ -684,19 +763,28 @@ class PsiphonVpnService : VpnService() {
             return
         }
         try {
-            val bridgeIntent = Intent(this, PsiphonTunBridgeService::class.java).apply {
-                action = PsiphonTunBridgeService.ACTION_START
-                putExtra(PsiphonTunBridgeService.EXTRA_TUN_FD, ParcelFileDescriptor.dup(tun.fileDescriptor))
-                putExtra(PsiphonTunBridgeService.EXTRA_SOCKS_PORT, port)
+            // Binder duplicates the descriptor for the other process. Close our
+            // temporary duplicate even if startForegroundService throws.
+            ParcelFileDescriptor.dup(tun.fileDescriptor).use { duplicate ->
+                val bridgeIntent = Intent(this, PsiphonTunBridgeService::class.java).apply {
+                    action = PsiphonTunBridgeService.ACTION_START
+                    putExtra(PsiphonTunBridgeService.EXTRA_TUN_FD, duplicate)
+                    putExtra(PsiphonTunBridgeService.EXTRA_SOCKS_PORT, port)
+                    putExtra(PsiphonTunBridgeService.EXTRA_BRIDGE_SESSION, session)
+                }
+                bridgeRequested = true
+                lastBridgeHeartbeatMs = SystemClock.elapsedRealtime()
+                PsiphonTunBridgeService.start(this, bridgeIntent)
             }
-            PsiphonTunBridgeService.start(this, bridgeIntent)
             plog("requested isolated traffic bridge on SOCKS port $port")
         } catch (t: Throwable) {
+            bridgeRequested = false
             plog("failed to launch traffic bridge: ${t.message}")
             Log.e(TAG, "Failed to launch isolated Psiphon bridge", t)
             bridgeConfirmed = false
             updateConnectedState()
             sendStatus()
+            commands.execute { onBridgeStatus(false, session) }
         }
     }
 

@@ -30,6 +30,7 @@ class MainActivity: FlutterActivity() {
     private val DNS_CHANNEL = "com.forwin.vpn/dns"
     private val PSIPHON_CHANNEL = "com.forwin.vpn/psiphon"
     private val PSIPHON_REQUEST_CODE = 102
+    private var pendingPsiphonPermission: MethodChannel.Result? = null
     private val XRAY_CHANNEL = "com.forwin.vpn/xray"
     private val IMPORT_CHANNEL = "com.forwin.vpn/import"
     private val OPENVPN_CHANNEL = "com.forwin.vpn/openvpn"
@@ -60,9 +61,23 @@ class MainActivity: FlutterActivity() {
     private var openvpnLogListener: VpnStatus.LogListener? = null
     
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == PSIPHON_REQUEST_CODE) {
+            val pending = pendingPsiphonPermission
+            pendingPsiphonPermission = null
+            pending?.success(resultCode == RESULT_OK && VpnService.prepare(applicationContext) == null)
+        }
         // OpenVPN permission handler
         OpenVPNFlutterPlugin.connectWhileGranted(requestCode == 24 && resultCode == RESULT_OK)
         super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onDestroy() {
+        // Resolve a pending consent call, but never stop the background VPN
+        // just because Android recreates/removes the Activity.
+        val pending = pendingPsiphonPermission
+        pendingPsiphonPermission = null
+        try { pending?.success(false) } catch (_: Throwable) {}
+        super.onDestroy()
     }
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -170,8 +185,17 @@ class MainActivity: FlutterActivity() {
                 "prepare" -> {
                     val intent = VpnService.prepare(applicationContext)
                     if (intent != null) {
-                        startActivityForResult(intent, PSIPHON_REQUEST_CODE)
-                        result.success(false)
+                        if (pendingPsiphonPermission != null) {
+                            result.error("PSIPHON_PERMISSION_PENDING", "VPN consent is already open", null)
+                        } else {
+                            pendingPsiphonPermission = result
+                            try {
+                                startActivityForResult(intent, PSIPHON_REQUEST_CODE)
+                            } catch (t: Throwable) {
+                                pendingPsiphonPermission = null
+                                result.error("PSIPHON_PERMISSION", "Unable to open VPN consent", null)
+                            }
+                        }
                     } else result.success(true)
                 }
                 "start" -> {
@@ -183,12 +207,19 @@ class MainActivity: FlutterActivity() {
                     result.success(true)
                 }
                 "stop" -> { startService(Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_DISCONNECT)); result.success(true) }
-                "reconnect" -> { startService(Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_RECONNECT)); result.success(true) }
+                "reconnect" -> {
+                    val intent = Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_RECONNECT)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                    result.success(true)
+                }
                 // NOTE: PsiphonVpnService runs in the :psiphon process, so its
                 // statics are NOT visible here. All state reads go through
                 // PsiphonStatusStore (fed by cross-process broadcasts).
                 "isRunning" -> result.success(runCatching { PsiphonStatusStore.isRunning() }.getOrDefault(false))
                 "isConnected" -> result.success(runCatching { PsiphonStatusStore.isConnected() }.getOrDefault(false))
+                // Read-only diagnostic text from the isolated native service;
+                // unlike the booleans this preserves the actual startup error.
+                "getStatus" -> result.success(runCatching { PsiphonStatusStore.statusText() }.getOrDefault(""))
                 "isKillSwitchActive" -> result.success(runCatching { PsiphonStatusStore.isKillSwitchActive() }.getOrDefault(false))
                 "queryStats" -> {
                     val stats = runCatching { PsiphonStatusStore.queryTrafficStats() }.getOrDefault(longArrayOf(0L, 0L))

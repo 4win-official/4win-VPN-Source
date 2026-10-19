@@ -55,6 +55,14 @@ object PsiphonTunBridge {
         }
     }
 
+    /** True only while the native Xray loop still reports itself running. */
+    @Synchronized
+    fun isRunning(): Boolean = try {
+        controller?.isRunning == true
+    } catch (_: Throwable) {
+        false
+    }
+
     private fun buildConfig(socksPort: Int): String {
         val socksServer = JSONObject()
             .put("address", "127.0.0.1")
@@ -68,10 +76,27 @@ object PsiphonTunBridge {
             .put("settings", socksSettings)
             .put("tag", "psiphon")
 
-        val direct = JSONObject()
-            .put("protocol", "freedom")
+        // Psiphon's SOCKS5 listener is a TCP proxy; it is not a safe UDP
+        // transport.  Use Xray's DNS outbound to turn the TUN's UDP/TCP DNS
+        // packets into TCP/53, and carry that stream through Psiphon.
+        // (This is the same pattern used by SlowDnsXrayConfig and Mix.)
+        val dns = JSONObject()
+            .put("protocol", "dns")
+            .put("settings", JSONObject()
+                .put("network", "tcp")
+                .put("address", "1.1.1.1")
+                .put("port", 53)
+                .put("nonIPQuery", "skip"))
+            .put("proxySettings", JSONObject().put("tag", "psiphon"))
+            .put("tag", "psiphon-dns")
+
+        // Anything other than DNS UDP must be rejected rather than sent
+        // directly.  A freedom fallback here would create a leak whenever an
+        // app emits QUIC or another UDP protocol.
+        val blockedUdp = JSONObject()
+            .put("protocol", "blackhole")
             .put("settings", JSONObject())
-            .put("tag", "direct")
+            .put("tag", "block-udp")
 
         // Xray's Android TUN integration requires an explicit tun inbound.
         // startLoop() supplies the Android VpnService fd through xray.tun.fd.
@@ -87,18 +112,30 @@ object PsiphonTunBridge {
                 .put("enabled", true)
                 .put("destOverride", JSONArray().put("http").put("tls").put("quic")))
 
+        val dnsRule = JSONObject()
+            .put("type", "field")
+            .put("port", "53")
+            .put("network", "tcp,udp")
+            .put("outboundTag", "psiphon-dns")
+        val udpBlockRule = JSONObject()
+            .put("type", "field")
+            .put("network", "udp")
+            .put("outboundTag", "block-udp")
         val routingRule = JSONObject()
             .put("type", "field")
-            .put("network", "tcp,udp")
+            .put("network", "tcp")
             .put("outboundTag", "psiphon")
 
         return JSONObject()
             .put("log", JSONObject().put("loglevel", "none"))
+            .put("dns", JSONObject()
+                .put("servers", JSONArray().put("tcp://1.1.1.1"))
+                .put("queryStrategy", "UseIP"))
             .put("inbounds", JSONArray().put(tunInbound))
-            .put("outbounds", JSONArray().put(proxy).put(direct))
+            .put("outbounds", JSONArray().put(proxy).put(dns).put(blockedUdp))
             .put("routing", JSONObject()
                 .put("domainStrategy", "AsIs")
-                .put("rules", JSONArray().put(routingRule)))
+                .put("rules", JSONArray().put(dnsRule).put(udpBlockRule).put(routingRule)))
             .toString()
     }
 }
