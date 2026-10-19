@@ -26,6 +26,7 @@ import 'dns_servers_screen.dart';
 import 'openvpn_configs_screen.dart';
 import 'slowdns_configs_screen.dart';
 import 'xray_servers_screen.dart';
+import 'sstp_servers_screen.dart';
 import 'proxy_servers_screen.dart';
 import 'secret_text_screen.dart';
 import '../services/update_service.dart';
@@ -959,6 +960,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     );
                   }
                   
+                  // SSTP: the grouped server list is always available.
+                  if (provider.selectedProtocol == 'sstp') {
+                    final group = provider.selectedSstpGroup;
+                    final server = provider.selectedServer;
+                    final groupNames = provider.sstpGroups.where((g) => g.id == group);
+                    final groupName = groupNames.isEmpty ? '4win Free Servers' : groupNames.first.name;
+                    final label = group == null
+                        ? (server == null ? 'Choose an SSTP server' : server.fullAddress)
+                        : server == null
+                            ? 'Group: $groupName'
+                            : '$groupName • ${server.fullAddress}';
+                    return Column(
+                      children: [
+                        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SstpServersScreen())),
+                            icon: const Icon(Icons.vpn_key),
+                            label: const Text('Server List', style: TextStyle(fontSize: 16)),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              backgroundColor: Colors.tealAccent.shade700,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
                   // OpenVPN: Always show "OpenVPN Configs" button
                   if (provider.selectedProtocol == 'openvpn') {
                     return SizedBox(
@@ -1232,36 +1266,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     );
                   }
 
-                  // SSTP: Show "Next Server" only when connected
-                  if (!provider.isConnected) {
-                    return const SizedBox.shrink();
-                  }
-                  
-                  return SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: provider.isConnecting ? null : () => provider.connectToNextServer(),
-                      icon: Icon(
-                        Icons.skip_next,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
-                      label: Text(
-                        'Next Server',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: isDark ? Colors.white70 : Colors.black87,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-                  );
+                  return const SizedBox.shrink();
                 },
               ),
             ),

@@ -33,15 +33,11 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _dnsController = TextEditingController();
-  final _customServerController = TextEditingController();
-  final _customUsernameController = TextEditingController();
-  final _customPasswordController = TextEditingController();
   int _concurrentTests = 100;
   bool _parallelConnection = false; // سوییچ اتصال موازی
   bool _killSwitch = false; // Kill Switch
   bool _trafficCompression = false; // فشرده‌سازی ترافیک (فقط OpenVPN)
   String _connectionMode = 'vpn'; // vpn (تونل کل گوشی) | proxy (لوکال 127.0.0.1:4444)
-  bool _useCustomServer = false; // سوییچ استفاده از سرور اختصاصی
   bool _deepScan = false; // اسکن عمیق (برای اینترنت ضعیف/محدودیت دولتی)
   String _mtuMode = 'off'; // حالت MTU: off | auto | manual
   final _mtuController = TextEditingController(text: '1400'); // مقدار دستی MTU
@@ -121,9 +117,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _dnsController.dispose();
-    _customServerController.dispose();
-    _customUsernameController.dispose();
-    _customPasswordController.dispose();
     _mtuController.dispose();
     _sstpFragSizeController.dispose();
     _sstpFragIntervalController.dispose();
@@ -139,15 +132,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _dnsController.text = prefs.getString('custom_dns') ?? '8.8.8.8';
-      _customServerController.text = prefs.getString('custom_server') ?? '';
-      _customUsernameController.text = prefs.getString('custom_username') ?? '';
-      _customPasswordController.text = prefs.getString('custom_password') ?? '';
       _concurrentTests = prefs.getInt('concurrent_tests') ?? 100;
       _parallelConnection = prefs.getBool('parallel_connection') ?? false;
       _killSwitch = prefs.getBool('kill_switch') ?? false;
       _trafficCompression = prefs.getBool('traffic_compression') ?? false;
       _connectionMode = prefs.getString('connection_mode') ?? 'vpn';
-      _useCustomServer = prefs.getBool('use_custom_server') ?? false;
       _deepScan = prefs.getBool('deep_scan') ?? false;
       // مهاجرت از سوییچ قدیمی auto_mtu به حالت سه‌گانه جدید
       final legacyAuto = prefs.getBool('auto_mtu');
@@ -769,15 +758,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveSettings() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('custom_dns', _dnsController.text);
-    await prefs.setString('custom_server', _customServerController.text);
-    await prefs.setString('custom_username', _customUsernameController.text);
-    await prefs.setString('custom_password', _customPasswordController.text);
     await prefs.setInt('concurrent_tests', _concurrentTests);
     await prefs.setBool('parallel_connection', _parallelConnection);
     await prefs.setBool('kill_switch', _killSwitch);
     await prefs.setBool('traffic_compression', _trafficCompression);
     await prefs.setString('connection_mode', _connectionMode);
-    await prefs.setBool('use_custom_server', _useCustomServer);
     
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -933,152 +918,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       const SizedBox(height: 16),
                       
-                      // سوییچ استفاده از سرور اختصاصی
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Use Custom Server',
-                                  style: TextStyle(
-                                    color: isDark ? Colors.white : Colors.black87,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _useCustomServer 
-                                      ? 'Connect only to custom server'
-                                      : 'Use server list (automatic)',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: isDark ? Colors.white38 : Colors.black38,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Switch(
-                            value: _useCustomServer,
-                            onChanged: (value) {
-                              setState(() {
-                                _useCustomServer = value;
-                              });
-                            },
-                            activeTrackColor: isDark ? const Color(0xFF00FF88) : Colors.blue,
-                          ),
-                        ],
-                      ),
-                      
-                      const SizedBox(height: 16),
-                      
-                      TextField(
-                        controller: _customServerController,
-                        enabled: _useCustomServer,
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: 'Custom Server',
-                          hintText: 'example.com:443',
-                          helperText: 'Format: hostname:port',
-                          labelStyle: TextStyle(
-                            color: isDark ? Colors.white54 : Colors.black54,
-                          ),
-                          helperStyle: TextStyle(
-                            color: isDark ? Colors.white38 : Colors.black38,
-                            fontSize: 12,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? Colors.white24 : Colors.black26,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? const Color(0xFF00FF88) : Colors.blue,
-                            ),
-                          ),
-                          disabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? Colors.white12 : Colors.black12,
-                            ),
-                          ),
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 16),
-                      
-                      TextField(
-                        controller: _customUsernameController,
-                        enabled: _useCustomServer,
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: 'Username (Optional)',
-                          hintText: 'username',
-                          labelStyle: TextStyle(
-                            color: isDark ? Colors.white54 : Colors.black54,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? Colors.white24 : Colors.black26,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? const Color(0xFF00FF88) : Colors.blue,
-                            ),
-                          ),
-                          disabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? Colors.white12 : Colors.black12,
-                            ),
-                          ),
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 16),
-                      
-                      TextField(
-                        controller: _customPasswordController,
-                        enabled: _useCustomServer,
-                        obscureText: true,
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: 'Password (Optional)',
-                          hintText: '••••••••',
-                          labelStyle: TextStyle(
-                            color: isDark ? Colors.white54 : Colors.black54,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? Colors.white24 : Colors.black26,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? const Color(0xFF00FF88) : Colors.blue,
-                            ),
-                          ),
-                          disabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: isDark ? Colors.white12 : Colors.black12,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 20),
-                      Divider(color: isDark ? Colors.white12 : Colors.black12),
-                      const SizedBox(height: 12),
-
                       // ⚙️ MTU - تنظیم واقعی MTU پروتکل SSTP (Off / Auto / Manual)
                       Row(
                         children: [

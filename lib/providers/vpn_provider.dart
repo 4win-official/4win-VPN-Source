@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:openvpn_flutter/openvpn_flutter.dart';
 import '../models/vpn_server.dart';
+import '../models/sstp_server_group.dart';
+import '../services/sstp_server_store.dart';
 import '../models/dns_server.dart';
 import '../models/openvpn_config.dart';
 import '../models/slowdns_config.dart';
@@ -33,6 +35,7 @@ import '../services/mix_plan_builder.dart';
 // Re-export for convenience
 export '../services/vpn_service.dart' show VpnConnectionStatus;
 part 'mix_provider.dart';
+part 'sstp_provider.dart';
 
 class VpnProvider with ChangeNotifier {
   final MixStrategyStore _mixStore = MixStrategyStore();
@@ -51,7 +54,32 @@ class VpnProvider with ChangeNotifier {
       _saveMixStrategy(strategy);
   Future<void> deleteMixStrategy(String id) => _deleteMixStrategy(id);
   Future<void> selectMixStrategy(String id) => _selectMixStrategy(id);
-  final ServerService _serverService = ServerService();
+  final ServerService _serverService;
+  final SstpServerStore _sstpStore;
+  List<SstpServerGroup> _sstpGroups = [];
+  String _sstpTargetGroup = 'default';
+  bool _sstpManualSelection = false;
+  bool _sstpSelectionRestored = false;
+  bool _sstpGroupTesting = false;
+  int _sstpTestedCount = 0;
+  int _sstpTestTotal = 0;
+  int _sstpConnectGen = 0;
+  Future<void>? _sstpLoadOperation;
+  Future<List<VpnServer>>? _sstpTestOperation;
+  Future<bool>? _sstpNativeOperation;
+  List<SstpServerGroup> get sstpGroups => List.unmodifiable(_sstpGroups);
+  String? get selectedSstpGroup =>
+      _sstpManualSelection ? null : _sstpTargetGroup;
+  bool get sstpGroupTesting => _sstpGroupTesting;
+  bool get sstpRefreshing => _isLoadingServers;
+  int get sstpTestedCount => _sstpTestedCount;
+  int get sstpTestTotal => _sstpTestTotal;
+  Future<void> refreshSstpGroup(String id) => _refreshSstpGroup(id);
+  Future<void> addSstpGroup(String name, String content,
+          {String username = 'vpn', String password = 'vpn'}) =>
+      _addSstpGroup(name, content, username: username, password: password);
+  Future<void> removeSstpGroup(String id) => _removeSstpGroup(id);
+  Future<void> selectSstpGroup(String id) => _selectSstpGroup(id);
   final VpnService _vpnService = VpnService();
   final DnsService _dnsService = DnsService();
   final OpenVpnService _openVpnService = OpenVpnService();
@@ -270,7 +298,9 @@ class VpnProvider with ChangeNotifier {
     return '↓ $download  ↑ $upload';
   }
 
-  VpnProvider() {
+  VpnProvider({ServerService? serverService, SstpServerStore? sstpStore})
+      : _serverService = serverService ?? ServerService(),
+        _sstpStore = sstpStore ?? SstpServerStore(serverService: serverService) {
     _mixLoaded = _loadMixStrategies();
     _init();
     // بارگیری پروتکل انتخابی و در صورت نیاز اتصال خودکار به آخرین سرور OpenVPN
@@ -330,8 +360,12 @@ class VpnProvider with ChangeNotifier {
 
   void _init() {
     _statusSubscription = _vpnService.statusStream.listen((status) {
-      if (_selectedProtocol == 'mix')
-        return; // Ignore stale standalone callbacks.
+      if (_selectedProtocol != 'sstp' || _mixDisposed) return;
+      if ((_status == VpnConnectionStatus.disconnecting ||
+           _status == VpnConnectionStatus.disconnected) &&
+          status != VpnConnectionStatus.disconnected) {
+        return;
+      }
       _status = status;
 
       if (status == VpnConnectionStatus.connected) {
@@ -351,7 +385,7 @@ class VpnProvider with ChangeNotifier {
         _currentPing = null;
       } else if (status == VpnConnectionStatus.error) {
         // خطا در اتصال - تلاش برای سرور بعدی
-        _handleConnectionError();
+        _errorMessage = 'SSTP connection failed. Select another server or retry.';
       }
 
       notifyListeners();
@@ -793,112 +827,25 @@ class VpnProvider with ChangeNotifier {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
-  /// Load servers from service
-  Future<void> loadServers({bool forceRefresh = false}) async {
-    _isLoadingServers = true;
-    _errorMessage = null;
-    notifyListeners();
+  /// Load the protected source and saved user groups without testing them.
+  Future<void> loadServers({bool forceRefresh = false}) =>
+      _loadSstpServers(forceRefresh: forceRefresh);
 
-    try {
-      _servers = await _serverService.fetchServers(forceRefresh: forceRefresh);
-
-      // حذف خطا - فقط Connecting نمایش داده شود
-      if (_servers.isEmpty) {
-        // بدون نمایش خطا - حلقه بی‌نهایت دوباره دانلود می‌کند
-        _errorMessage = null;
-      }
-    } catch (e) {
-      // حذف خطا - فقط Connecting نمایش داده شود
-      _errorMessage = null;
-      if (kDebugMode) {
-        debugPrint('⚠️ Failed to load servers; retrying.');
-      }
-    } finally {
-      _isLoadingServers = false;
-      notifyListeners();
-    }
-  }
-
-  /// Test all servers in parallel با تایم‌اوت
+  /// Test only the current SSTP target, retaining all group members.
   Future<void> testAllServers() async {
-    if (_servers.isEmpty) return;
-
-    _isLoadingServers = true;
-    // حذف پیغام Testing - فقط Connecting نمایش داده شود
-    _errorMessage = null;
-    notifyListeners();
-
-    try {
-      // تایم‌اوت کلی 120 ثانیه (2 دقیقه) برای تست - اگه گیر کرد، skip میشه
-      final testedServers = await _serverService
-          .testServersInParallel(
-            _servers,
-            onProgress: (tested, total) {
-              // حذف پیغام Testing - فقط Connecting در UI
-              // پیشرفت تست فقط در debug log
-              if (kDebugMode) {
-                debugPrint('Testing $tested/$total servers...');
-              }
-            },
-          )
-          .timeout(
-            const Duration(seconds: 120), // 2 دقیقه
-            onTimeout: () {
-              // اگه تایم‌اوت شد، لیست خام سرورها رو برگردون (بدون تست)
-              if (kDebugMode) {
-                debugPrint(
-                  '⚠️ Testing timeout - using servers without ping test',
-                );
-              }
-              return _servers;
-            },
-          );
-
-      _servers = testedServers;
-
-      if (_servers.isNotEmpty) {
-        _selectedServer = _servers.first; // بهترین سرور (کمترین ping)
-        _errorMessage = null;
-      } else {
-        // حذف خطا - حلقه بی‌نهایت دوباره تست می‌کند
-        _errorMessage = null;
-      }
-    } catch (e) {
-      // حذف خطا - فقط Connecting نمایش داده شود
-      _errorMessage = null;
-      if (kDebugMode) {
-        debugPrint('⚠️ Failed to test servers; retrying.');
-      }
-      // حتی با خطا، اگه سرور داریم ادامه بده
-      if (_servers.isNotEmpty) {
-        _selectedServer = _servers.first;
-      }
-    } finally {
-      _isLoadingServers = false;
-      notifyListeners();
-    }
+    if (_sstpGroups.isEmpty) await loadServers();
+    if (_sstpGroups.isEmpty || _sstpGroupTesting) return;
+    await _testSstpTarget();
   }
 
-  /// Test all servers and find the best one
-  Future<void> findBestServer() async {
-    await testAllServers();
-  }
-
-  /// Handle connection error and try next server (بدون نمایش شمارش)
-  void _handleConnectionError() async {
-    // کمی تاخیر برای اطمینان از disconnect کامل
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // دوباره اتصال - connect خودش حلقه بی‌نهایت داره
-    await connect();
-  }
+  Future<void> findBestServer() => testAllServers();
 
   /// Connect to selected or best server (one by one - RESTORED WORKING VERSION)
   ///
   /// [forceBypassCert] — set when the user confirmed "connect anyway" after an
   /// OpenVPN certificate warning; passed through to the OpenVPN connect path.
   Future<void> connect({bool forceBypassCert = false}) async {
-    if (_selectedProtocol == 'mix' &&
+    if ((_selectedProtocol == 'mix' || _selectedProtocol == 'sstp') &&
         _status == VpnConnectionStatus.disconnecting)
       return;
     if (_status == VpnConnectionStatus.connecting ||
@@ -906,6 +853,7 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
+    final sstpToken = _selectedProtocol == 'sstp' ? ++_sstpConnectGen : null;
     // ⚡ CRITICAL: Set to connecting immediately so user sees feedback
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
@@ -974,180 +922,11 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
-    // ✅ SSTP: Original SSTP connection logic
-
-    // 🔧 CHECK CUSTOM SERVER FIRST
-    final prefs = await SharedPreferences.getInstance();
-    final useCustomServer = prefs.getBool('use_custom_server') ?? false;
-
-    if (useCustomServer) {
-      // ✅ Use custom server only
-      final customServerStr = prefs.getString('custom_server') ?? '';
-      final customUsername = prefs.getString('custom_username') ?? '';
-      final customPassword = prefs.getString('custom_password') ?? '';
-
-      if (customServerStr.isNotEmpty) {
-        // Parse custom server
-        final parts = customServerStr.split(':');
-        if (parts.length == 2) {
-          final customServer = VpnServer(
-            address: parts[0],
-            port: int.tryParse(parts[1]) ?? 443,
-            username: customUsername.isNotEmpty ? customUsername : 'vpn',
-            password: customPassword.isNotEmpty ? customPassword : 'vpn',
-          );
-
-          _selectedServer = customServer;
-          notifyListeners();
-
-          try {
-            // Request VPN permission
-            final permissionGranted = await _vpnService.requestPermission();
-
-            if (!permissionGranted) {
-              _status = VpnConnectionStatus.error;
-              _errorMessage = 'VPN permission denied';
-              notifyListeners();
-              return;
-            }
-
-            // Connect to custom server
-            final success = await _vpnService.connect(customServer);
-
-            if (success) {
-              // Success!
-              return;
-            } else {
-              _status = VpnConnectionStatus.error;
-              _errorMessage = 'Failed to connect to custom server';
-              notifyListeners();
-              return;
-            }
-          } catch (e) {
-            _status = VpnConnectionStatus.error;
-            _errorMessage = 'Custom server error: $e';
-            notifyListeners();
-            return;
-          }
-        } else {
-          _status = VpnConnectionStatus.error;
-          _errorMessage = 'Invalid custom server format. Use: hostname:port';
-          notifyListeners();
-          return;
-        }
-      } else {
-        _status = VpnConnectionStatus.error;
-        _errorMessage = 'Custom server is empty';
-        notifyListeners();
-        return;
-      }
+    if (sstpToken == null || sstpToken != _sstpConnectGen ||
+        _selectedProtocol != 'sstp' || _mixDisposed) {
+      return;
     }
-
-    // ✅ If not using custom server, use server list
-    // 1️⃣ If no servers → infinite loop: download → test → connect
-    while (_servers.isEmpty) {
-      await loadServers(forceRefresh: true);
-      if (_servers.isEmpty) {
-        await Future.delayed(const Duration(seconds: 2));
-        continue;
-      }
-    }
-
-    // 2️⃣ Test servers (batch by batch)
-    await testAllServers();
-
-    // 3️⃣ If still no servers after test → re-download and test
-    while (_servers.isEmpty) {
-      await loadServers(forceRefresh: true);
-      if (_servers.isEmpty) {
-        await Future.delayed(const Duration(seconds: 2));
-        continue;
-      }
-      await testAllServers();
-    }
-
-    // تنظیمات DNS برای اتصال SSTP
-    final bool deepScan = prefs.getBool('deep_scan') ?? false;
-    final String chosenDns = (prefs.getString('custom_dns') ?? '8.8.8.8')
-        .trim();
-
-    // تنظیم MTU برای SSTP. سه حالت:
-    //   'off'    : MTU پیش‌فرض (1500)
-    //   'manual' : مقدار دستی واردشده توسط کاربر (1280..1500)
-    //   'auto'   : تشخیص خودکار واقعی MTU با probe به سرور
-    String mtuMode = prefs.getString('mtu_mode') ?? 'off';
-    int manualMtu = (prefs.getInt('manual_mtu') ?? 1400).clamp(1280, 1500);
-
-    // ✂️ SSTP Fragment: SSTP wraps PPP inside TLS, so we cannot fragment the
-    // TLS ClientHello the way Xray does. The genuine, observable way to
-    // "fragment" an SSTP tunnel is to shrink the inner PPP MTU so the wrapped
-    // PPP frames are split into several smaller IP packets — this breaks up the
-    // uniform packet-size fingerprint that some DPI boxes key on. We only apply
-    // it when the user hasn't already chosen an explicit Manual/Auto MTU, so we
-    // never override their MTU choice.
-    final bool sstpFragment = prefs.getBool('sstp_fragment') ?? false;
-    if (sstpFragment && mtuMode == 'off') {
-      // Derive a smaller MTU from the configured fragment size. Larger sizes
-      // -> less aggressive (bigger MTU); smaller sizes -> more aggressive.
-      final String fragSize = prefs.getString('sstp_fragment_size') ?? '1-3';
-      final int firstNum = int.tryParse(fragSize.split('-').first.trim()) ?? 1;
-      // Map fragment "size" 1..6 to an MTU in the 1280..1380 range.
-      final int fragMtu = (1280 + (firstNum.clamp(1, 6) - 1) * 20).clamp(
-        1280,
-        1500,
-      );
-      mtuMode = 'manual';
-      manualMtu = fragMtu;
-    }
-
-    // در حالت Deep Scan هر سرور با چند DNS مختلف تست می‌شود (ممکن است یک سرور
-    // با DNS گوگل و سرور دیگری با DNS کلادفلر کار کند). در حالت عادی فقط از
-    // DNS انتخاب‌شده‌ی کاربر استفاده می‌شود.
-    final List<String> dnsCandidates = deepScan
-        ? _deepScanDnsList()
-        : [chosenDns.isNotEmpty ? chosenDns : '8.8.8.8'];
-
-    // 4️⃣ Try connecting one by one (best ping first)
-    for (var server in _servers) {
-      _selectedServer = server;
-      notifyListeners();
-
-      for (final dns in dnsCandidates) {
-        try {
-          // Request VPN permission first
-          final permissionGranted = await _vpnService.requestPermission();
-
-          if (!permissionGranted) {
-            // No error message - just keep trying
-            return;
-          }
-
-          final success = await _vpnService.connect(
-            server,
-            dns: dns,
-            mtuMode: mtuMode,
-            manualMtu: manualMtu,
-          );
-
-          if (success) {
-            // Success - exit loop
-            return;
-          }
-        } catch (e) {
-          if (kDebugMode) {
-            debugPrint('⚠️ Failed: ${server.fullAddress} via DNS $dns: $e');
-          }
-          // Continue to next DNS / next server
-          continue;
-        }
-      }
-    }
-
-    // 5️⃣ If all failed → restart from beginning (infinite loop)
-    if (_status != VpnConnectionStatus.connected) {
-      // Re-download, test, and try again
-      await connect();
-    }
+    await _connectSstp();
   }
 
   /// لیست DNS هایی که در حالت Deep Scan برای هر سرور امتحان می‌شوند.
@@ -3109,6 +2888,7 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
+    _sstpConnectGen++;
     _mixConnectGen++;
     // Invalidate any in-flight Xray connect (e.g. a group delay-test in
     // progress) so it aborts instead of connecting after the user cancelled.
@@ -3215,6 +2995,7 @@ class VpnProvider with ChangeNotifier {
           debugPrint('🔌 Disconnecting WARP...');
         }
       } else {
+        try { await _sstpNativeOperation; } catch (_) {}
         await _vpnService.disconnect();
       }
 
@@ -3229,11 +3010,8 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Select a specific server
-  void selectServer(VpnServer server) {
-    _selectedServer = server;
-    notifyListeners();
-  }
+  /// A manual target is tested normally on connect, never bypassing tests.
+  void selectServer(VpnServer server) => _selectSstpServer(server);
 
   /// Clear error message
   void clearError() {
@@ -3241,50 +3019,21 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Refresh servers
-  Future<void> refreshServers() async {
-    await _serverService.clearCache();
-    await loadServers(forceRefresh: true);
-  }
+  /// Refresh SSTP sources without touching other protocol selections.
+  Future<void> refreshServers() => loadServers(forceRefresh: true);
 
-  /// Connect to next server in list
   Future<void> connectToNextServer() async {
     if (_servers.isEmpty || _selectedServer == null) return;
-
-    // Find current server index
-    final currentIndex = _servers.indexWhere(
-      (s) => s.fullAddress == _selectedServer?.fullAddress,
-    );
-
-    if (currentIndex == -1 || currentIndex >= _servers.length - 1) {
-      // حذف ارور - همیشه Connecting باقی بماند
-      // دوباره به اولین سرور برگرد و تلاش کن
-      if (_servers.isNotEmpty) {
-        _selectedServer = _servers.first;
-      }
-      notifyListeners();
-      return;
-    }
-
-    // Disconnect first
+    final current = _servers.indexOf(_selectedServer!);
+    final next = _servers[(current + 1) % _servers.length];
     await disconnect();
-
-    // Wait for disconnect
-    await Future.delayed(const Duration(seconds: 1));
-
-    // Select next server
-    _selectedServer = _servers[currentIndex + 1];
-    notifyListeners();
-
-    // Connect to next server
+    selectServer(next);
     await connect();
   }
 
-  /// Reset state (called when app is paused and VPN is not connected)
+  /// Keep persisted SSTP targets when returning from the background.
   void resetState() {
-    if (!isConnected) {
-      _servers.clear();
-      _selectedServer = null;
+    if (!isConnected && !isConnecting && !_sstpGroupTesting) {
       _errorMessage = null;
       _connectionDuration = Duration.zero;
       _totalDownloadBytes = 0;
@@ -3292,9 +3041,7 @@ class VpnProvider with ChangeNotifier {
       _lastDownloadBytes = 0;
       _lastUploadBytes = 0;
       notifyListeners();
-
-      // Reload and test servers
-      _loadAndTestServers();
+      unawaited(loadServers());
     }
   }
 
@@ -3538,6 +3285,7 @@ class VpnProvider with ChangeNotifier {
   @override
   void dispose() {
     _mixDisposed = true;
+    _sstpConnectGen++;
     _slowDnsConnectGen++;
     SlowDnsConnection.detach();
     _mixConnectGen++;
