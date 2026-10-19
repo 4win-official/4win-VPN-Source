@@ -2,11 +2,8 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-/// A translucent lens, not an opaque card with a glow painted in its centre.
-///
-/// The scene supplies the glass colour through a clipped backdrop blur. Most of
-/// the reflection is confined to the bevel so labels remain crisp and the same
-/// material works over both the light and dark home screen.
+/// A translucent lens with a blurred scene, broad specular sweeps, and a thick
+/// refractive rim. The centre stays comparatively quiet so labels remain crisp.
 class ProtocolGlassSurface extends StatelessWidget {
   const ProtocolGlassSurface({
     super.key,
@@ -43,26 +40,26 @@ class ProtocolGlassSurface extends StatelessWidget {
       child: ClipRRect(
         borderRadius: _radius,
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
           child: DecoratedBox(
             key: const ValueKey('protocol-glass-tint'),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                stops: const [0, 0.32, 0.7, 1],
+                stops: const [0, 0.28, 0.68, 1],
                 colors: isDark
                     ? const [
-                        Color(0x38282B30),
-                        Color(0x26181B20),
-                        Color(0x20181B20),
-                        Color(0x30282B30),
+                        Color(0x3D242A32),
+                        Color(0x28171C24),
+                        Color(0x22141A22),
+                        Color(0x382B323B),
                       ]
                     : const [
-                        Color(0x60FFFFFF),
-                        Color(0x36FFFFFF),
-                        Color(0x2CF4F7FA),
-                        Color(0x48FFFFFF),
+                        Color(0x66FFFFFF),
+                        Color(0x3DFFFFFF),
+                        Color(0x30F2F6FA),
+                        Color(0x55FFFFFF),
                       ],
               ),
             ),
@@ -88,20 +85,75 @@ class _GlassReflection extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    // A very quiet grazing reflection fades out before the list. No artificial
-    // central spotlight: the background, not a radial blob, provides depth.
+    // A bowed reflection has its own silhouette: this reads as curved glass,
+    // rather than another full-panel tint. It fades before the main list.
+    final shoulder = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, size.height * 0.09)
+      ..cubicTo(
+        size.width * 0.72,
+        size.height * 0.04,
+        size.width * 0.36,
+        size.height * 0.30,
+        0,
+        size.height * 0.23,
+      )
+      ..close();
+    canvas.drawPath(
+      shoulder,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: isDark ? 0.18 : 0.26),
+            Colors.white.withValues(alpha: 0.02),
+          ],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height * 0.3)),
+    );
+    // Broad, offset bands imply a curved lens while leaving the content area
+    // readable. Each band is clipped by the parent's ClipRRect.
     canvas.drawRect(
       rect,
       Paint()
         ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: const Alignment(0.25, 0.1),
+          begin: const Alignment(-1.15, -0.8),
+          end: const Alignment(0.8, 0.15),
           colors: [
-            Colors.white.withValues(alpha: isDark ? 0.07 : 0.16),
-            Colors.white.withValues(alpha: 0.015),
+            Colors.white.withValues(alpha: isDark ? 0.22 : 0.34),
+            Colors.white.withValues(alpha: isDark ? 0.075 : 0.14),
             Colors.white.withValues(alpha: 0),
           ],
-          stops: const [0, 0.45, 1],
+          stops: const [0, 0.18, 0.58],
+        ).createShader(rect),
+    );
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: const Alignment(-0.25, -1.2),
+          end: const Alignment(0.65, 1.15),
+          colors: [
+            Colors.white.withValues(alpha: isDark ? 0.13 : 0.22),
+            Colors.white.withValues(alpha: 0),
+            Colors.white.withValues(alpha: isDark ? 0.045 : 0.09),
+            Colors.white.withValues(alpha: 0),
+          ],
+          stops: const [0, 0.22, 0.45, 0.78],
+        ).createShader(rect),
+    );
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: const Alignment(1.1, -0.75),
+          end: const Alignment(-0.75, 0.9),
+          colors: [
+            Colors.white.withValues(alpha: isDark ? 0.12 : 0.18),
+            Colors.white.withValues(alpha: 0),
+          ],
+          stops: const [0, 0.33],
         ).createShader(rect),
     );
   }
@@ -124,8 +176,8 @@ class _GlassBevel extends CustomPainter {
     if (size.isEmpty) return;
     final rect = Offset.zero & size;
 
-    // A curved lens catches light at opposing corners. The wide, faint band
-    // rolls into a sharper hairline, rather than two uniform concentric borders.
+    // A thick, uneven caustic band gives the panel a curved lens edge instead
+    // of a flat uniform outline.
     final bevel = Path()
       ..fillType = PathFillType.evenOdd
       ..addRRect(_edge(rect, 0.5))
@@ -136,12 +188,12 @@ class _GlassBevel extends CustomPainter {
         ..shader = SweepGradient(
           center: Alignment.center,
           colors: [
-            Colors.white.withValues(alpha: 0.015),
-            Colors.white.withValues(alpha: isDark ? 0.15 : 0.28),
-            Colors.white.withValues(alpha: 0.025),
-            Colors.black.withValues(alpha: isDark ? 0.09 : 0.055),
-            Colors.white.withValues(alpha: isDark ? 0.22 : 0.42),
-            Colors.white.withValues(alpha: 0.015),
+            Colors.white.withValues(alpha: isDark ? 0.04 : 0.09),
+            Colors.white.withValues(alpha: isDark ? 0.32 : 0.52),
+            Colors.white.withValues(alpha: isDark ? 0.06 : 0.12),
+            Colors.black.withValues(alpha: isDark ? 0.18 : 0.08),
+            Colors.white.withValues(alpha: isDark ? 0.40 : 0.62),
+            Colors.white.withValues(alpha: isDark ? 0.03 : 0.08),
           ],
           stops: const [0, 0.18, 0.36, 0.53, 0.68, 1],
         ).createShader(rect),
@@ -151,15 +203,15 @@ class _GlassBevel extends CustomPainter {
       _edge(rect, 0.65),
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.3
+        ..strokeWidth = 1.7
         ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withValues(alpha: isDark ? 0.72 : 0.95),
-            Colors.white.withValues(alpha: isDark ? 0.18 : 0.40),
-            Colors.white.withValues(alpha: isDark ? 0.045 : 0.12),
-            Colors.white.withValues(alpha: isDark ? 0.36 : 0.72),
+            Colors.white.withValues(alpha: isDark ? 0.86 : 1.0),
+            Colors.white.withValues(alpha: isDark ? 0.25 : 0.52),
+            Colors.white.withValues(alpha: isDark ? 0.06 : 0.16),
+            Colors.white.withValues(alpha: isDark ? 0.52 : 0.86),
           ],
           stops: const [0, 0.28, 0.62, 1],
         ).createShader(rect),
@@ -171,14 +223,14 @@ class _GlassBevel extends CustomPainter {
       _edge(rect, 4.5),
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
+        ..strokeWidth = 1.25
         ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.black.withValues(alpha: isDark ? 0.16 : 0.07),
+            Colors.black.withValues(alpha: isDark ? 0.24 : 0.11),
             Colors.black.withValues(alpha: 0),
-            Colors.white.withValues(alpha: isDark ? 0.045 : 0.13),
+            Colors.white.withValues(alpha: isDark ? 0.09 : 0.18),
           ],
           stops: const [0, 0.48, 1],
         ).createShader(rect),

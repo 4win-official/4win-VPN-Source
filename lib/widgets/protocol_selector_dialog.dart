@@ -47,7 +47,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Padding(
-          padding: const EdgeInsets.all(6),
+          padding: const EdgeInsets.all(11),
           child: Icon(
             Icons.settings,
             size: 22,
@@ -87,72 +87,108 @@ class ProtocolSelectorDialog extends StatelessWidget {
     required String subtitle,
     required IconData icon,
     required Color accent,
-    bool divider = true,
     String? badge,
   }) {
-    return Column(
-      children: [
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          leading: Icon(
-            icon,
-            color: provider.selectedProtocol == protocol
-                ? accent
-                : (isDark ? Colors.white54 : Colors.black54),
-            size: 28,
+    final selected = provider.selectedProtocol == protocol;
+    // Keep coloured controls legible without changing each protocol's identity.
+    final hsl = HSLColor.fromColor(accent);
+    final readableAccent = hsl
+        .withLightness(isDark ? hsl.lightness.clamp(0.65, 0.8) : 0.32)
+        .toColor();
+    final ink = isDark ? Colors.white : const Color(0xFF122238);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Ink(
+        key: ValueKey('protocol-row-$protocol'),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: selected
+                ? [
+                    readableAccent.withValues(alpha: isDark ? 0.22 : 0.15),
+                    Colors.white.withValues(alpha: isDark ? 0.07 : 0.32),
+                    readableAccent.withValues(alpha: 0.07),
+                  ]
+                : [
+                    Colors.white.withValues(alpha: isDark ? 0.08 : 0.22),
+                    Colors.white.withValues(alpha: isDark ? 0.02 : 0.08),
+                  ],
           ),
-          title: Row(
-            mainAxisSize: MainAxisSize.min,
+          border: Border.all(
+            color: selected
+                ? readableAccent.withValues(alpha: 0.65)
+                : Colors.white.withValues(alpha: isDark ? 0.14 : 0.46),
+          ),
+        ),
+        child: ListTile(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          contentPadding: const EdgeInsets.only(left: 12, right: 2),
+          minLeadingWidth: 30,
+          horizontalTitleGap: 10,
+          leading: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: readableAccent.withValues(alpha: isDark ? 0.13 : 0.09),
+              border: Border.all(color: readableAccent.withValues(alpha: 0.22)),
+            ),
+            child: Icon(icon, color: readableAccent, size: 23),
+          ),
+          title: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Flexible(
-                child: _titleText(
-                  context,
-                  title,
-                  provider,
-                  isDark,
-                  protocol,
-                  16,
-                ),
-              ),
-              if (badge != null) ...[
-                const SizedBox(width: 8),
+              _titleText(context, title, provider, isDark, protocol, 16),
+              if (badge != null)
                 Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
+                    horizontal: 6,
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: accent.withValues(alpha: 0.6)),
+                    color: readableAccent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(
+                      color: readableAccent.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Text(
                     badge,
                     style: TextStyle(
-                      color: accent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+                      color: readableAccent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-              ],
             ],
           ),
-          subtitle: Text(
-            subtitle,
-            style: TextStyle(
-              fontSize: 13,
-              color: isDark ? Colors.white60 : Colors.black54,
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 12,
+                color: ink.withValues(alpha: 0.76),
+              ),
             ),
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (provider.selectedProtocol == protocol)
-                Icon(Icons.check_circle, color: accent),
+              if (selected)
+                Icon(Icons.check_circle, color: readableAccent, size: 20),
               _gearButton(
                 context,
                 isDark: isDark,
+                color: ink.withValues(alpha: 0.78),
                 tooltip: '$title settings',
                 onTap: () => _openProtocolSettings(context, protocol),
               ),
@@ -163,15 +199,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
             Navigator.pop(context);
           },
         ),
-        if (divider)
-          Divider(
-            height: 20,
-            thickness: 0.6,
-            color: (isDark ? Colors.white : Colors.black).withValues(
-              alpha: 0.10,
-            ),
-          ),
-      ],
+      ),
     );
   }
 
@@ -198,12 +226,19 @@ class ProtocolSelectorDialog extends StatelessWidget {
             child: ProtocolGlassSurface(
               isDark: isDark,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
                 child: Column(
                   children: [
                     Row(
                       children: [
-                        const SizedBox(width: 34),
+                        IconButton(
+                          tooltip: 'Close protocol selector',
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.close_rounded, size: 21),
+                          color: isDark
+                              ? Colors.white70
+                              : const Color(0xFF334155),
+                        ),
                         Expanded(
                           child: Text(
                             'Select Protocol',
@@ -224,7 +259,18 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                      child: Text(
+                        'Choose your connection',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark
+                              ? Colors.white70
+                              : const Color(0xFF42536A),
+                        ),
+                      ),
+                    ),
                     Expanded(
                       child: Scrollbar(
                         thumbVisibility: true,
@@ -322,7 +368,6 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                 subtitle: 'DNS Tunneling for heavy censorship',
                                 icon: Icons.cloud_queue,
                                 accent: Colors.orange,
-                                divider: false,
                                 badge: 'Beta',
                               ),
                             ],

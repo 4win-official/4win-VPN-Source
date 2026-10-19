@@ -68,6 +68,21 @@ void main() {
       // Guard against reverting to a nearly opaque light/dark panel.
       expect(gradient.colors.every((color) => color.a < 0.45), isTrue);
       expect(find.byType(BackdropFilter), findsOneWidget);
+      final blur = tester.widget<BackdropFilter>(find.byType(BackdropFilter));
+      expect(blur.filter.toString(), contains('20.0'));
+      final selectedRow = tester.widget<Ink>(
+        find.byKey(const ValueKey('protocol-row-warp')),
+      );
+      final otherRow = tester.widget<Ink>(
+        find.byKey(const ValueKey('protocol-row-xray')),
+      );
+      final selectedDecoration = selectedRow.decoration! as BoxDecoration;
+      final otherDecoration = otherRow.decoration! as BoxDecoration;
+      expect(selectedDecoration.gradient, isNot(otherDecoration.gradient));
+      expect(selectedDecoration.border, isNot(otherDecoration.border));
+      final settings = find.byTooltip('WARP settings');
+      expect(tester.getSize(settings).width, greaterThanOrEqualTo(44));
+      expect(tester.getSize(settings).height, greaterThanOrEqualTo(44));
       final glass = find.byType(ProtocolGlassSurface);
       final clip = tester.widget<ClipRRect>(
         find.descendant(of: glass, matching: find.byType(ClipRRect)).first,
@@ -134,6 +149,39 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     provider.dispose();
   });
+
+  testWidgets('close control dismisses without selecting a protocol', (
+    tester,
+  ) async {
+    final provider = _SelectorProvider();
+    await _open(tester, provider, Brightness.light);
+    await tester.tap(find.byTooltip('Close protocol selector'));
+    await tester.pumpAndSettle();
+    expect(provider.switchedTo, isNull);
+    expect(find.byType(ProtocolSelectorDialog), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    provider.dispose();
+  });
+
+  for (final size in [const Size(320, 568), const Size(568, 320)]) {
+    testWidgets('large text stays scrollable at $size', (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final provider = _SelectorProvider();
+      await _open(tester, provider, Brightness.dark);
+      await tester.ensureVisible(find.text('Slow DNS'));
+      await tester.tap(find.text('Slow DNS'));
+      await tester.pumpAndSettle();
+      expect(provider.switchedTo, 'slowdns');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      provider.dispose();
+    });
+  }
 
   const protocols = {
     'Mix': 'mix',
