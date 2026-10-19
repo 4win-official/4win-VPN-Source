@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/sstp_server_group.dart';
 import '../models/vpn_server.dart';
+import '../models/mix_strategy.dart';
 import '../providers/vpn_provider.dart';
 import '../widgets/animated_server_group.dart';
 import '../widgets/four_win_loader.dart';
@@ -10,7 +11,10 @@ import '../widgets/four_win_loader.dart';
 /// Grouped SSTP server picker. Group selection is deliberately separate from
 /// the arrow: tapping a header starts the provider's fastest-server test.
 class SstpServersScreen extends StatefulWidget {
-  const SstpServersScreen({super.key});
+  const SstpServersScreen({super.key, this.initialSelection, this.onSelected});
+
+  final MixHop? initialSelection;
+  final ValueChanged<MixHop>? onSelected;
 
   @override
   State<SstpServersScreen> createState() => _SstpServersScreenState();
@@ -53,6 +57,10 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
   }
 
   Future<void> _selectGroup(SstpServerGroup group) async {
+    if (widget.onSelected != null) {
+      widget.onSelected!(MixHop(protocol: 'sstp', group: group.id));
+      return;
+    }
     final p = context.read<VpnProvider>();
     if (p.isConnected || p.isConnecting) {
       _toast('Disconnect first to change the SSTP server.');
@@ -63,6 +71,15 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
   }
 
   Future<void> _selectServer(VpnServer server) async {
+    if (widget.onSelected != null) {
+      final owner = context.read<VpnProvider>().sstpGroups.firstWhere(
+        (g) => g.servers.contains(server),
+      );
+      widget.onSelected!(
+        MixHop(protocol: 'sstp', serverId: server.fullAddress, group: owner.id),
+      );
+      return;
+    }
     final p = context.read<VpnProvider>();
     if (p.isConnected || p.isConnecting) {
       _toast('Disconnect first to change the SSTP server.');
@@ -186,9 +203,10 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
 
   Widget _group(VpnProvider p, SstpServerGroup g, bool dark, Color accent) {
     final open = _expanded.contains(g.id);
-    final selected =
-        p.selectedSstpGroup == g.id ||
-        g.servers.any((s) => _same(s, p.selectedServer));
+    final selected = widget.onSelected != null
+        ? _isInitialGroup(g)
+        : p.selectedSstpGroup == g.id ||
+              g.servers.any((s) => _same(s, p.selectedServer));
     final busy =
         p.sstpGroupTesting ||
         p.sstpRefreshing ||
@@ -261,6 +279,19 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
                 ),
               ),
               if (selected) Icon(Icons.check_circle, color: accent, size: 21),
+              IconButton(
+                tooltip: 'Test group latency',
+                onPressed: busy
+                    ? null
+                    : () => _run(() => p.testSstpGroup(g.id)),
+                icon: testing
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: FourWinLoader(strokeWidth: 1.8, color: accent),
+                      )
+                    : const Icon(Icons.speed, size: 21),
+              ),
               if (g.isDefault || g.subscriptionUrl != null)
                 IconButton(
                   tooltip: 'Refresh group',
@@ -292,13 +323,22 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         ),
       ),
       itemCount: g.servers.length,
-      itemBuilder: (_, i) => _serverTile(p, g.servers[i], accent, dark),
+      itemBuilder: (_, i) => _serverTile(p, g, g.servers[i], accent, dark),
     );
   }
 
-  Widget _serverTile(VpnProvider p, VpnServer s, Color accent, bool dark) {
-    final selected = _same(s, p.selectedServer);
+  Widget _serverTile(
+    VpnProvider p,
+    SstpServerGroup group,
+    VpnServer s,
+    Color accent,
+    bool dark,
+  ) {
+    final selected = widget.onSelected != null
+        ? _isInitialServer(group, s)
+        : _same(s, p.selectedServer);
     final ping = s.ping;
+    final testing = p.isSstpServerTesting(s);
     return ListTile(
       dense: true,
       leading: CircleAvatar(
@@ -318,10 +358,45 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
             : '$ping ms',
         style: TextStyle(color: ping != null && ping >= 0 ? accent : null),
       ),
-      trailing: selected ? Icon(Icons.check_circle, color: accent) : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Test latency',
+            onPressed:
+                testing ||
+                    p.sstpGroupTesting ||
+                    p.sstpRefreshing ||
+                    p.isConnected ||
+                    p.isConnecting
+                ? null
+                : () => _run(() => p.testSstpServer(group.id, s)),
+            icon: testing
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: FourWinLoader(strokeWidth: 1.8, color: accent),
+                  )
+                : const Icon(Icons.speed, size: 20),
+          ),
+          if (selected) Icon(Icons.check_circle, color: accent),
+        ],
+      ),
       onTap: () => _selectServer(s),
     );
   }
+
+  bool _isInitialGroup(SstpServerGroup group) =>
+      widget.initialSelection?.protocol == 'sstp' &&
+      (widget.initialSelection?.group == group.id ||
+          (widget.initialSelection?.group == null &&
+              group.servers.any((s) => _isInitialServer(group, s))));
+
+  bool _isInitialServer(SstpServerGroup group, VpnServer server) =>
+      widget.initialSelection?.protocol == 'sstp' &&
+      (widget.initialSelection?.group == null ||
+          widget.initialSelection?.group == group.id) &&
+      widget.initialSelection?.serverId == server.fullAddress;
 
   bool _same(VpnServer a, VpnServer? b) => identical(a, b);
 

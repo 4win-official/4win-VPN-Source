@@ -4,10 +4,10 @@ import 'package:provider/provider.dart';
 import '../models/dns_server.dart';
 import '../models/mix_strategy.dart';
 import '../models/proxy_server.dart';
-import '../models/xray_server.dart';
 import '../models/openvpn_config.dart';
-import '../models/vpn_server.dart';
 import '../providers/vpn_provider.dart';
+import 'sstp_servers_screen.dart';
+import 'xray_servers_screen.dart';
 
 class MixStrategyEditorScreen extends StatefulWidget {
   const MixStrategyEditorScreen({super.key, this.existingStrategy});
@@ -135,23 +135,20 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
       return;
     }
     final provider = context.read<VpnProvider>();
-    if (hop.protocol == 'xray') {
-      final groups =
-          provider.xrayServers
-              .map((s) => s.group)
-              .where((g) => g.isNotEmpty)
-              .toSet()
-              .toList()
-            ..sort();
-      final selected = await _serverSheet<XrayServer>(
-        title: 'Choose Xray server or group',
-        groups: groups,
-        servers: provider.xrayServers,
-        label: (s) => s.remark,
-        onServer: (s) => MixHop(protocol: 'xray', serverId: s.id),
-        onGroup: (g) => MixHop(protocol: 'xray', group: g),
+    if (hop.protocol == 'xray' || hop.protocol == 'sstp') {
+      final selected = await Navigator.of(context).push<MixHop>(
+        MaterialPageRoute(
+          builder: (pickerContext) {
+            void choose(MixHop value) => Navigator.pop(pickerContext, value);
+            return hop.protocol == 'xray'
+                ? XrayServersScreen(initialSelection: hop, onSelected: choose)
+                : SstpServersScreen(initialSelection: hop, onSelected: choose);
+          },
+        ),
       );
-      if (selected != null && mounted) setState(() => _hops[index] = selected);
+      if (selected != null && mounted && index < _hops.length) {
+        setState(() => _hops[index] = selected);
+      }
     } else if (hop.protocol == 'proxy') {
       final groups =
           provider.proxyServers
@@ -167,16 +164,6 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
         label: (s) => s.remark,
         onServer: (s) => MixHop(protocol: 'proxy', serverId: s.id),
         onGroup: (g) => MixHop(protocol: 'proxy', group: g),
-      );
-      if (selected != null && mounted) setState(() => _hops[index] = selected);
-    } else if (hop.protocol == 'sstp') {
-      final selected = await _serverSheet<VpnServer>(
-        title: 'Choose SSTP server',
-        groups: const [],
-        servers: provider.servers,
-        label: (s) => s.fullAddress,
-        onServer: (s) => MixHop(protocol: 'sstp', serverId: s.fullAddress),
-        onGroup: (_) => throw StateError('SSTP has no groups'),
       );
       if (selected != null && mounted) setState(() => _hops[index] = selected);
     } else if (hop.protocol == 'openvpn') {
@@ -581,9 +568,11 @@ class _GridHop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final title = MixStrategy.protocols[hop.protocol] ?? hop.protocol;
-    final ref = hop.group != null
-        ? 'Group: ${hop.group}'
-        : (hop.serverId ?? 'Choose a reference');
+    final ref = hop.serverId != null
+        ? (hop.group == null
+              ? hop.serverId!
+              : '${hop.serverId} · Group: ${hop.group}')
+        : (hop.group == null ? 'Choose a reference' : 'Group: ${hop.group}');
     return Column(
       children: [
         _GridLine(),

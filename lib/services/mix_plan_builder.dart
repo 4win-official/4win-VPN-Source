@@ -5,6 +5,7 @@ import '../models/dns_server.dart';
 import '../models/mix_strategy.dart';
 import '../models/openvpn_config.dart';
 import '../models/proxy_server.dart';
+import '../models/sstp_server_group.dart';
 import '../models/vpn_server.dart';
 import '../models/warp_account.dart';
 import '../models/xray_server.dart';
@@ -18,6 +19,7 @@ class MixPlanBuilder {
     List<XrayServer> xrayServers = const [],
     List<ProxyServer> proxyServers = const [],
     List<VpnServer> sstpServers = const [],
+    List<SstpServerGroup> sstpGroups = const [],
     List<OpenVpnConfig> openVpnConfigs = const [],
     List<DnsServer> dnsServers = const [],
     WarpAccount? warpAccount,
@@ -103,13 +105,7 @@ class MixPlanBuilder {
           hops.add({'protocol': 'psiphon', 'config': <String, dynamic>{}});
           break;
         case 'sstp':
-          final s = _choose(
-            sstpServers,
-            hop,
-            (v) => v.fullAddress,
-            (_) => '',
-            'SSTP server',
-          );
+          final s = _chooseSstp(hop, sstpServers, sstpGroups);
           hops.add({
             'protocol': 'sstp',
             'config': {
@@ -171,6 +167,7 @@ class MixPlanBuilder {
     List<XrayServer> xrayServers = const [],
     List<ProxyServer> proxyServers = const [],
     List<VpnServer> sstpServers = const [],
+    List<SstpServerGroup> sstpGroups = const [],
     List<OpenVpnConfig> openVpnConfigs = const [],
     List<DnsServer> dnsServers = const [],
     WarpAccount? warpAccount,
@@ -179,10 +176,34 @@ class MixPlanBuilder {
     xrayServers: xrayServers,
     proxyServers: proxyServers,
     sstpServers: sstpServers,
+    sstpGroups: sstpGroups,
     openVpnConfigs: openVpnConfigs,
     dnsServers: dnsServers,
     warpAccount: warpAccount,
   );
+
+  static VpnServer _chooseSstp(
+    MixHop hop,
+    List<VpnServer> legacyServers,
+    List<SstpServerGroup> groups,
+  ) {
+    // A scoped reference must never fall back to a different group's
+    // credentials, even if the same host:port exists there.
+    final candidates = hop.group != null
+        ? groups.where((g) => g.id == hop.group).expand((g) => g.servers)
+        : groups.isNotEmpty
+        ? groups.expand((g) => g.servers)
+        : legacyServers;
+    final matches = candidates
+        .where((s) => hop.serverId == null || s.fullAddress == hop.serverId)
+        .toList();
+    if (matches.isEmpty) {
+      throw const FormatException(
+        'SSTP server/group reference is missing. Edit this strategy.',
+      );
+    }
+    return matches.first;
+  }
 
   static Map<String, dynamic> _decode(String value) =>
       Map<String, dynamic>.from(jsonDecode(value) as Map);

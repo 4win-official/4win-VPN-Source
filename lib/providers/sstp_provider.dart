@@ -222,6 +222,7 @@ extension _SstpProviderLogic on VpnProvider {
     _sstpGroupTesting = true;
     _sstpTestedCount = 0;
     _sstpTestTotal = targets.length;
+    _sstpTestError = null;
     _errorMessage = null;
     for (final server in targets) {
       server.ping = null;
@@ -259,6 +260,84 @@ extension _SstpProviderLogic on VpnProvider {
             'No reachable SSTP servers in this target. Refresh or try another group.';
       }
       return sorted;
+    } catch (_) {
+      _sstpTestError = 'Could not test SSTP servers. Please try again.';
+      rethrow;
+    } finally {
+      _sstpGroupTesting = false;
+      if (!_mixDisposed) notifyListeners();
+    }
+  }
+
+  Future<void> _testSstpServer(String groupId, VpnServer server) async {
+    final group = _sstpGroup(groupId);
+    if (group == null || !group.servers.contains(server)) {
+      throw ArgumentError('SSTP server not found.');
+    }
+    if (_sstpLocked || _sstpGroupTesting || _isLoadingServers) return;
+    final key = server.fullAddress;
+    if (_sstpTestingServers.contains(key)) return;
+    _sstpTestingServers.add(key);
+    _sstpGroupTesting = true;
+    _sstpTestedCount = 0;
+    _sstpTestTotal = 1;
+    _sstpTestError = null;
+    server.ping = null;
+    if (!_mixDisposed) notifyListeners();
+    try {
+      final reachable = await _serverService.testServersInParallel([server]);
+      server.ping = reachable.isEmpty ? -1 : reachable.first.ping;
+      if (server.ping == -1) {
+        _sstpTestError = 'SSTP server ${server.fullAddress} is unreachable.';
+      }
+    } catch (_) {
+      server.ping = -1;
+      _sstpTestError = 'Could not test SSTP server ${server.fullAddress}.';
+      rethrow;
+    } finally {
+      _sstpTestingServers.remove(key);
+      _sstpGroupTesting = false;
+      _sstpTestedCount = 1;
+      if (!_mixDisposed) notifyListeners();
+    }
+  }
+
+  Future<void> _testSstpGroup(String groupId) async {
+    final group = _sstpGroup(groupId);
+    if (group == null) throw ArgumentError('SSTP group not found.');
+    if (_sstpLocked || _sstpGroupTesting || _isLoadingServers) return;
+    _sstpGroupTesting = true;
+    _sstpTestedCount = 0;
+    _sstpTestTotal = group.servers.length;
+    _sstpTestError = null;
+    if (!_mixDisposed) notifyListeners();
+    try {
+      final reachable = await _serverService.testServersInParallel(
+        group.servers,
+        onProgress: (tested, total) {
+          _sstpTestedCount = tested;
+          _sstpTestTotal = total;
+          if (!_mixDisposed) notifyListeners();
+        },
+      );
+      for (final server in group.servers) {
+        final matches = reachable.where(
+          (candidate) =>
+              candidate.fullAddress == server.fullAddress &&
+              candidate.username == server.username &&
+              candidate.password == server.password,
+        );
+        server.ping = matches.isEmpty ? -1 : matches.first.ping;
+      }
+      if (group.servers.isNotEmpty && reachable.isEmpty) {
+        _sstpTestError = 'No reachable SSTP servers in this group.';
+      }
+    } catch (_) {
+      for (final server in group.servers) {
+        server.ping = -1;
+      }
+      _sstpTestError = 'Could not test SSTP group. Please try again.';
+      rethrow;
     } finally {
       _sstpGroupTesting = false;
       if (!_mixDisposed) notifyListeners();

@@ -5,6 +5,9 @@ import 'dart:io';
 class MixHop {
   final String protocol;
   final String? serverId;
+
+  /// For SSTP a server may also carry its owning group, since different
+  /// groups can publish the same endpoint with different credentials.
   final String? group;
   const MixHop({required this.protocol, this.serverId, this.group});
 
@@ -133,7 +136,7 @@ class MixStrategy {
           (hop.group == null || hop.group!.isEmpty)) {
         return 'Choose a server or group for block ${i + 1}.';
       }
-      if (hop.serverId != null && hop.group != null) {
+      if (hop.serverId != null && hop.group != null && hop.protocol != 'sstp') {
         return 'Block ${i + 1} must select a server OR a group.';
       }
       if (hop.protocol == 'direct_dns') {

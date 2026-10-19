@@ -20,6 +20,31 @@ void main() {
       'connection_mode': 'proxy',
     }),
   );
+  test(
+    'Mix protocol selections round-trip without standalone changes',
+    () async {
+      final mixed = MixStrategy(
+        id: 'targets',
+        name: 'Targets',
+        hops: const [
+          MixHop(
+            protocol: 'sstp',
+            group: 'custom',
+            serverId: 'vpn.example:443',
+          ),
+          MixHop(protocol: 'sstp', group: 'default'),
+          MixHop(protocol: 'xray', group: 'subscription'),
+          MixHop(protocol: 'xray', serverId: 'xray-manual'),
+        ],
+      );
+      await store.save([mixed]);
+      expect((await store.load()).single.toJson(), mixed.toJson());
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('selected_xray_server'), 'standalone-xray');
+      expect(prefs.getString('xray_selected_group'), 'standalone-group');
+      expect(prefs.getString('selected_protocol'), 'warp');
+    },
+  );
   test('fresh storage has no strategies and no selected id', () async {
     expect(await store.load(), isEmpty);
     expect(await store.selectedId(), isNull);

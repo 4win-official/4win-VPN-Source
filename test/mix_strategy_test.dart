@@ -8,6 +8,35 @@ MixHop tunnel(String id) => MixHop(protocol: 'xray', serverId: id);
 MixHop dns(String ip) => MixHop(protocol: 'direct_dns', serverId: ip);
 
 void main() {
+  test(
+    'SSTP supports group-scoped servers without relaxing other protocols',
+    () {
+      expect(
+        strategy([
+          const MixHop(protocol: 'sstp', group: 'custom'),
+        ]).validationError,
+        isNull,
+      );
+      expect(
+        strategy([
+          const MixHop(
+            protocol: 'sstp',
+            group: 'custom',
+            serverId: 'vpn.example:443',
+          ),
+        ]).validationError,
+        isNull,
+      );
+      for (final protocol in ['xray', 'proxy', 'direct_dns']) {
+        expect(
+          strategy([
+            MixHop(protocol: protocol, group: 'group', serverId: 'server'),
+          ]).validationError,
+          isNotNull,
+        );
+      }
+    },
+  );
   test('accepts exactly 50 blocks and rejects 51', () {
     expect(
       strategy(

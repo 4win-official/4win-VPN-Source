@@ -61,6 +61,8 @@ class VpnProvider with ChangeNotifier {
   bool _sstpManualSelection = false;
   bool _sstpSelectionRestored = false;
   bool _sstpGroupTesting = false;
+  String? _sstpTestError;
+  final Set<String> _sstpTestingServers = <String>{};
   int _sstpTestedCount = 0;
   int _sstpTestTotal = 0;
   int _sstpConnectGen = 0;
@@ -74,6 +76,12 @@ class VpnProvider with ChangeNotifier {
   bool get sstpRefreshing => _isLoadingServers;
   int get sstpTestedCount => _sstpTestedCount;
   int get sstpTestTotal => _sstpTestTotal;
+  String? get sstpTestError => _sstpTestError;
+  bool isSstpServerTesting(VpnServer server) =>
+      _sstpTestingServers.contains(server.fullAddress);
+  Future<void> testSstpServer(String groupId, VpnServer server) =>
+      _testSstpServer(groupId, server);
+  Future<void> testSstpGroup(String groupId) => _testSstpGroup(groupId);
   Future<void> refreshSstpGroup(String id) => _refreshSstpGroup(id);
   Future<void> addSstpGroup(String name, String content,
           {String username = 'vpn', String password = 'vpn'}) =>

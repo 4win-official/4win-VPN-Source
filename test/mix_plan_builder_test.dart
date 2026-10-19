@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vpn_swift/models/dns_server.dart';
 import 'package:vpn_swift/models/mix_strategy.dart';
 import 'package:vpn_swift/models/proxy_server.dart';
+import 'package:vpn_swift/models/sstp_server_group.dart';
+import 'package:vpn_swift/models/vpn_server.dart';
 import 'package:vpn_swift/services/mix_plan_builder.dart';
 
 void main() {
@@ -13,6 +15,90 @@ void main() {
     address: '127.0.0.1',
     port: 1080,
   );
+  final first = VpnServer(
+    address: 'same.example',
+    port: 443,
+    username: 'first',
+  );
+  final second = VpnServer(
+    address: 'same.example',
+    port: 443,
+    username: 'second',
+  );
+  final groups = [
+    SstpServerGroup(id: 'default', name: 'Default', servers: [first]),
+    SstpServerGroup(id: 'custom', name: 'Custom', servers: [second]),
+  ];
+  Map<String, dynamic> sstpPlan(MixHop hop) => MixPlanBuilder.build(
+    strategy: MixStrategy(id: 'sstp', name: 'SSTP', hops: [hop]),
+    sstpGroups: groups,
+  );
+
+  test('SSTP group resolves its own server and credentials', () {
+    final plan = sstpPlan(const MixHop(protocol: 'sstp', group: 'custom'));
+    final config = (plan['hops'] as List).single['config'];
+    expect(config['host'], 'same.example');
+    expect(config['username'], 'second');
+  });
+  test('SSTP manual server is scoped to its retained group', () {
+    final plan = sstpPlan(
+      const MixHop(
+        protocol: 'sstp',
+        serverId: 'same.example:443',
+        group: 'custom',
+      ),
+    );
+    expect((plan['hops'] as List).single['config']['username'], 'second');
+  });
+  test('removed SSTP group and missing member never fall back', () {
+    expect(
+      () => sstpPlan(
+        const MixHop(
+          protocol: 'sstp',
+          serverId: 'same.example:443',
+          group: 'deleted',
+        ),
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => sstpPlan(
+        const MixHop(
+          protocol: 'sstp',
+          serverId: 'removed.example:443',
+          group: 'custom',
+        ),
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => sstpPlan(const MixHop(protocol: 'sstp', group: 'deleted')),
+      throwsFormatException,
+    );
+  });
+  test('legacy address-only SSTP references remain supported', () {
+    final plan = MixPlanBuilder.buildPlan(
+      strategy: MixStrategy(
+        id: 'legacy',
+        name: 'Legacy',
+        hops: const [MixHop(protocol: 'sstp', serverId: 'same.example:443')],
+      ),
+      sstpServers: [first],
+    );
+    expect((plan['hops'] as List).single['config']['username'], 'first');
+  });
+  test('buildPlan forwards SSTP groups', () {
+    final plan = MixPlanBuilder.buildPlan(
+      strategy: MixStrategy(
+        id: 'alias',
+        name: 'Alias',
+        hops: const [MixHop(protocol: 'sstp', group: 'custom')],
+      ),
+      sstpGroups: groups,
+    );
+    expect((plan['hops'] as List).single['config']['username'], 'second');
+  });
+
   test('builds a logical plan without local listener ports', () {
     final plan = MixPlanBuilder.build(
       strategy: MixStrategy(
@@ -114,10 +200,13 @@ void main() {
     expect(plan['dns'], dnsAddresses.last);
   });
 
-  test('Slow DNS remains excluded while supported Mix protocols are listed', () {
-    expect(MixStrategy.protocols.containsKey('slowdns'), isFalse);
-    expect(MixStrategy.unavailableReason('slowdns'), isNotNull);
-  });
+  test(
+    'Slow DNS remains excluded while supported Mix protocols are listed',
+    () {
+      expect(MixStrategy.protocols.containsKey('slowdns'), isFalse);
+      expect(MixStrategy.unavailableReason('slowdns'), isNotNull);
+    },
+  );
 
   test('plan accepts 50 blocks and rejects 51 before execution', () {
     Map<String, dynamic> build(int length) => MixPlanBuilder.build(

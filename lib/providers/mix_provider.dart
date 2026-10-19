@@ -134,12 +134,15 @@ extension _MixProviderLogic on VpnProvider {
           );
       int delay;
       if (usesNativeChain) {
-        await loadServers(forceRefresh: true);
+        // Keep the picker's loaded groups and latency results. Loading an
+        // unloaded catalog is enough; connecting must not replace selections.
+        await loadServers();
         final plan = MixPlanBuilder.build(
           strategy: strategy,
           xrayServers: xray,
           proxyServers: proxies,
           sstpServers: List<VpnServer>.of(_servers),
+          sstpGroups: List<SstpServerGroup>.of(_sstpGroups),
           openVpnConfigs: await _openVpnService.loadConfigs(),
           dnsServers: dns,
           warpAccount: await _warpService.getAccount(),

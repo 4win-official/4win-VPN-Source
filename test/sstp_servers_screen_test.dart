@@ -54,6 +54,8 @@ class FakeVpnProvider extends ChangeNotifier implements VpnProvider {
 
   @override
   bool get sstpRefreshing => false;
+  @override
+  bool isSstpServerTesting(VpnServer server) => false;
 
   @override
   int get sstpTestedCount => 0;

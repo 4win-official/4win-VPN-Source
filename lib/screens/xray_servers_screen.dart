@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
+import '../models/mix_strategy.dart';
 import '../models/xray_server.dart';
 import '../services/xray_service.dart';
 import '../widgets/animated_server_group.dart';
@@ -16,7 +17,14 @@ import '../widgets/four_win_loader.dart';
 /// down-arrow expands/collapses the group in place. Users can also paste
 /// vless:// / vmess:// / trojan:// / ss:// share links and ping-test servers.
 class XrayServersScreen extends StatefulWidget {
-  const XrayServersScreen({super.key});
+  final MixHop? initialSelection;
+  final ValueChanged<MixHop>? onSelected;
+
+  const XrayServersScreen({
+    super.key,
+    this.initialSelection,
+    this.onSelected,
+  });
 
   @override
   State<XrayServersScreen> createState() => _XrayServersScreenState();
@@ -31,9 +39,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
       final provider = context.read<VpnProvider>();
       // لود سریع از حافظه تا لیست فوراً نمایش داده شود.
       await provider.loadXrayServers();
+      if (!mounted) return;
       // آپدیت ساب‌های پیش‌فرض (Free + Plus) فقط موقع باز شدن اپ در Loading
       // screen انجام می‌شود؛ دیگر هر بار ورود به این صفحه رفرش نمی‌کنیم.
       // کاربر می‌تواند دستی با دکمه‌ی رفرش لیست را به‌روز کند.
@@ -636,9 +646,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final groupAccent = spec.key == XrayServer.plusGroup
         ? const Color(0xFFE6B800)
         : accent;
-    final highlight =
-        (spec.locked && provider.xrayGroupSelectedFor(spec.key)) ||
-        spec.servers.any((s) => provider.selectedXrayServer?.id == s.id);
+    final highlight = widget.onSelected != null
+        ? widget.initialSelection?.group == spec.key ||
+            spec.servers.any((s) => widget.initialSelection?.serverId == s.id)
+        : (spec.locked && provider.xrayGroupSelectedFor(spec.key)) ||
+            spec.servers.any((s) => provider.selectedXrayServer?.id == s.id);
     final shown = spec.servers.length > maxVisible
         ? maxVisible
         : spec.servers.length;
@@ -682,7 +694,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         return _buildServerTile(
           provider,
           server,
-          provider.selectedXrayServer?.id == server.id,
+          widget.onSelected != null
+              ? widget.initialSelection?.serverId == server.id
+              : provider.selectedXrayServer?.id == server.id,
           isDark,
           groupAccent,
           key: ValueKey('xray-server-${server.id}'),
@@ -713,7 +727,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final tcpTesting = provider.xrayGroupTcpTestingFor(groupKey);
     // A named group can be selected as a whole; a specific selected server in
     // this group also counts as "this group active".
-    final groupSelected = locked && provider.xrayGroupSelectedFor(groupKey);
+    final groupSelected = widget.onSelected != null
+        ? widget.initialSelection?.group == groupKey
+        : locked && provider.xrayGroupSelectedFor(groupKey);
     // A group is refreshable only if it's backed by a subscription URL — the
     // built-in free group or a user sub-link group. The user-pasted links
     // group ("My Sub Links") and individual servers have no source URL.
@@ -724,7 +740,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
 
     return InkWell(
       borderRadius: BorderRadius.circular(14),
-      onTap: locked ? () => provider.selectXrayGroup(groupKey) : onToggleExpand,
+      onTap: widget.onSelected != null
+          ? () => widget.onSelected!(MixHop(protocol: 'xray', group: groupKey))
+          : (locked ? () => provider.selectXrayGroup(groupKey) : onToggleExpand),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
@@ -1113,7 +1131,9 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             ),
         ],
       ),
-      onTap: () => provider.selectXrayServer(s),
+      onTap: widget.onSelected != null
+          ? () => widget.onSelected!(MixHop(protocol: 'xray', serverId: s.id))
+          : () => provider.selectXrayServer(s),
     );
   }
 
