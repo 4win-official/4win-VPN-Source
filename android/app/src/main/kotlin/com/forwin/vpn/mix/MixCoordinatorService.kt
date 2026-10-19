@@ -164,6 +164,9 @@ class MixCoordinatorService : VpnService() {
         require(hops.length() in 1..50) { "Mix supports 1 to 50 blocks" }
         val heldPorts = ArrayList<ServerSocket>()
         val relayConfig = plan.optJSONObject("udpRelay")?.let { MixUdpRelay.Config.fromJson(it) }
+        // Reject known impossible UDP underlays before binding listeners or
+        // starting any worker. Native readiness still validates real transport.
+        MixCapabilities.validatePlan(plan, relayConfig != null)
         fun reservePort(): Int {
             val socket = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
             heldPorts.add(socket)

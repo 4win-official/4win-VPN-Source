@@ -220,6 +220,88 @@ class MixProtocolMatrixTest {
     }
 
     @Test
+    fun tcpOnlyProxyCapabilitiesFailClosedInsteadOfClaimingUdp() {
+        val http = hop("xray", "http")
+        val socks4 = hop("proxy", "socks").put("socks4", JSONObject())
+
+        assertFalse(MixCapabilities.afterXray(http, true))
+        assertFalse(MixCapabilities.afterXray(socks4, true))
+        assertTrue(MixCapabilities.needsRelay(http))
+        assertTrue(MixCapabilities.needsRelay(socks4))
+
+        val mismatchedSocks4 = hop("xray", "http").put("socks4", JSONObject())
+        assertThrows(IllegalArgumentException::class.java) {
+            MixCapabilities.needsRelay(mismatchedSocks4)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            MixCapabilities.afterXray(mismatchedSocks4, true)
+        }
+
+        val missingOutbound = hop("xray", "http").apply { remove("outbound") }
+        assertThrows(IllegalStateException::class.java) {
+            MixCapabilities.needsRelay(missingOutbound)
+        }
+        assertThrows(IllegalStateException::class.java) {
+            MixCapabilities.afterXray(missingOutbound, true)
+        }
+    }
+
+    @Test
+    fun wholePlanValidationRequiresRelayBeforeWarpButAllowsNativeRestoration() {
+        val httpThenWarp = plan("xray", "warp")
+        httpThenWarp.getJSONArray("hops").getJSONObject(0)
+            .getJSONObject("outbound").put("protocol", "http")
+        assertThrows(IllegalArgumentException::class.java) {
+            MixCapabilities.validatePlan(httpThenWarp, relayConfigured = false)
+        }
+        MixCapabilities.validatePlan(httpThenWarp, relayConfigured = true)
+
+        val socks4ThenWarp = plan("proxy", "warp")
+        socks4ThenWarp.getJSONArray("hops").getJSONObject(0)
+            .put("socks4", JSONObject().put("host", "proxy.invalid").put("port", 1080))
+        assertThrows(IllegalArgumentException::class.java) {
+            MixCapabilities.validatePlan(socks4ThenWarp, relayConfigured = false)
+        }
+
+        // DNS is a policy boundary, not a UDP tunnel. Nor can ordinary SOCKS
+        // or Shadowsocks restore UDP lost at an earlier HTTP CONNECT hop.
+        for (datagram in listOf("socks", "shadowsocks")) {
+            val tcpOnly = plan("proxy", "direct_dns", "proxy", "direct_dns", "warp")
+            tcpOnly.getJSONArray("hops").getJSONObject(0)
+                .getJSONObject("outbound").put("protocol", "http")
+            tcpOnly.getJSONArray("hops").getJSONObject(2)
+                .getJSONObject("outbound").put("protocol", datagram)
+            assertThrows(IllegalArgumentException::class.java) {
+                MixCapabilities.validatePlan(tcpOnly, false)
+            }
+            MixCapabilities.validatePlan(tcpOnly, true)
+        }
+
+        // A native packet tunnel is a capability boundary; the worker's
+        // runtime readiness remains authoritative after this preflight.
+        for (restorer in listOf("sstp", "psiphon", "openvpn", "xray")) {
+            val restored = plan("proxy", "direct_dns", restorer, "direct_dns", "warp")
+            restored.getJSONArray("hops").getJSONObject(0)
+                .getJSONObject("outbound").put("protocol", "http")
+            val before = restored.toString()
+            MixCapabilities.validatePlan(restored, relayConfigured = false)
+            assertEquals(before, restored.toString())
+        }
+        for (count in listOf(0, 51)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                MixCapabilities.validatePlan(plan(*Array(count) { "warp" }), false)
+            }
+        }
+        val fifty = plan(*Array(50) { protocols[it % protocols.size] })
+        val before = fifty.toString()
+        MixCapabilities.validatePlan(fifty, false)
+        assertEquals(before, fifty.toString())
+        assertThrows(IllegalArgumentException::class.java) {
+            MixCapabilities.validatePlan(plan("slowdns", "warp"), false)
+        }
+    }
+
+    @Test
     fun psiphonPacketTunnelBetweenTcpProxyAndWarpAddsNoExternalRelayOrHiddenHop() {
         val input = plan("proxy", "psiphon", "warp")
         input.getJSONArray("hops").put(0, hop("proxy", "http"))

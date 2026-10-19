@@ -30,6 +30,13 @@ class PsiphonMixAdapter : MixAdapter {
         internal fun packetStackFailure(ready: Boolean, error: String): String? =
             if (!ready && error.isNotBlank()) error else null
     }
+    /** Guarded by the adapter callback lock, including startup reconnects. */
+    internal class ConnectionState {
+        private var connected = false
+        fun onConnected() { connected = true }
+        fun onConnecting() { connected = false }
+        fun canPublish(stackReady: Boolean): Boolean = connected && stackReady
+    }
     private val lock = Any()
     // Native stop can join callback threads. Never acquire this while holding
     // the callback lock; callbacks only schedule resource cleanup.
@@ -40,7 +47,7 @@ class PsiphonMixAdapter : MixAdapter {
     @Volatile private var stopped = false
     private var started = false
     private var generation = 0L
-    private var connected = false
+    private val connection = ConnectionState()
     private var readySent = false
     private var failureSent = false
     private var timer: ScheduledExecutorService? = null
@@ -107,6 +114,10 @@ class PsiphonMixAdapter : MixAdapter {
             override fun bindToDevice(fileDescriptor: Long) = Unit
             override fun onConnecting() {
                 synchronized(lock) {
+                    if (!isLiveLocked(token)) return
+                    // A tunnel can drop after onConnected but before the local
+                    // packet stack becomes ready. Never publish that stale state.
+                    connection.onConnecting()
                     if (readySent && isLiveLocked(token))
                         failLocked(token, environment, "Psiphon stage lost its packet tunnel")
                 }
@@ -114,7 +125,7 @@ class PsiphonMixAdapter : MixAdapter {
             override fun onConnected() {
                 synchronized(lock) {
                     if (!isLiveLocked(token)) return
-                    connected = true
+                    connection.onConnected()
                     publishReadyLocked(token, environment)
                 }
             }
@@ -166,7 +177,7 @@ class PsiphonMixAdapter : MixAdapter {
     }
 
     private fun publishReadyLocked(token: Long, environment: MixAdapterEnvironment) {
-        if (!connected || packetStack?.ready != true || readySent || !isLiveLocked(token)) return
+        if (!connection.canPublish(packetStack?.ready == true) || readySent || !isLiveLocked(token)) return
         readySent = true
         // This is a full packet tunnel, including UDP. The coordinator still
         // validates actual traffic through the complete chain before its TUN.
