@@ -68,6 +68,14 @@ class XrayVpnService : VpnService() {
             private set
 
         @Volatile
+        var isMixModeRunning = false
+            private set
+
+        @Volatile
+        var isMixModeReconnecting = false
+            private set
+
+        @Volatile
         private var activeController: CoreController? = null
 
         @Volatile private var totalUplink = 0L
@@ -94,10 +102,14 @@ class XrayVpnService : VpnService() {
         when (intent?.action) {
             ACTION_CONNECT -> {
                 val token: Long
-                synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); configJson=intent.getStringExtra(EXTRA_CONFIG_JSON); mixMode=intent.getBooleanExtra(EXTRA_MIX_MODE,false) }
+                synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); configJson=intent.getStringExtra(EXTRA_CONFIG_JSON); mixMode=intent.getBooleanExtra(EXTRA_MIX_MODE,false); isMixModeReconnecting=mixMode }
                 commandExecutor.execute { if (teardown(false) && isCurrent(token)) { runCatching { showNotification(token) }; launch(token) } }
             }
-            ACTION_DISCONNECT -> if (isCurrentToken(intent)) { synchronized(lifecycleLock) { invalidateConnectionLocked() }; commandExecutor.execute { teardown(true) } }
+            ACTION_DISCONNECT -> if (isCurrentToken(intent)) {
+                VpnStateBroadcast.notifyDisconnected(this, when { mixMode -> "mix"; configJson?.contains("__APP_FILES__") == true -> "warp"; else -> "xray" })
+                synchronized(lifecycleLock) { invalidateConnectionLocked() }
+                commandExecutor.execute { teardown(true) }
+            }
             ACTION_RECONNECT -> reconnect(intent)
         }
         return START_STICKY
@@ -120,6 +132,7 @@ class XrayVpnService : VpnService() {
             if (generation == token) {
                 reconnectInProgress = false
                 isReconnecting = false
+                isMixModeReconnecting = false
             }
         }
     }
@@ -202,6 +215,7 @@ class XrayVpnService : VpnService() {
             }
             isRunning = true
             isServiceRunning = true
+            isMixModeRunning = mixMode
             activeController = controller
             totalUplink = 0L
             totalDownlink = 0L
@@ -293,6 +307,7 @@ class XrayVpnService : VpnService() {
             if (reconnectInProgress || activeConnectIntent == null) return
             reconnectInProgress = true
             isReconnecting = true
+            isMixModeReconnecting = mixMode
             generation++
             token = generation
         }
@@ -313,11 +328,12 @@ class XrayVpnService : VpnService() {
         generation++
         reconnectInProgress = false
         isReconnecting = false
+        isMixModeReconnecting = false
         activeConnectIntent = null
     }
 
     private fun teardown(stopService: Boolean): Boolean {
-        isRunning=false; isServiceRunning=false; activeController=null; totalUplink=0L; totalDownlink=0L
+        isRunning=false; isServiceRunning=false; isMixModeRunning=false; isMixModeReconnecting=false; activeController=null; totalUplink=0L; totalDownlink=0L
         if (aetherActive) runCatching { NativeCore.stop() }
         runCatching { coreController?.stopLoop() }; coreController=null
         val old=engineThread

@@ -329,6 +329,7 @@ class PsiphonVpnService : VpnService() {
             }
             ACTION_DISCONNECT -> {
                 val token = intent.getStringExtra(EXTRA_GENERATION)
+                if (token == null || token == connectionGeneration) VpnStateBroadcast.notifyDisconnected(this, "psiphon")
                 if (token != null && token != connectionGeneration) return START_STICKY
                 connectionGeneration = null
                 reconnectInFlight.set(false)

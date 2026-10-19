@@ -51,6 +51,7 @@ class DnsVpnService : VpnService() {
         // ارجاع به نمونه‌ی فعال سرویس تا MainActivity بتواند پینگ protected بگیرد
         @Volatile
         var instance: DnsVpnService? = null
+        @Volatile var isServiceRunning = false
 
         /**
          * پینگ به سرور DNS از طریق سوکت protect-شده (خارج از تونل VPN).
@@ -70,7 +71,11 @@ class DnsVpnService : VpnService() {
                 synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); primary=intent.getStringExtra(EXTRA_DNS_PRIMARY) ?: "8.8.8.8"; secondary=intent.getStringExtra(EXTRA_DNS_SECONDARY) ?: "8.8.4.4" }
                 lifecycleExecutor.execute { stopVpn(false); if (token == generation) startVpn(primary, secondary, token) }
             }
-            ACTION_DISCONNECT -> if (isCurrentToken(intent)) { synchronized(lifecycleLock) { invalidateConnectionLocked() }; lifecycleExecutor.execute { stopVpn(true) } }
+            ACTION_DISCONNECT -> if (isCurrentToken(intent)) {
+                VpnStateBroadcast.notifyDisconnected(this, "direct_dns")
+                synchronized(lifecycleLock) { invalidateConnectionLocked() }
+                lifecycleExecutor.execute { stopVpn(true) }
+            }
             ACTION_RECONNECT -> reconnect(intent)
         }
         return START_STICKY
@@ -373,6 +378,7 @@ class DnsVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        isServiceRunning = false
         synchronized(lifecycleLock) { invalidateConnectionLocked() }
         lifecycleExecutor.execute { stopVpn(true); lifecycleExecutor.shutdown() }
         super.onDestroy()

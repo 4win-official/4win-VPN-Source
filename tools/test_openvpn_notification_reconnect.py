@@ -53,6 +53,7 @@ STUBS = {
             public boolean stopVPN(boolean replacement) throws android.os.RemoteException { stops++; return true; }
         }""",
     "com/forwin/vpn/mix/FakeService.java": "package com.forwin.vpn.mix; public class FakeService extends de.blinkt.openvpn.core.OpenVPNService {}",
+    "com/forwin/vpn/VpnStateBroadcast.java": "package com.forwin.vpn; public final class VpnStateBroadcast { public static int calls; public static String lastProtocol; public static void notifyDisconnected(de.blinkt.openvpn.core.OpenVPNService service, String protocol) { calls++; lastProtocol=protocol; } }",
     "ReconnectTest.java": """import android.app.Notification;
         import android.content.Intent;
         import com.forwin.vpn.OpenVpnNotificationActions;
@@ -73,6 +74,8 @@ STUBS = {
                 Intent old=first.actions.get(0).intent;
                 check(OpenVpnNotificationActions.handleReconnect(service,old),"action not consumed");
                 check(engine.calls==1,"active engine did not reconnect");
+                check(OpenVpnNotificationActions.isReconnecting(),"reconnect gap not exposed");
+                check(com.forwin.vpn.VpnStateBroadcast.calls==0,"reconnect emitted disconnect");
                 OpenVpnNotificationActions.handleReconnect(service,old);
                 check(engine.calls==1,"old tap repeated reconnect");
                 Notification.Builder pending=notification(service);
@@ -92,6 +95,10 @@ STUBS = {
                 Notification.Builder current=notification(service);
                 OpenVpnNotificationActions.handleReconnect(service,current.actions.get(1).intent);
                 check(service.stops==1 && other.calls==0,"disconnect restarted VPN");
+                check(com.forwin.vpn.VpnStateBroadcast.calls==1 && "openvpn".equals(com.forwin.vpn.VpnStateBroadcast.lastProtocol),"disconnect event missing");
+                check(!OpenVpnNotificationActions.isReconnecting(),"disconnect retained reconnect intent");
+                OpenVpnNotificationActions.handleReconnect(service,current.actions.get(1).intent);
+                check(com.forwin.vpn.VpnStateBroadcast.calls==1,"stale disconnect emitted event");
                 OpenVpnNotificationActions.handleReconnect(service,current.actions.get(0).intent);
                 check(other.calls==0,"stopped session was resurrected");
                 OpenVPNService recreated=new OpenVPNService();

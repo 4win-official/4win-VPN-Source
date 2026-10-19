@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import com.forwin.vpn.R
+import com.forwin.vpn.VpnStateBroadcast
 import go.Seq
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
@@ -118,6 +119,7 @@ class SlowDnsVpnService : VpnService() {
                 val current = session
                 val token = intent.getStringExtra(EXTRA_GENERATION)
                 if (token != null && connectionGeneration != token) return START_NOT_STICKY
+                VpnStateBroadcast.notifyDisconnected(this, "slowdns")
                 connectionGeneration = null
                 current?.cancelled = true
                 reconnectInFlight.set(false)
@@ -361,6 +363,8 @@ class SlowDnsVpnService : VpnService() {
             }
         }
         fun disconnect() { instance?.let { stop(it.applicationContext) } }
+        fun isRunning(): Boolean = instance?.session != null
+        fun isReconnecting(): Boolean = instance?.reconnecting == true
         fun status(): Map<String, Any> = state.toMap()
     }
 }

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:openvpn_flutter/openvpn_flutter.dart';
 import '../models/vpn_server.dart';
@@ -36,8 +38,21 @@ import '../services/mix_plan_builder.dart';
 export '../services/vpn_service.dart' show VpnConnectionStatus;
 part 'mix_provider.dart';
 part 'sstp_provider.dart';
+part 'vpn_state_sync.dart';
 
-class VpnProvider with ChangeNotifier {
+class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
+  static const _vpnStateChannel = MethodChannel('com.forwin.vpn/vpn_state');
+  int _vpnStateRevision = 0;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(refreshConnectionState());
+    }
+  }
+
+  /// Reconcile missed notification actions without starting a connection.
+  Future<void> refreshConnectionState() => _refreshNativeVpnState();
   final MixStrategyStore _mixStore = MixStrategyStore();
   List<MixStrategy> _mixStrategies = [];
   String? _selectedMixStrategyId;
@@ -313,6 +328,8 @@ class VpnProvider with ChangeNotifier {
   VpnProvider({ServerService? serverService, SstpServerStore? sstpStore})
     : _serverService = serverService ?? ServerService(),
       _sstpStore = sstpStore ?? SstpServerStore(serverService: serverService) {
+    WidgetsBinding.instance.addObserver(this);
+    _vpnStateChannel.setMethodCallHandler(_onNativeVpnState);
     _mixLoaded = _loadMixStrategies();
     _init();
     // بارگیری پروتکل انتخابی و در صورت نیاز اتصال خودکار به آخرین سرور OpenVPN
@@ -866,6 +883,7 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
+    final revision = ++_vpnStateRevision;
     final sstpToken = _selectedProtocol == 'sstp' ? ++_sstpConnectGen : null;
     // ⚡ CRITICAL: Set to connecting immediately so user sees feedback
     _status = VpnConnectionStatus.connecting;
@@ -888,6 +906,7 @@ class VpnProvider with ChangeNotifier {
     // message instead of silently falling back to a full VPN tunnel (which is
     // what made the setting look ignored).
     final modePrefs = await SharedPreferences.getInstance();
+    if (_mixDisposed || revision != _vpnStateRevision) return;
     final proxyMode =
         (modePrefs.getString('connection_mode') ?? 'vpn') == 'proxy';
     // Xray, the dedicated Proxy protocol AND WARP all run the Xray core and
@@ -1314,6 +1333,8 @@ class VpnProvider with ChangeNotifier {
 
   /// Connect via Direct DNS (separate from SSTP)
   Future<void> _connectDirectDns() async {
+    final revision = _vpnStateRevision;
+    bool cancelled() => _mixDisposed || revision != _vpnStateRevision;
     // Check if DNS server is selected
     if (_selectedDnsServer == null) {
       // ✅ نمایش پیام به کاربر
@@ -1336,6 +1357,7 @@ class VpnProvider with ChangeNotifier {
 
       // Request VPN permission
       final permissionGranted = await DnsVpnConnection.requestPermission();
+      if (cancelled()) return;
 
       if (!permissionGranted) {
         _status = VpnConnectionStatus.disconnected;
@@ -1348,6 +1370,7 @@ class VpnProvider with ChangeNotifier {
         primaryDns: _selectedDnsServer!.primaryDns,
         secondaryDns: _selectedDnsServer!.secondaryDns ?? '8.8.4.4',
       );
+      if (cancelled()) return;
 
       // Update status to connected
       _status = VpnConnectionStatus.connected;
@@ -1366,6 +1389,7 @@ class VpnProvider with ChangeNotifier {
       if (kDebugMode) {
         debugPrint('⚠️ Failed to connect DNS: $e');
       }
+      if (cancelled()) return;
       _status = VpnConnectionStatus.disconnected;
       notifyListeners();
     }
@@ -1376,12 +1400,15 @@ class VpnProvider with ChangeNotifier {
   /// HARD auth failure (wrong user/pass). Client-certificate material is
   /// bypassed when explicitly requested or when the profile has none to keep.
   Future<void> _connectOpenVpn({bool forceBypassCert = false}) async {
+    final revision = _vpnStateRevision;
+    bool cancelled() => _mixDisposed || revision != _vpnStateRevision;
     // Apply the global Traffic Compression toggle before building the config.
     try {
       final prefs = await SharedPreferences.getInstance();
       OpenVpnConfig.trafficCompressionEnabled =
           prefs.getBool('traffic_compression') ?? false;
     } catch (_) {}
+    if (cancelled()) return;
 
     if (_selectedOpenVpnConfig == null) {
       _status = VpnConnectionStatus.error;
@@ -1402,6 +1429,7 @@ class VpnProvider with ChangeNotifier {
       final cb = onOpenVpnCredentialsRequired;
       if (cb != null) {
         final creds = await cb(cfg);
+        if (cancelled()) return;
         if (creds == null) {
           // User cancelled the credentials prompt → abort cleanly.
           _status = VpnConnectionStatus.disconnected;
@@ -1426,10 +1454,12 @@ class VpnProvider with ChangeNotifier {
       }
     }
 
+    if (cancelled()) return;
     // Tear down any prior/stale native session first.
     try {
       await OpenVpnConnection.disconnect();
     } catch (_) {}
+    if (cancelled()) return;
 
     // Clear the session-sticky auth-failed flag EXACTLY once, now that this is
     // a fresh user-initiated connection. (The internal retry loop must NOT
@@ -2939,6 +2969,7 @@ class VpnProvider with ChangeNotifier {
       return;
     }
 
+    _vpnStateRevision++;
     _sstpConnectGen++;
     _mixConnectGen++;
     // Invalidate any in-flight Xray connect (e.g. a group delay-test in
@@ -3060,6 +3091,24 @@ class VpnProvider with ChangeNotifier {
       _status = VpnConnectionStatus.disconnected;
     }
 
+    if (_mixDisposed) return;
+    // All stop paths (including notification stops) clear the same UI state.
+    _stopDurationTimer();
+    _stopPingTimer();
+    _stopXrayTraffic();
+    _connectedServer = null;
+    _activeXrayServer = null;
+    _activeProxyServer = null;
+    _connectionDuration = Duration.zero;
+    _currentPing = null;
+    _pingFailed = false;
+    _totalDownloadBytes = 0;
+    _totalUploadBytes = 0;
+    _lastDownloadBytes = 0;
+    _lastUploadBytes = 0;
+    _dnsBaselineRxBytes = -1;
+    _dnsBaselineTxBytes = -1;
+    _errorMessage = null;
     notifyListeners();
   }
 
@@ -3124,6 +3173,7 @@ class VpnProvider with ChangeNotifier {
       await disconnect();
     }
 
+    _vpnStateRevision++;
     _selectedProtocol = protocol;
     await _dnsService.setSelectedProtocol(protocol);
     notifyListeners();
@@ -3344,6 +3394,9 @@ class VpnProvider with ChangeNotifier {
   @override
   void dispose() {
     _mixDisposed = true;
+    _vpnStateRevision++;
+    WidgetsBinding.instance.removeObserver(this);
+    _vpnStateChannel.setMethodCallHandler(null);
     _sstpConnectGen++;
     _slowDnsConnectGen++;
     SlowDnsConnection.detach();

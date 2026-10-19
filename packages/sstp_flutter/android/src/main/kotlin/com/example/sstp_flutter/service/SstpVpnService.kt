@@ -60,7 +60,7 @@ internal const val NOTIFICATION_ERROR_ID = 1
 internal const val NOTIFICATION_RECONNECT_ID = 2
 internal const val NOTIFICATION_DISCONNECT_ID = 3
 
-internal class SstpVpnService : VpnService() {
+class SstpVpnService : VpnService() {
     private lateinit var prefs: SharedPreferences
     private lateinit var listener: SharedPreferences.OnSharedPreferenceChangeListener
     private lateinit var notificationManager: NotificationManagerCompat
@@ -75,6 +75,22 @@ internal class SstpVpnService : VpnService() {
     private var notificationActionInProgress = false
     private var activeSessionPrefs: SessionPreferences? = null
     private var sessionGeneration = 0L
+
+    companion object {
+        @Volatile var isReconnecting: Boolean = false
+            private set
+
+        /** Read by the host app without confusing this standalone service with Mix. */
+        fun state(context: android.content.Context): Map<String, Any> {
+            val prefs = PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
+            val running = prefs.getBoolean(OscPrefKey.ROOT_STATE.name, false)
+            return mapOf(
+                "running" to running,
+                "reconnecting" to (running && isReconnecting),
+                "connected" to running
+            )
+        }
+    }
 
     private fun setRootState(state: Boolean) {
         setBooleanPrefValue(state, OscPrefKey.ROOT_STATE, prefs)
@@ -168,6 +184,7 @@ internal class SstpVpnService : VpnService() {
                     token == lastReconnectToken || notificationActionInProgress) return Service.START_STICKY
                 lastReconnectToken = token
                 notificationActionInProgress = true
+                isReconnecting = true
                 val generation = sessionGeneration
                 scope.launch {
                     jobReconnect?.cancelAndJoin()
@@ -178,6 +195,7 @@ internal class SstpVpnService : VpnService() {
                     initializeClient(activeSessionPrefs ?: return@launch)
                     setRootState(true)
                     notificationActionInProgress = false
+                    isReconnecting = false
                 }
                 Service.START_STICKY
             }
@@ -190,7 +208,14 @@ internal class SstpVpnService : VpnService() {
                 if(intent?.getBooleanExtra("manuallyDisconnected",false) == true){
                     manuallyDisconnected = true
                 }
+                // Only accepted notification tokens reach this branch when a
+                // token is supplied; stale actions returned above.  Broadcast
+                // before teardown so Flutter can invalidate its live session.
+                sendBroadcast(Intent("com.forwin.vpn.VPN_DISCONNECTED")
+                    .setPackage(packageName)
+                    .putExtra("protocol", "sstp"))
                 sessionGeneration++
+                isReconnecting = false
                 notificationActionInProgress = false
                 jobReconnect?.cancel()
                 setRootState(false)
@@ -274,6 +299,7 @@ internal class SstpVpnService : VpnService() {
                 }
             } catch (_: CancellationException) { }
             finally {
+                isReconnecting = false
                 cancelNotification(NOTIFICATION_RECONNECT_ID)
             }
         }
@@ -350,6 +376,7 @@ internal class SstpVpnService : VpnService() {
     }
 
     internal fun onReconnectFinished() {
+        isReconnecting = false
         notificationActionInProgress = false
     }
 

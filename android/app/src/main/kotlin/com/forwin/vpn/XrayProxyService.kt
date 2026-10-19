@@ -91,6 +91,9 @@ class XrayProxyService : Service() {
                 commandExecutor.execute { teardown(false); if (isCurrent(token)) { runCatching { showNotification(token) }; launch(token) } }
             }
             ACTION_DISCONNECT -> if (isCurrentToken(intent)) {
+                // Notify Flutter before invalidating the generation or tearing down
+                // the core.  A stale notification action is rejected above.
+                VpnStateBroadcast.notifyDisconnected(this, "xray")
                 synchronized(lifecycleLock) { invalidateConnectionLocked() }
                 commandExecutor.execute { teardown(true) }
             }

@@ -15,6 +15,7 @@ import android.os.Looper
 import android.net.Uri
 import androidx.core.app.NotificationCompat
 import com.forwin.vpn.R
+import com.forwin.vpn.VpnStateBroadcast
 import com.forwin.vpn.VpnNotificationLabels
 import go.Seq
 import libv2ray.CoreCallbackHandler
@@ -147,7 +148,10 @@ class MixCoordinatorService : VpnService() {
         if (intent?.action == ACTION_STOP || intent?.action == ACTION_RECONNECT) {
             // Notification actions belong to one chain only, including worker notifications.
             if (next != null && intent.getStringExtra("sessionId") == next.id) {
-                if (intent.action == ACTION_RECONNECT) requestReconnect(next) else requestStop(next)
+                if (intent.action == ACTION_RECONNECT) requestReconnect(next) else {
+                    VpnStateBroadcast.notifyDisconnected(this, "mix")
+                    requestStop(next)
+                }
             } else if (request == null) stopSelf(startId)
             return START_NOT_STICKY
         }

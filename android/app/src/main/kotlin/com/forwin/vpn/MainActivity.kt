@@ -1,9 +1,13 @@
 package com.forwin.vpn
 
 import com.forwin.vpn.mix.MixCoordinatorService
+import com.forwin.vpn.slowdns.SlowDnsVpnService
+import com.example.sstp_flutter.service.SstpVpnService
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
@@ -35,6 +39,9 @@ class MainActivity: FlutterActivity() {
     private val IMPORT_CHANNEL = "com.forwin.vpn/import"
     private val OPENVPN_CHANNEL = "com.forwin.vpn/openvpn"
     private val APPS_CHANNEL = "com.forwin.vpn/apps"
+    private val VPN_STATE_CHANNEL = "com.forwin.vpn/vpn_state"
+    private var vpnStateChannel: MethodChannel? = null
+    private var vpnStateReceiver: BroadcastReceiver? = null
     private val VPN_REQUEST_CODE = 100
     private val XRAY_REQUEST_CODE = 101
 
@@ -72,6 +79,11 @@ class MainActivity: FlutterActivity() {
     }
 
     override fun onDestroy() {
+        vpnStateReceiver?.let { receiver ->
+            try { unregisterReceiver(receiver) } catch (_: IllegalArgumentException) { }
+            vpnStateReceiver = null
+        }
+        vpnStateChannel = null
         // Resolve a pending consent call, but never stop the background VPN
         // just because Android recreates/removes the Activity.
         val pending = pendingPsiphonPermission
@@ -82,6 +94,26 @@ class MainActivity: FlutterActivity() {
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val stateChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VPN_STATE_CHANNEL)
+        vpnStateChannel = stateChannel
+        stateChannel.setMethodCallHandler { call, result ->
+            if (call.method != "getState") { result.notImplemented(); return@setMethodCallHandler }
+            val protocol = call.argument<String>("protocol")?.lowercase()
+            if (protocol == null) { result.error("INVALID_PROTOCOL", "protocol is required", null); return@setMethodCallHandler }
+            result.success(nativeVpnState(protocol))
+        }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != VpnStateBroadcast.ACTION_DISCONNECTED) return
+                val protocol = intent.getStringExtra(VpnStateBroadcast.EXTRA_PROTOCOL) ?: return
+                stateChannel.invokeMethod("onDisconnected", mapOf("protocol" to protocol))
+            }
+        }
+        vpnStateReceiver = receiver
+        val filter = IntentFilter(VpnStateBroadcast.ACTION_DISCONNECTED)
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, receiver, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         // ── OpenVPN validation channel ──────────────────────────────────────
         // The openvpn_flutter plugin (via VPNHelper.connect) catches the
@@ -1021,4 +1053,30 @@ class MainActivity: FlutterActivity() {
         b(0x00); b(0x01)
         return out.toByteArray()
     }
+    private fun nativeVpnState(protocol: String): Map<String, Any> {
+        var running = false
+        var reconnecting = false
+        when (protocol) {
+            // Each standalone protocol can use either backend in VPN/proxy mode.
+            "xray", "proxy", "warp" -> {
+                running = XrayVpnService.isServiceRunning || XrayProxyService.isServiceRunning
+                reconnecting = XrayVpnService.isReconnecting || XrayProxyService.isReconnecting
+            }
+            "mix" -> { running = MixCoordinatorService.isRunning || XrayVpnService.isMixModeRunning; reconnecting = MixCoordinatorService.isReconnecting || XrayVpnService.isMixModeReconnecting }
+            "direct_dns" -> { running = DnsVpnService.isServiceRunning; reconnecting = DnsVpnService.isReconnecting }
+            "slowdns" -> { running = SlowDnsVpnService.isRunning(); reconnecting = SlowDnsVpnService.isReconnecting() }
+            "psiphon" -> { running = PsiphonStatusStore.isRunning(); reconnecting = PsiphonStatusStore.isReconnecting() }
+            "openvpn" -> {
+                running = VpnStatus.isVPNActive()
+                reconnecting = OpenVpnNotificationActions.isReconnecting()
+            }
+            "sstp" -> {
+                val state = SstpVpnService.state(applicationContext)
+                running = state["running"] == true
+                reconnecting = state["reconnecting"] == true
+            }
+        }
+        return mapOf("running" to running, "reconnecting" to reconnecting, "connected" to running)
+    }
+
 }

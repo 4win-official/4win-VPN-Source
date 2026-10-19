@@ -112,6 +112,7 @@ public final class OpenVpnNotificationActions {
                 synchronized (SESSIONS) { state.reconnecting = false; }
             }
         } else {
+            VpnStateBroadcast.notifyDisconnected(service, "openvpn");
             try { service.stopVPN(false); } catch (android.os.RemoteException ignored) { }
         }
         return true;
@@ -130,5 +131,15 @@ public final class OpenVpnNotificationActions {
 
     public static void invalidate(OpenVPNService service) {
         synchronized (SESSIONS) { SESSIONS.remove(service); }
+    }
+
+    /** True while an accepted notification reconnect is in progress. */
+    public static boolean isReconnecting() {
+        synchronized (SESSIONS) {
+            for (Session state : SESSIONS.values()) {
+                if (state != null && state.reconnecting) return true;
+            }
+            return false;
+        }
     }
 }
