@@ -30,6 +30,8 @@ import '../services/psiphon_service.dart';
 import '../services/retry_policy.dart';
 import '../services/connection_logger.dart';
 import '../models/mix_strategy.dart';
+import '../models/mix_diagnostics.dart';
+import '../models/mix_block_exception.dart';
 import '../services/mix_strategy_store.dart';
 import '../services/mix_config_builder.dart';
 import '../services/mix_plan_builder.dart';
@@ -60,6 +62,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   Future<void>? _mixOperation;
   int _mixConnectGen = 0;
   Timer? _mixMonitor;
+  Timer? _mixDiagnosticsTimer;
+  MixDiagnostics? _mixDiagnostics;
+  MixDiagnostics? get mixDiagnostics => _mixDiagnostics;
   bool _mixDisposed = false;
   Future<void>? _mixDisconnectOperation;
   List<MixStrategy> get mixStrategies => List.unmodifiable(_mixStrategies);
@@ -2991,6 +2996,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       return;
     }
 
+    final mixWasConnecting = _selectedProtocol == 'mix' && isConnecting;
     _vpnStateRevision++;
     _sstpConnectGen++;
     _mixConnectGen++;
@@ -3006,7 +3012,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     try {
       // Disconnect based on protocol
       if (_selectedProtocol == 'mix') {
-        final operation = _disconnectMix();
+        final operation = _disconnectMix(wasConnecting: mixWasConnecting);
         _mixDisconnectOperation = operation;
         try {
           await operation;
@@ -3424,6 +3430,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     SlowDnsConnection.detach();
     _mixConnectGen++;
     _mixMonitor?.cancel();
+    _mixDiagnosticsTimer?.cancel();
     _errorAutoClearTimer?.cancel();
     _statusSubscription?.cancel();
     _stopDurationTimer();

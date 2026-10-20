@@ -38,6 +38,7 @@ extension _MixProviderLogic on VpnProvider {
     ];
     await _mixStore.save(updated);
     _mixStrategies = updated;
+    if (_mixDiagnostics?.strategyId == strategy.id) _mixDiagnostics = null;
     if (_selectedMixStrategyId == null) {
       await _mixStore.select(strategy.id);
       _selectedMixStrategyId = strategy.id;
@@ -57,6 +58,7 @@ extension _MixProviderLogic on VpnProvider {
         .toList();
     await _mixStore.save(updated);
     _mixStrategies = updated;
+    if (_mixDiagnostics?.strategyId == id) _mixDiagnostics = null;
     if (_selectedMixStrategyId == id) {
       await _mixStore.select(null);
       _selectedMixStrategyId = null;
@@ -75,17 +77,58 @@ extension _MixProviderLogic on VpnProvider {
     }
     await _mixStore.select(id);
     _selectedMixStrategyId = id;
+    _mixDiagnostics = null;
+    if (!_mixDisposed) notifyListeners();
+  }
+
+  Future<void> _readMixDiagnostics(int generation) async {
+    final snapshot = await XrayConnection.getMixDiagnostics();
+    if (_mixDisposed ||
+        generation != _mixConnectGen ||
+        _selectedProtocol != 'mix' ||
+        snapshot == null) {
+      return;
+    }
+    final current = _mixDiagnostics;
+    if (current == null ||
+        const {
+          'Chain failed',
+          'Chain stopped',
+          'Connection cancelled',
+          'Disconnected',
+        }.contains(current.phase)) {
+      return;
+    }
+    final next = current.applyNative(snapshot);
+    if (!identical(current, next)) {
+      _mixDiagnostics = next;
+      notifyListeners();
+    }
+  }
+
+  void _setMixDiagnosticPhase(String phase, {bool unverified = false}) {
+    final current = _mixDiagnostics;
+    if (current == null) return;
+    _mixDiagnostics = current.update(
+      phase: phase,
+      states: unverified
+          ? List.filled(current.hops.length, MixBlockState.unverified)
+          : null,
+    );
     if (!_mixDisposed) notifyListeners();
   }
 
   Future<void> _connectMix() async {
     final generation = ++_mixConnectGen;
+    _mixDiagnosticsTimer?.cancel();
+    _mixDiagnostics = null;
     bool cancelled() =>
         _mixDisposed ||
         generation != _mixConnectGen ||
         _selectedProtocol != 'mix' ||
         _status != VpnConnectionStatus.connecting;
     var started = false;
+    var nativeDiagnostics = false;
     try {
       await _mixLoaded;
       if (cancelled()) return;
@@ -93,6 +136,11 @@ extension _MixProviderLogic on VpnProvider {
       if (strategy == null) {
         throw StateError('Open Strategy and select a Mix strategy first.');
       }
+      _mixDiagnostics = MixDiagnostics.begin(
+        strategy,
+        '${DateTime.now().microsecondsSinceEpoch}-$generation',
+      );
+      notifyListeners();
       final validation = strategy.validationError;
       if (validation != null) throw FormatException(validation);
       final prefs = await SharedPreferences.getInstance();
@@ -148,8 +196,25 @@ extension _MixProviderLogic on VpnProvider {
           warpAccount: await _warpService.getAccount(),
         );
         if (cancelled()) return;
+        plan['diagnosticsAttemptId'] = _mixDiagnostics!.attemptId;
+        nativeDiagnostics = true;
+        _setMixDiagnosticPhase('Starting native chain', unverified: true);
+        var reading = false;
+        _mixDiagnosticsTimer = Timer.periodic(
+          const Duration(milliseconds: 300),
+          (_) async {
+            if (reading) return;
+            reading = true;
+            try {
+              await _readMixDiagnostics(generation);
+            } finally {
+              reading = false;
+            }
+          },
+        );
         started = true;
         delay = await XrayConnection.connectMixPlan(plan);
+        await _readMixDiagnostics(generation);
         if (cancelled()) return;
         if (delay < 0) throw StateError('Could not start Mix.');
       } else {
@@ -169,6 +234,10 @@ extension _MixProviderLogic on VpnProvider {
         ConnectionLogger.instance.info(
           'mix',
           'Testing complete chain (${strategy.hops.length} blocks)',
+        );
+        _setMixDiagnosticPhase(
+          'Testing complete chain — individual blocks not observable',
+          unverified: true,
         );
         delay = await XrayConnection.measureDelay(
           probeConfig,
@@ -193,6 +262,7 @@ extension _MixProviderLogic on VpnProvider {
       }
       if (cancelled()) return;
       if (!running) throw StateError('Mix core did not become ready.');
+      _setMixDiagnosticPhase('Connected — complete-chain test passed');
       _status = VpnConnectionStatus.connected;
       _connectedServer = null;
       _errorMessage = null;
@@ -237,7 +307,15 @@ extension _MixProviderLogic on VpnProvider {
               !isConnected) {
             return;
           }
+          await _readMixDiagnostics(generation);
+          _mixDiagnosticsTimer?.cancel();
+          final diagnostics = _mixDiagnostics;
           await disconnect();
+          _mixDiagnostics = diagnostics?.update(
+            phase: 'Chain stopped',
+            message:
+                'The tunnel stopped. A failing block may not be identifiable.',
+          );
           if (_mixDisposed || _selectedProtocol != 'mix') return;
           _status = VpnConnectionStatus.error;
           _errorMessage =
@@ -248,6 +326,25 @@ extension _MixProviderLogic on VpnProvider {
       notifyListeners();
     } catch (error) {
       if (cancelled()) return;
+      _mixDiagnosticsTimer?.cancel();
+      if (nativeDiagnostics) await _readMixDiagnostics(generation);
+      if (cancelled()) return;
+      final diagnostic = _mixDiagnostics;
+      if (diagnostic != null) {
+        final states = List<MixBlockState>.of(diagnostic.states);
+        if (error is MixBlockException &&
+            error.index >= 0 &&
+            error.index < states.length) {
+          states[error.index] = MixBlockState.failed;
+        }
+        _mixDiagnostics = diagnostic.update(
+          phase: 'Chain failed',
+          states: states,
+          message: states.contains(MixBlockState.failed)
+              ? 'The highlighted block reported an error. Initialized blocks are not proof of remote reachability.'
+              : 'The failing block could not be identified reliably. No block was bypassed.',
+        );
+      }
       if (started) {
         await XrayConnection.disconnectMixPlan();
         await XrayConnection.disconnect();
@@ -271,7 +368,22 @@ extension _MixProviderLogic on VpnProvider {
     }
   }
 
-  Future<void> _disconnectMix() async {
+  Future<void> _disconnectMix({bool wasConnecting = false}) async {
+    _mixDiagnosticsTimer?.cancel();
+    final diagnostic = _mixDiagnostics;
+    if (diagnostic != null && diagnostic.phase != 'Chain failed') {
+      _mixDiagnostics = diagnostic.update(
+        phase: wasConnecting ? 'Connection cancelled' : 'Disconnected',
+        states: diagnostic.states
+            .map(
+              (state) => state == MixBlockState.starting
+                  ? MixBlockState.unverified
+                  : state,
+            )
+            .toList(),
+        message: 'Showing the last observed attempt, not a live tunnel.',
+      );
+    }
     _mixMonitor?.cancel();
     _mixMonitor = null;
     await XrayConnection.disconnectMixPlan();

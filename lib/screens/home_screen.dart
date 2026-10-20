@@ -1,3 +1,4 @@
+import '../widgets/mix_chain_diagnostics.dart';
 import 'mix_strategies_screen.dart';
 import 'dart:io';
 import 'dart:ui';
@@ -41,7 +42,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-
   final UpdateService _updateService = UpdateService();
   final GlobalKey _powerButtonKey = GlobalKey();
 
@@ -70,14 +70,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Shows a username/password dialog for an OpenVPN config that requires auth
   /// but has no stored credentials. Returns null if the user cancels.
   Future<({String username, String password})?> _promptOpenVpnCredentials(
-      config) async {
+    config,
+  ) async {
     final userCtrl = TextEditingController(
-        text: (config.effectiveUsername ?? '').toString());
+      text: (config.effectiveUsername ?? '').toString(),
+    );
     final passCtrl = TextEditingController(
-        text: (config.effectivePassword ?? '').toString());
+      text: (config.effectivePassword ?? '').toString(),
+    );
     bool obscure = true;
-    final result =
-        await showDialog<({String username, String password})?>(
+    final result = await showDialog<({String username, String password})?>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
@@ -88,8 +90,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             children: [
               Text(
                 'This config requires a username and password.',
-                style: TextStyle(
-                    fontSize: 13, color: Theme.of(ctx).hintColor),
+                style: TextStyle(fontSize: 13, color: Theme.of(ctx).hintColor),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -108,9 +109,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   labelText: 'Password',
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
-                    icon: Icon(obscure
-                        ? Icons.visibility
-                        : Icons.visibility_off),
+                    icon: Icon(
+                      obscure ? Icons.visibility : Icons.visibility_off,
+                    ),
                     onPressed: () => setD(() => obscure = !obscure),
                   ),
                 ),
@@ -129,8 +130,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (u.isEmpty || p.isEmpty) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
                     const SnackBar(
-                        content:
-                            Text('Username and password are required')),
+                      content: Text('Username and password are required'),
+                    ),
                   );
                   return;
                 }
@@ -192,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     // Reset app when user exits (only if VPN is NOT connected)
     if (state == AppLifecycleState.paused) {
       final provider = context.read<VpnProvider>();
@@ -205,7 +206,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     final themeProvider = context.watch<ThemeProvider>();
     final isSnowTheme = themeProvider.selectedTheme == AppTheme.snow;
     final isPixelTheme = themeProvider.selectedTheme == AppTheme.pixel;
@@ -215,7 +216,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isAutumnTheme = themeProvider.selectedTheme == AppTheme.autumn;
     final isLiquidGlassTheme =
         themeProvider.selectedTheme == AppTheme.liquidGlass;
-    
+
     // Theme-specific colors
     // تم صورتی اکنون نسخه روز و شب دارد:
     //  - روز: پس‌زمینه لاوندر روشن
@@ -227,12 +228,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       bgColor = isDark
           ? const Color(0xFF2A1A24) // صورتی-بنفش خیلی تیره (نسخه شب)
           : const Color(0xFFFFF0F5); // لاوندر صورتی روشن (نسخه روز)
-      iconColor = isDark
-          ? const Color(0xFFFF9EC4)
-          : const Color(0xFFFF69B4);
-      textColor = isDark
-          ? const Color(0xFFFFB6D9)
-          : const Color(0xFFFF1493);
+      iconColor = isDark ? const Color(0xFFFF9EC4) : const Color(0xFFFF69B4);
+      textColor = isDark ? const Color(0xFFFFB6D9) : const Color(0xFFFF1493);
     } else if (isDayNightTheme) {
       bgColor = isDark ? const Color(0xFF080F25) : const Color(0xFFFFFDF5);
       iconColor = isDark ? const Color(0xFFB8CFFF) : const Color(0xFFAD5100);
@@ -241,12 +238,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       bgColor = isDark
           ? const Color(0xFF20140B) // قهوه‌ای خیلی تیره
           : const Color(0xFFFFF3E6); // کرم گرم پاییزی
-      iconColor = isDark
-          ? const Color(0xFFE8A055)
-          : const Color(0xFFC0392B);
-      textColor = isDark
-          ? const Color(0xFFF3C892)
-          : const Color(0xFF8E4B10);
+      iconColor = isDark ? const Color(0xFFE8A055) : const Color(0xFFC0392B);
+      textColor = isDark ? const Color(0xFFF3C892) : const Color(0xFF8E4B10);
     } else if (isLiquidGlassTheme) {
       // لیکویید گلس: پس‌زمینه‌ی گرادیانی زیر لایه‌ی شیشه‌ای رندر می‌شود،
       // پس اینجا رنگ پایه‌ی ملایم می‌گذاریم.
@@ -258,12 +251,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       iconColor = isDark ? Colors.white70 : Colors.black54;
       textColor = isDark ? Colors.white : Colors.black87;
     }
-    
+
     // تم پیکسلی می‌تونه دارک یا لایت باشه (بر خلاف تم برفی که فقط دارک است)
 
     // When the user picked a custom background (default theme only), let it show
     // through: make the Scaffold transparent instead of painting a solid color.
-    final hasCustomBackground = themeProvider.customBackgroundPath != null &&
+    final hasCustomBackground =
+        themeProvider.customBackgroundPath != null &&
         themeProvider.customBackgroundPath!.isNotEmpty &&
         File(themeProvider.customBackgroundPath!).existsSync();
 
@@ -301,10 +295,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         actions: [
           // Secret Text tool — encode/decode text so only 4win VPN can read it.
           IconButton(
-            icon: Icon(
-              Icons.enhanced_encryption_outlined,
-              color: iconColor,
-            ),
+            icon: Icon(Icons.enhanced_encryption_outlined, color: iconColor),
             tooltip: 'Secret Text',
             onPressed: () {
               Navigator.push(
@@ -318,10 +309,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           // Theme Selection Button
           IconButton(
-            icon: Icon(
-              Icons.palette_outlined,
-              color: iconColor,
-            ),
+            icon: Icon(Icons.palette_outlined, color: iconColor),
             tooltip: 'VPN Themes',
             onPressed: () {
               Navigator.push(
@@ -332,7 +320,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               );
             },
           ),
-          
+
           // Dark/Light toggle removed from home — it now lives inside the Theme
           // selection screen (opened via the palette icon).
 
@@ -342,13 +330,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => const DonateScreen(),
-                ),
+                MaterialPageRoute(builder: (context) => const DonateScreen()),
               );
             },
           ),
-          
+
           // Refresh Button
           Consumer<VpnProvider>(
             builder: (context, provider, _) {
@@ -357,10 +343,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ? SizedBox(
                         width: 20,
                         height: 20,
-                        child: FourWinLoader(
-                          strokeWidth: 2,
-                          color: iconColor,
-                        ),
+                        child: FourWinLoader(strokeWidth: 2, color: iconColor),
                       )
                     : Icon(Icons.refresh, color: iconColor),
                 onPressed: provider.isLoadingServers
@@ -379,8 +362,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             // a one-shot heart burst. Done via a post-frame callback to keep the
             // build pure.
             if (provider.status != _lastStatusForHearts) {
-              final justConnected = provider.status ==
-                      VpnConnectionStatus.connected &&
+              final justConnected =
+                  provider.status == VpnConnectionStatus.connected &&
                   _lastStatusForHearts != VpnConnectionStatus.connected;
               _lastStatusForHearts = provider.status;
               if (justConnected && isPinkTheme) {
@@ -395,7 +378,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             // Custom user background — ONLY for the default (system) theme.
             // Separate image per day/night. Rendered behind everything.
             final customBg = themeProvider.customBackgroundPath;
-            final hasCustomBg = customBg != null &&
+            final hasCustomBg =
+                customBg != null &&
                 customBg.isNotEmpty &&
                 File(customBg).existsSync();
             return Stack(
@@ -466,14 +450,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const Positioned.fill(
                     child: RepaintBoundary(child: AutumnAnimation()),
                   ),
-                
+
                 // نور ملایم از پایین صفحه - با انیمیشن نرم
                 Positioned(
                   bottom: 0,
                   left: 0,
                   right: 0,
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 800), // انیمیشن آهسته و نرم
+                    duration: const Duration(
+                      milliseconds: 800,
+                    ), // انیمیشن آهسته و نرم
                     curve: Curves.easeInOut,
                     height: 200,
                     decoration: BoxDecoration(
@@ -481,15 +467,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         begin: Alignment.bottomCenter,
                         end: Alignment.topCenter,
                         colors: [
-                          _getGlowColor(provider.status, isDark).withValues(alpha: isDark ? 0.4 : 0.2),
-                          _getGlowColor(provider.status, isDark).withValues(alpha: isDark ? 0.2 : 0.1),
-                          _getGlowColor(provider.status, isDark).withValues(alpha: 0.0),
+                          _getGlowColor(
+                            provider.status,
+                            isDark,
+                          ).withValues(alpha: isDark ? 0.4 : 0.2),
+                          _getGlowColor(
+                            provider.status,
+                            isDark,
+                          ).withValues(alpha: isDark ? 0.2 : 0.1),
+                          _getGlowColor(
+                            provider.status,
+                            isDark,
+                          ).withValues(alpha: 0.0),
                         ],
                       ),
                     ),
                   ),
                 ),
-                
+
                 // محتوای اصلی
                 Column(
                   children: [
@@ -501,699 +496,896 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         alignment: const Alignment(0.0, 0.15),
                         child: Consumer<VpnProvider>(
                           builder: (context, provider, _) {
-                    // Show loading when servers are being fetched on startup
-                    if (provider.isLoadingServers && provider.servers.isEmpty) {
-                      return Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const FourWinLoader(),
-                          const SizedBox(height: 24),
-                          Text(
-                            'Loading servers...',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: isDark ? Colors.white70 : Colors.black54,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-
-                        ],
-                      );
-                    }
-                    
-                    // Standard centered layout:
-                    //  - The power button is the fixed visual anchor and sits
-                    //    in the true center of the screen (slightly below via
-                    //    the Stack alignment used by the caller).
-                    //  - Protocol selector + status text sit in a fixed-height
-                    //    zone ABOVE the button.
-                    //  - Stats / errors sit in a fixed-height zone BELOW the
-                    //    button. Because both zones have fixed heights, the
-                    //    button never moves when text appears or disappears.
-                    return Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // ===== TOP ZONE (fixed height): protocol + status =====
-                        SizedBox(
-                          height: 150,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              // Keep the selector reachable without repeating
-                              // the selected protocol in a separate glass pill.
-                              IconButton(
-                                tooltip: 'Select protocol',
-                                icon: const Icon(Icons.tune_rounded),
-                                color: isDark ? Colors.white70 : Colors.black54,
-                                constraints: const BoxConstraints(
-                                  minWidth: 48,
-                                  minHeight: 48,
-                                ),
-                                onPressed: () {
-                                  showDialog(
-                                    context: context,
-                                    barrierColor: Colors.black.withValues(
-                                      alpha: isDark ? 0.22 : 0.16,
+                            // Show loading when servers are being fetched on startup
+                            if (provider.isLoadingServers &&
+                                provider.servers.isEmpty) {
+                              return Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const FourWinLoader(),
+                                  const SizedBox(height: 24),
+                                  Text(
+                                    'Loading servers...',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.black54,
+                                      fontWeight: FontWeight.w500,
                                     ),
-                                    builder: (context) => const ProtocolSelectorDialog(),
-                                  );
-                                },
-                              ),
-                              const SizedBox(height: 18),
-
-                              // Connection Status Text
-                              Text(
-                                _getStatusText(provider.status),
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: isDark ? Colors.white70 : Colors.black54,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              // Active Proxy server name (under the status text).
-                              if (provider.selectedProtocol == 'proxy' &&
-                                  provider.activeProxyServer != null) ...[
-                                const SizedBox(height: 6),
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 24),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.swap_horiz,
-                                          size: 15,
-                                          color: isDark
-                                              ? Colors.white54
-                                              : Colors.black45),
-                                      const SizedBox(width: 6),
-                                      Flexible(
-                                        child: Text(
-                                          provider.activeProxyServer!.remark
-                                                  .isEmpty
-                                              ? provider
-                                                  .activeProxyServer!.address
-                                              : provider
-                                                  .activeProxyServer!.remark,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: isDark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
                                   ),
-                                ),
-                              ],
-                              // Active Xray config name (under the status text).
-                              if (provider.selectedProtocol == 'xray' &&
-                                  provider.activeXrayServer != null) ...[
-                                const SizedBox(height: 6),
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 24),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.dns,
-                                          size: 15,
-                                          color: isDark
-                                              ? Colors.white54
-                                              : Colors.black45),
-                                      const SizedBox(width: 6),
-                                      Flexible(
-                                        child: Text(
-                                          provider.activeXrayServer!.remark.isEmpty
-                                              ? provider.activeXrayServer!.address
-                                              : provider.activeXrayServer!.remark,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: isDark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
+                                ],
+                              );
+                            }
 
-                        // ===== CENTER: Connect Button (fixed, always centered) =====
-                        Stack(
-                          alignment: Alignment.center,
-                          clipBehavior: Clip.none,
-                          children: [
-                            // Pink theme: colourful hearts burst from behind the
-                            // button on connect, then fade out after a moment.
-                            if (isPinkTheme)
-                              HeartBurst(
-                                trigger: _heartBurstTrigger == 0
-                                    ? null
-                                    : _heartBurstTrigger,
-                                size: 340,
-                              ),
-                            GestureDetector(
-                          onTap: () => _handleConnectTap(context, provider),
-                          onLongPress: () => _handleLongPress(context),
-                          child: Container(
-                            key: _powerButtonKey,
-                            width: 200,
-                            height: 200,
-                            decoration: BoxDecoration(
-                              // تم پیکسلی: مربع با گوشه‌های تیز
-                              // تم عادی: دایره
-                              shape: isPixelTheme ? BoxShape.rectangle : BoxShape.circle,
-                              borderRadius: isPixelTheme ? BorderRadius.zero : null,
-                              color: _getButtonColor(provider.status, isDark),
-                              border: isPixelTheme 
-                                  ? Border.all(
-                                      color: Colors.black.withValues(alpha: 0.3),
-                                      width: 4,
-                                    )
-                                  : null,
-                              boxShadow: isPixelTheme
-                                  ? [
-                                      // سایه پیکسلی (بدون blur)
-                                      BoxShadow(
-                                        offset: const Offset(8, 8),
-                                        blurRadius: 0,
-                                        color: Colors.black.withValues(alpha: 0.5),
-                                      ),
-                                    ]
-                                  : isSnowTheme ? const [
-                                      BoxShadow(
-                                        color: Color(0x407AC9E8),
-                                        blurRadius: 32,
-                                        spreadRadius: 3,
-                                      ),
-                                      BoxShadow(
-                                        color: Color(0x1FBAEFFF),
-                                        blurRadius: 64,
-                                        spreadRadius: 8,
-                                      ),
-                                    ]
-                                  : isDark ? [
-                                      // نئون گلو در dark mode
-                                      BoxShadow(
-                                        color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.6),
-                                        blurRadius: 40,
-                                        spreadRadius: 10,
-                                      ),
-                                      BoxShadow(
-                                        color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.4),
-                                        blurRadius: 80,
-                                        spreadRadius: 20,
-                                      ),
-                                    ] : [
-                                      BoxShadow(
-                                        color: _getButtonColor(provider.status, isDark).withValues(alpha: 0.3),
-                                        blurRadius: 20,
-                                        spreadRadius: 5,
-                                      ),
-                                    ],
-                            ),
-                            child: RainButtonSurface(
-                              enabled: isRainTheme,
-                              child: SnowButtonSurface(
-                                enabled: isSnowTheme,
-                                tint: _getButtonColor(provider.status, isDark),
-                                child: Center(
-                                  child: provider.isConnecting
-                                      ? FourWinLoader(
-                                          color: isDark ? Colors.black87 : Colors.white,
-                                          strokeWidth: 3,
-                                        )
-                                      : Icon(
-                                          _getButtonIcon(provider.status),
-                                          size: 80,
-                                          color: isDark ? Colors.black87 : Colors.white,
-                                        ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                          ],
-                        ),
-
-                        // ===== BOTTOM ZONE (fixed height): stats / errors =====
-                        SizedBox(
-                          height: 150,
-                          child: SingleChildScrollView(
-                            child: Column(
+                            // Standard centered layout:
+                            //  - The power button is the fixed visual anchor and sits
+                            //    in the true center of the screen (slightly below via
+                            //    the Stack alignment used by the caller).
+                            //  - Protocol selector + status text sit in a fixed-height
+                            //    zone ABOVE the button.
+                            //  - Stats / errors sit in a fixed-height zone BELOW the
+                            //    button. Because both zones have fixed heights, the
+                            //    button never moves when text appears or disappears.
+                            return Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                const SizedBox(height: 20),
-                                // Data Usage Info
-                                if (provider.isConnected &&
-                                    (provider.selectedProtocol == 'sstp' ||
-                                        provider.selectedProtocol == 'direct_dns' ||
-                                        provider.selectedProtocol == 'xray' ||
-                                        provider.selectedProtocol == 'proxy' ||
-                                        provider.selectedProtocol == 'warp' ||
-                                        provider.selectedProtocol == 'openvpn' ||
-                                        provider.selectedProtocol == 'psiphon'))
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                                    child: Text(
-                                      provider.dataUsage,
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: isDark ? Colors.white70 : Colors.black87,
-                                        fontWeight: FontWeight.w500,
+                                // ===== TOP ZONE (fixed height): protocol + status =====
+                                SizedBox(
+                                  height: 150,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      // Keep the selector reachable without repeating
+                                      // the selected protocol in a separate glass pill.
+                                      IconButton(
+                                        tooltip: 'Select protocol',
+                                        icon: const Icon(Icons.tune_rounded),
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black54,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 48,
+                                          minHeight: 48,
+                                        ),
+                                        onPressed: () {
+                                          showDialog(
+                                            context: context,
+                                            barrierColor: Colors.black
+                                                .withValues(
+                                                  alpha: isDark ? 0.22 : 0.16,
+                                                ),
+                                            builder: (context) =>
+                                                const ProtocolSelectorDialog(),
+                                          );
+                                        },
                                       ),
-                                      textAlign: TextAlign.center,
-                                    ),
+                                      const SizedBox(height: 18),
+
+                                      // Connection Status Text
+                                      Text(
+                                        _getStatusText(provider.status),
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: isDark
+                                              ? Colors.white70
+                                              : Colors.black54,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      // Active Proxy server name (under the status text).
+                                      if (provider.selectedProtocol ==
+                                              'proxy' &&
+                                          provider.activeProxyServer !=
+                                              null) ...[
+                                        const SizedBox(height: 6),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 24,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.swap_horiz,
+                                                size: 15,
+                                                color: isDark
+                                                    ? Colors.white54
+                                                    : Colors.black45,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Flexible(
+                                                child: Text(
+                                                  provider
+                                                          .activeProxyServer!
+                                                          .remark
+                                                          .isEmpty
+                                                      ? provider
+                                                            .activeProxyServer!
+                                                            .address
+                                                      : provider
+                                                            .activeProxyServer!
+                                                            .remark,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: isDark
+                                                        ? Colors.white
+                                                        : Colors.black87,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                      // Active Xray config name (under the status text).
+                                      if (provider.selectedProtocol == 'xray' &&
+                                          provider.activeXrayServer !=
+                                              null) ...[
+                                        const SizedBox(height: 6),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 24,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.dns,
+                                                size: 15,
+                                                color: isDark
+                                                    ? Colors.white54
+                                                    : Colors.black45,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Flexible(
+                                                child: Text(
+                                                  provider
+                                                          .activeXrayServer!
+                                                          .remark
+                                                          .isEmpty
+                                                      ? provider
+                                                            .activeXrayServer!
+                                                            .address
+                                                      : provider
+                                                            .activeXrayServer!
+                                                            .remark,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: isDark
+                                                        ? Colors.white
+                                                        : Colors.black87,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
-                                // Connection Duration
-                                if (provider.isConnected && provider.connectionDuration.inSeconds > 0)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 12),
+                                ),
+
+                                // ===== CENTER: Connect Button (fixed, always centered) =====
+                                Stack(
+                                  alignment: Alignment.center,
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    // Pink theme: colourful hearts burst from behind the
+                                    // button on connect, then fade out after a moment.
+                                    if (isPinkTheme)
+                                      HeartBurst(
+                                        trigger: _heartBurstTrigger == 0
+                                            ? null
+                                            : _heartBurstTrigger,
+                                        size: 340,
+                                      ),
+                                    GestureDetector(
+                                      onTap: () =>
+                                          _handleConnectTap(context, provider),
+                                      onLongPress: () =>
+                                          _handleLongPress(context),
+                                      child: Container(
+                                        key: _powerButtonKey,
+                                        width: 200,
+                                        height: 200,
+                                        decoration: BoxDecoration(
+                                          // تم پیکسلی: مربع با گوشه‌های تیز
+                                          // تم عادی: دایره
+                                          shape: isPixelTheme
+                                              ? BoxShape.rectangle
+                                              : BoxShape.circle,
+                                          borderRadius: isPixelTheme
+                                              ? BorderRadius.zero
+                                              : null,
+                                          color: _getButtonColor(
+                                            provider.status,
+                                            isDark,
+                                          ),
+                                          border: isPixelTheme
+                                              ? Border.all(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.3),
+                                                  width: 4,
+                                                )
+                                              : null,
+                                          boxShadow: isPixelTheme
+                                              ? [
+                                                  // سایه پیکسلی (بدون blur)
+                                                  BoxShadow(
+                                                    offset: const Offset(8, 8),
+                                                    blurRadius: 0,
+                                                    color: Colors.black
+                                                        .withValues(alpha: 0.5),
+                                                  ),
+                                                ]
+                                              : isSnowTheme
+                                              ? const [
+                                                  BoxShadow(
+                                                    color: Color(0x407AC9E8),
+                                                    blurRadius: 32,
+                                                    spreadRadius: 3,
+                                                  ),
+                                                  BoxShadow(
+                                                    color: Color(0x1FBAEFFF),
+                                                    blurRadius: 64,
+                                                    spreadRadius: 8,
+                                                  ),
+                                                ]
+                                              : isDark
+                                              ? [
+                                                  // نئون گلو در dark mode
+                                                  BoxShadow(
+                                                    color: _getButtonColor(
+                                                      provider.status,
+                                                      isDark,
+                                                    ).withValues(alpha: 0.6),
+                                                    blurRadius: 40,
+                                                    spreadRadius: 10,
+                                                  ),
+                                                  BoxShadow(
+                                                    color: _getButtonColor(
+                                                      provider.status,
+                                                      isDark,
+                                                    ).withValues(alpha: 0.4),
+                                                    blurRadius: 80,
+                                                    spreadRadius: 20,
+                                                  ),
+                                                ]
+                                              : [
+                                                  BoxShadow(
+                                                    color: _getButtonColor(
+                                                      provider.status,
+                                                      isDark,
+                                                    ).withValues(alpha: 0.3),
+                                                    blurRadius: 20,
+                                                    spreadRadius: 5,
+                                                  ),
+                                                ],
+                                        ),
+                                        child: RainButtonSurface(
+                                          enabled: isRainTheme,
+                                          child: SnowButtonSurface(
+                                            enabled: isSnowTheme,
+                                            tint: _getButtonColor(
+                                              provider.status,
+                                              isDark,
+                                            ),
+                                            child: Center(
+                                              child: provider.isConnecting
+                                                  ? FourWinLoader(
+                                                      color: isDark
+                                                          ? Colors.black87
+                                                          : Colors.white,
+                                                      strokeWidth: 3,
+                                                    )
+                                                  : Icon(
+                                                      _getButtonIcon(
+                                                        provider.status,
+                                                      ),
+                                                      size: 80,
+                                                      color: isDark
+                                                          ? Colors.black87
+                                                          : Colors.white,
+                                                    ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                // ===== BOTTOM ZONE (fixed height): stats / errors =====
+                                SizedBox(
+                                  height: 150,
+                                  child: SingleChildScrollView(
                                     child: Column(
                                       children: [
-                                        Text(
-                                          _formatDuration(provider.connectionDuration),
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            color: isDark ? Colors.white54 : Colors.black54,
-                                            fontWeight: FontWeight.w500,
+                                        const SizedBox(height: 20),
+                                        // Data Usage Info
+                                        if (provider.isConnected &&
+                                            (provider.selectedProtocol ==
+                                                    'sstp' ||
+                                                provider.selectedProtocol ==
+                                                    'direct_dns' ||
+                                                provider.selectedProtocol ==
+                                                    'xray' ||
+                                                provider.selectedProtocol ==
+                                                    'proxy' ||
+                                                provider.selectedProtocol ==
+                                                    'warp' ||
+                                                provider.selectedProtocol ==
+                                                    'openvpn' ||
+                                                provider.selectedProtocol ==
+                                                    'psiphon'))
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 32,
+                                            ),
+                                            child: Text(
+                                              provider.dataUsage,
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                color: isDark
+                                                    ? Colors.white70
+                                                    : Colors.black87,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                            ),
                                           ),
-                                        ),
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 8),
-                                          child: _buildPingIndicator(provider, isDark),
-                                        ),
+                                        // Connection Duration
+                                        if (provider.isConnected &&
+                                            provider
+                                                    .connectionDuration
+                                                    .inSeconds >
+                                                0)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 12,
+                                            ),
+                                            child: Column(
+                                              children: [
+                                                Text(
+                                                  _formatDuration(
+                                                    provider.connectionDuration,
+                                                  ),
+                                                  style: TextStyle(
+                                                    fontSize: 14,
+                                                    color: isDark
+                                                        ? Colors.white54
+                                                        : Colors.black54,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 8,
+                                                      ),
+                                                  child: _buildPingIndicator(
+                                                    provider,
+                                                    isDark,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        // Error Message
+                                        if (provider.errorMessage != null)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 12,
+                                              left: 32,
+                                              right: 32,
+                                            ),
+                                            child: Text(
+                                              provider.errorMessage!,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: isDark
+                                                    ? Colors.red[300]!
+                                                    : Colors.red,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ),
-                                // Error Message
-                                if (provider.errorMessage != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 12, left: 32, right: 32),
-                                    child: Text(
-                                      provider.errorMessage!,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: isDark ? Colors.red[300]! : Colors.red,
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+                    // Server Action Button (Next Server for SSTP, Server List for DNS)
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Consumer<VpnProvider>(
+                        builder: (context, provider, _) {
+                          if (provider.selectedProtocol == 'mix') {
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  provider.selectedMixStrategy?.name ??
+                                      'No strategy selected',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 8),
+                                if (provider.mixDiagnostics != null &&
+                                    provider.mixDiagnostics!.strategyId ==
+                                        provider.selectedMixStrategyId)
+                                  MixChainDiagnostics(
+                                    diagnostics: provider.mixDiagnostics!,
+                                  ),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    icon: const Icon(Icons.account_tree),
+                                    label: const Text('Strategy'),
+                                    onPressed: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const MixStrategiesScreen(),
                                       ),
-                                      textAlign: TextAlign.center,
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 16,
+                                      ),
                                     ),
                                   ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-            
-            // Server Action Button (Next Server for SSTP, Server List for DNS)
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Consumer<VpnProvider>(
-                builder: (context, provider, _) {
-                  if (provider.selectedProtocol == 'mix') {
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(provider.selectedMixStrategy?.name ?? 'No strategy selected',
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.account_tree),
-                            label: const Text('Strategy'),
-                            onPressed: () => Navigator.push(context,
-                              MaterialPageRoute(builder: (_) => const MixStrategiesScreen())),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  }
-                  // DNS: Always show "Server List" button
-                  if (provider.selectedProtocol == 'direct_dns') {
-                    return SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const DnsServersScreen(),
-                            ),
-                          );
-                        },
-                        icon: Icon(
-                          Icons.dns,
-                          color: isDark ? Colors.white70 : Colors.black87,
-                        ),
-                        label: Text(
-                          'Server List',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    );
-                  }
-                  
-                  // SSTP: the grouped server list is always available.
-                  if (provider.selectedProtocol == 'sstp') {
-                    final group = provider.selectedSstpGroup;
-                    final server = provider.selectedServer;
-                    final groupNames = provider.sstpGroups.where((g) => g.id == group);
-                    final groupName = groupNames.isEmpty ? '4win Free Servers' : groupNames.first.name;
-                    final label = group == null
-                        ? (server == null ? 'Choose an SSTP server' : server.fullAddress)
-                        : server == null
-                            ? 'Group: $groupName'
-                            : '$groupName • ${server.fullAddress}';
-                    return Column(
-                      children: [
-                        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SstpServersScreen())),
-                            icon: const Icon(Icons.vpn_key),
-                            label: const Text('Server List', style: TextStyle(fontSize: 16)),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              backgroundColor: Colors.tealAccent.shade700,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  }
-
-                  // OpenVPN: Always show "OpenVPN Configs" button
-                  if (provider.selectedProtocol == 'openvpn') {
-                    return SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const OpenVpnConfigsScreen(),
-                            ),
-                          );
-                        },
-                        icon: Icon(
-                          Icons.shield,
-                          color: isDark ? Colors.white70 : Colors.black87,
-                        ),
-                        label: Text(
-                          'OpenVPN Configs',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    );
-                  }
-                  
-                  // Slow DNS: Show DNS Scanner and Configs buttons
-                  if (provider.selectedProtocol == 'slowdns') {
-                    return Column(
-                      children: [
-                        // DNS Scanner button
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const SlowDnsConfigsScreen(),
                                 ),
-                              );
-                            },
-                            icon: const Icon(Icons.radar),
-                            label: const Text(
-                              'DNS Scanner & Configs',
-                              style: TextStyle(fontSize: 16),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              backgroundColor: Colors.orange,
-                              shape: RoundedRectangleBorder(
+                              ],
+                            );
+                          }
+                          // DNS: Always show "Server List" button
+                          if (provider.selectedProtocol == 'direct_dns') {
+                            return SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const DnsServersScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: Icon(
+                                  Icons.dns,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87,
+                                ),
+                                label: Text(
+                                  'Server List',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black87,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.black12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
+                          // SSTP: the grouped server list is always available.
+                          if (provider.selectedProtocol == 'sstp') {
+                            final group = provider.selectedSstpGroup;
+                            final server = provider.selectedServer;
+                            final groupNames = provider.sstpGroups.where(
+                              (g) => g.id == group,
+                            );
+                            final groupName = groupNames.isEmpty
+                                ? '4win Free Servers'
+                                : groupNames.first.name;
+                            final label = group == null
+                                ? (server == null
+                                      ? 'Choose an SSTP server'
+                                      : server.fullAddress)
+                                : server == null
+                                ? 'Group: $groupName'
+                                : '$groupName • ${server.fullAddress}';
+                            return Column(
+                              children: [
+                                Text(
+                                  label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const SstpServersScreen(),
+                                      ),
+                                    ),
+                                    icon: const Icon(Icons.vpn_key),
+                                    label: const Text(
+                                      'Server List',
+                                      style: TextStyle(fontSize: 16),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 16,
+                                      ),
+                                      backgroundColor:
+                                          Colors.tealAccent.shade700,
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+
+                          // OpenVPN: Always show "OpenVPN Configs" button
+                          if (provider.selectedProtocol == 'openvpn') {
+                            return SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const OpenVpnConfigsScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: Icon(
+                                  Icons.shield,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87,
+                                ),
+                                label: Text(
+                                  'OpenVPN Configs',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black87,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.black12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
+                          // Slow DNS: Show DNS Scanner and Configs buttons
+                          if (provider.selectedProtocol == 'slowdns') {
+                            return Column(
+                              children: [
+                                // DNS Scanner button
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const SlowDnsConfigsScreen(),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.radar),
+                                    label: const Text(
+                                      'DNS Scanner & Configs',
+                                      style: TextStyle(fontSize: 16),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 16,
+                                      ),
+                                      backgroundColor: Colors.orange,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+
+                          // Proxy: Always show "Proxy Servers" button (mirrors Xray).
+                          if (provider.selectedProtocol == 'proxy') {
+                            final showNext = provider.proxyGroupSelected;
+                            final serverListBtn = ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const ProxyServersScreen(),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.swap_horiz),
+                              label: const Text(
+                                'Proxy Servers',
+                                style: TextStyle(fontSize: 16),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                backgroundColor: Colors.tealAccent.shade700,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            );
+
+                            final nextBtn = OutlinedButton.icon(
+                              onPressed: provider.isConnecting
+                                  ? null
+                                  : () async {
+                                      await provider.selectNextProxyServer();
+                                      final s = provider.selectedProxyServer;
+                                      if (!context.mounted || s == null) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Next: ${s.remark.isEmpty ? s.address : s.remark}',
+                                          ),
+                                          duration: const Duration(seconds: 1),
+                                        ),
+                                      );
+                                    },
+                              icon: Icon(
+                                Icons.skip_next,
+                                color: isDark ? Colors.white70 : Colors.black87,
+                              ),
+                              label: Text(
+                                'Next',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? Colors.white24
+                                      : Colors.black12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            );
+
+                            return Row(
+                              children: [
+                                Expanded(
+                                  flex: showNext ? 3 : 1,
+                                  child: serverListBtn,
+                                ),
+                                if (showNext) ...[
+                                  const SizedBox(width: 10),
+                                  Expanded(flex: 2, child: nextBtn),
+                                ],
+                              ],
+                            );
+                          }
+
+                          // Xray: Always show "Xray Servers" button
+                          if (provider.selectedProtocol == 'xray') {
+                            final showNext = provider.xrayFreeGroupSelected;
+                            final serverListBtn = ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const XrayServersScreen(),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.rocket_launch),
+                              label: const Text(
+                                'Xray Servers',
+                                style: TextStyle(fontSize: 16),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                backgroundColor: Colors.tealAccent.shade700,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            );
+
+                            final nextBtn = OutlinedButton.icon(
+                              onPressed: provider.isConnecting
+                                  ? null
+                                  : () async {
+                                      await provider.selectNextFreeServer();
+                                      final s = provider.selectedXrayServer;
+                                      if (!context.mounted || s == null) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Next: ${s.remark.isEmpty ? s.address : s.remark}',
+                                          ),
+                                          duration: const Duration(seconds: 1),
+                                        ),
+                                      );
+                                    },
+                              icon: Icon(
+                                Icons.skip_next,
+                                color: isDark ? Colors.white70 : Colors.black87,
+                              ),
+                              label: Text(
+                                'Next',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? Colors.white24
+                                      : Colors.black12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            );
+
+                            // Next Server sits NEXT TO the Server List button, and
+                            // only when a whole group is selected as the target.
+                            return Row(
+                              children: [
+                                Expanded(
+                                  flex: showNext ? 3 : 1,
+                                  child: serverListBtn,
+                                ),
+                                if (showNext) ...[
+                                  const SizedBox(width: 10),
+                                  Expanded(flex: 2, child: nextBtn),
+                                ],
+                              ],
+                            );
+                          }
+
+                          if (provider.selectedProtocol == 'psiphon') {
+                            return PsiphonServerListStatus(isDark: isDark);
+                          }
+
+                          // WARP: no user-picked server list and no manual "register"
+                          // action — the app registers the Cloudflare identity by
+                          // itself automatically (on first connect, and again by
+                          // itself if a stored identity turns out to be unusable).
+                          // This is a plain read-only status readout showing the
+                          // Cloudflare edge endpoint currently in use, NOT a button.
+                          if (provider.selectedProtocol == 'warp') {
+                            final account = provider.warpAccount;
+                            final label = provider.warpRegistering
+                                ? 'Registering WARP identity…'
+                                : account != null
+                                ? 'WARP endpoint: ${account.peerEndpoint}'
+                                : 'WARP (sets up automatically on connect)';
+                            return Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 16,
+                                horizontal: 16,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: const Color(
+                                    0xFFF38020,
+                                  ).withValues(alpha: 0.5),
+                                ),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  }
-                  
-                  // Proxy: Always show "Proxy Servers" button (mirrors Xray).
-                  if (provider.selectedProtocol == 'proxy') {
-                    final showNext = provider.proxyGroupSelected;
-                    final serverListBtn = ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const ProxyServersScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.swap_horiz),
-                      label: const Text(
-                        'Proxy Servers',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: Colors.tealAccent.shade700,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    );
-
-                    final nextBtn = OutlinedButton.icon(
-                      onPressed: provider.isConnecting
-                          ? null
-                          : () async {
-                              await provider.selectNextProxyServer();
-                              final s = provider.selectedProxyServer;
-                              if (!context.mounted || s == null) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                      'Next: ${s.remark.isEmpty ? s.address : s.remark}'),
-                                  duration: const Duration(seconds: 1),
-                                ),
-                              );
-                            },
-                      icon: Icon(
-                        Icons.skip_next,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
-                      label: Text(
-                        'Next',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: isDark ? Colors.white70 : Colors.black87,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: BorderSide(
-                            color: isDark ? Colors.white24 : Colors.black12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    );
-
-                    return Row(
-                      children: [
-                        Expanded(flex: showNext ? 3 : 1, child: serverListBtn),
-                        if (showNext) ...[
-                          const SizedBox(width: 10),
-                          Expanded(flex: 2, child: nextBtn),
-                        ],
-                      ],
-                    );
-                  }
-
-                  // Xray: Always show "Xray Servers" button
-                  if (provider.selectedProtocol == 'xray') {
-                    final showNext = provider.xrayFreeGroupSelected;
-                    final serverListBtn = ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const XrayServersScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.rocket_launch),
-                      label: const Text(
-                        'Xray Servers',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: Colors.tealAccent.shade700,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    );
-
-                    final nextBtn = OutlinedButton.icon(
-                      onPressed: provider.isConnecting
-                          ? null
-                          : () async {
-                              await provider.selectNextFreeServer();
-                              final s = provider.selectedXrayServer;
-                              if (!context.mounted || s == null) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                      'Next: ${s.remark.isEmpty ? s.address : s.remark}'),
-                                  duration: const Duration(seconds: 1),
-                                ),
-                              );
-                            },
-                      icon: Icon(
-                        Icons.skip_next,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
-                      label: Text(
-                        'Next',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: isDark ? Colors.white70 : Colors.black87,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: BorderSide(
-                            color:
-                                isDark ? Colors.white24 : Colors.black12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    );
-
-                    // Next Server sits NEXT TO the Server List button, and
-                    // only when a whole group is selected as the target.
-                    return Row(
-                      children: [
-                        Expanded(flex: showNext ? 3 : 1, child: serverListBtn),
-                        if (showNext) ...[
-                          const SizedBox(width: 10),
-                          Expanded(flex: 2, child: nextBtn),
-                        ],
-                      ],
-                    );
-                  }
-
-                  if (provider.selectedProtocol == 'psiphon') {
-                    return PsiphonServerListStatus(isDark: isDark);
-                  }
-
-                  // WARP: no user-picked server list and no manual "register"
-                  // action — the app registers the Cloudflare identity by
-                  // itself automatically (on first connect, and again by
-                  // itself if a stored identity turns out to be unusable).
-                  // This is a plain read-only status readout showing the
-                  // Cloudflare edge endpoint currently in use, NOT a button.
-                  if (provider.selectedProtocol == 'warp') {
-                    final account = provider.warpAccount;
-                    final label = provider.warpRegistering
-                        ? 'Registering WARP identity…'
-                        : account != null
-                            ? 'WARP endpoint: ${account.peerEndpoint}'
-                            : 'WARP (sets up automatically on connect)';
-                    return Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 16, horizontal: 16),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                            color: const Color(0xFFF38020).withValues(alpha: 0.5)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.cloud_done,
-                            color: Color(0xFFF38020),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              label,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500,
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.cloud_done,
+                                    color: Color(0xFFF38020),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      label,
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
+                            );
+                          }
 
-                  return const SizedBox.shrink();
-                },
-              ),
-            ),
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                    ),
                   ],
                 ),
                 // Airborne rain stays above the glow. The solid button masks
@@ -1231,7 +1423,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Color _getButtonColor(VpnConnectionStatus status, bool isDark) {
     final themeProvider = context.watch<ThemeProvider>();
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
-    
+
     // Pink theme: همه چی صورتی (با نسخه شب)
     if (isPinkTheme) {
       if (isDark) {
@@ -1260,11 +1452,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return const Color(0xFFDC143C); // Crimson
       }
     }
-    
+
     // Default theme colors
     switch (status) {
       case VpnConnectionStatus.connected:
-        return isDark ? const Color(0xFF00FF88) : const Color(0xFF4CAF50); // نئون سبز
+        return isDark
+            ? const Color(0xFF00FF88)
+            : const Color(0xFF4CAF50); // نئون سبز
       case VpnConnectionStatus.connecting:
       case VpnConnectionStatus.disconnecting:
         return isDark ? const Color(0xFFFF9944) : Colors.orange; // نئون نارنجی
@@ -1281,7 +1475,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildPingIndicator(VpnProvider provider, bool isDark) {
     final ping = provider.currentPing;
 
-    if (provider.selectedProtocol == 'xray' || provider.selectedProtocol == 'warp') {
+    if (provider.selectedProtocol == 'xray' ||
+        provider.selectedProtocol == 'warp') {
       final pinging = provider.xrayPinging;
       final awaitingFirst = provider.xrayPingAwaitingFirstTap;
 
@@ -1315,8 +1510,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.touch_app,
-                size: 16, color: isDark ? Colors.white54 : Colors.black54),
+            Icon(
+              Icons.touch_app,
+              size: 16,
+              color: isDark ? Colors.white54 : Colors.black54,
+            ),
             const SizedBox(width: 4),
             Text(
               'click to ping',
@@ -1350,8 +1548,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 color: ping != null
                     ? _getPingColor(ping)
                     : (provider.pingFailed
-                        ? Colors.redAccent
-                        : (isDark ? Colors.white54 : Colors.black54)),
+                          ? Colors.redAccent
+                          : (isDark ? Colors.white54 : Colors.black54)),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1363,8 +1561,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         borderRadius: BorderRadius.circular(20),
         onTap: pinging ? null : () => provider.manualXrayPing(),
         child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           child: content,
         ),
       );
@@ -1391,8 +1588,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             color: ping != null
                 ? _getPingColor(ping)
                 : (provider.pingFailed
-                    ? Colors.redAccent
-                    : (isDark ? Colors.white38 : Colors.black38)),
+                      ? Colors.redAccent
+                      : (isDark ? Colors.white38 : Colors.black38)),
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -1402,12 +1599,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Color _getPingColor(int ping) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     if (ping < 100) {
       return isDark ? const Color(0xFF00FF88) : Colors.green; // نئون سبز
     }
     if (ping < 200) {
-      return isDark ? const Color(0xFF88FF44) : Colors.lightGreen; // نئون سبز روشن
+      return isDark
+          ? const Color(0xFF88FF44)
+          : Colors.lightGreen; // نئون سبز روشن
     }
     if (ping < 400) {
       return isDark ? const Color(0xFFFF9944) : Colors.orange; // نئون نارنجی
@@ -1419,14 +1618,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Color _getGlowColor(VpnConnectionStatus status, bool isDark) {
     switch (status) {
       case VpnConnectionStatus.connected:
-        return isDark ? const Color(0xFF00FF88) : const Color(0xFF4CAF50); // نئون سبز
+        return isDark
+            ? const Color(0xFF00FF88)
+            : const Color(0xFF4CAF50); // نئون سبز
       case VpnConnectionStatus.connecting:
       case VpnConnectionStatus.disconnecting:
         return isDark ? const Color(0xFFFF9944) : Colors.orange; // نئون نارنجی
       case VpnConnectionStatus.disconnected:
-        return isDark ? Colors.grey : Colors.grey.shade400; // خاکستری وقتی وصل نیست
+        return isDark
+            ? Colors.grey
+            : Colors.grey.shade400; // خاکستری وقتی وصل نیست
       case VpnConnectionStatus.error:
-        return isDark ? const Color(0xFFFF4466) : Colors.red; // نئون قرمز فقط برای ارور
+        return isDark
+            ? const Color(0xFFFF4466)
+            : Colors.red; // نئون قرمز فقط برای ارور
     }
   }
 
@@ -1471,9 +1676,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _showSettingsTransition(context);
     if (!mounted) return;
     await navigator.push(
-      MaterialPageRoute(
-        builder: (context) => const SettingsScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const SettingsScreen()),
     );
   }
 
@@ -1523,12 +1726,14 @@ class _SettingsTransitionOverlayState extends State<_SettingsTransitionOverlay>
       duration: const Duration(milliseconds: 700),
     );
     // Spin the gear ~1.25 turns while it appears.
-    _rotation = Tween<double>(begin: 0.0, end: 1.25).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-    _scale = Tween<double>(begin: 0.4, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
-    );
+    _rotation = Tween<double>(
+      begin: 0.0,
+      end: 1.25,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _scale = Tween<double>(
+      begin: 0.4,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.elasticOut));
     _fade = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
@@ -1621,10 +1826,8 @@ class _LiquidGlassBackdropState extends State<_LiquidGlassBackdrop>
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 14),
-    )..repeat();
+    _c = AnimationController(vsync: this, duration: const Duration(seconds: 14))
+      ..repeat();
   }
 
   @override
@@ -1650,13 +1853,17 @@ class _LiquidGlassBackdropState extends State<_LiquidGlassBackdrop>
                     top: 80 + 40 * (0.5 - (t - 0.5).abs()),
                     left: -40,
                     child: _blob(
-                        const Color(0xFF4FC3F7).withValues(alpha: 0.5), 220),
+                      const Color(0xFF4FC3F7).withValues(alpha: 0.5),
+                      220,
+                    ),
                   ),
                   Positioned(
                     bottom: 120 - 40 * (0.5 - (t - 0.5).abs()),
                     right: -50,
                     child: _blob(
-                        const Color(0xFFB388FF).withValues(alpha: 0.5), 260),
+                      const Color(0xFFB388FF).withValues(alpha: 0.5),
+                      260,
+                    ),
                   ),
                 ],
               );
@@ -1694,9 +1901,7 @@ class _LiquidGlassBackdropState extends State<_LiquidGlassBackdrop>
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: RadialGradient(
-          colors: [color, color.withValues(alpha: 0.0)],
-        ),
+        gradient: RadialGradient(colors: [color, color.withValues(alpha: 0.0)]),
       ),
     );
   }

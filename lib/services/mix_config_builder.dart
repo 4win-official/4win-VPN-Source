@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import '../models/dns_server.dart';
+import '../models/mix_block_exception.dart';
 import '../models/mix_strategy.dart';
 import '../models/proxy_server.dart';
 import '../models/xray_server.dart';
@@ -40,86 +41,91 @@ class MixConfigBuilder {
         jsonDecode(XrayConfigBuilder.buildForProxyServer(dummy))
             as Map<String, dynamic>;
     var tcpOnly = false;
-    for (final hop in strategy.hops) {
-      if (hop.protocol == 'direct_dns') {
-        final resolver = _choose<DnsServer>(
-          dnsServers,
-          (server) => server.primaryDns == hop.serverId,
-          'The selected DNS server was removed. Edit this strategy.',
-        );
-        if (InternetAddress.tryParse(resolver.primaryDns) == null) {
-          throw const FormatException('Mix DNS must be an IP address.');
+    for (var hopIndex = 0; hopIndex < strategy.hops.length; hopIndex++) {
+      final hop = strategy.hops[hopIndex];
+      try {
+        if (hop.protocol == 'direct_dns') {
+          final resolver = _choose<DnsServer>(
+            dnsServers,
+            (server) => server.primaryDns == hop.serverId,
+            'The selected DNS server was removed. Edit this strategy.',
+          );
+          if (InternetAddress.tryParse(resolver.primaryDns) == null) {
+            throw const FormatException('Mix DNS must be an IP address.');
+          }
+          dnsPolicies.add((
+            address: resolver.primaryDns,
+            prefixLength: tunnels.length,
+          ));
+          continue;
         }
-        dnsPolicies.add((
-          address: resolver.primaryDns,
-          prefixLength: tunnels.length,
-        ));
-        continue;
-      }
-      late String standalone;
-      String? httpsProxyHost;
-      if (hop.protocol == 'xray') {
-        final server = _choose(
-          xrayServers,
-          (server) => hop.group != null
-              ? server.group == hop.group
-              : server.id == hop.serverId,
-          'An Xray server/group is missing. Edit this strategy.',
-        );
-        standalone = XrayConfigBuilder.build(server, fragmentEnabled: false);
-      } else if (hop.protocol == 'proxy') {
-        final server = _choose(
-          proxyServers,
-          (server) => hop.group != null
-              ? server.group == hop.group
-              : server.id == hop.serverId,
-          'A proxy server/group is missing. Edit this strategy.',
-        );
-        // The standalone builder historically maps SOCKS4 to SOCKS5. Do not
-        // change its behavior here, and never misrepresent SOCKS4 in Mix.
-        if (server.protocol != 'socks5' && server.protocol != 'http') {
-          throw const FormatException(
-            'Mix supports SOCKS5 and HTTP proxies, not SOCKS4.',
+        late String standalone;
+        String? httpsProxyHost;
+        if (hop.protocol == 'xray') {
+          final server = _choose(
+            xrayServers,
+            (server) => hop.group != null
+                ? server.group == hop.group
+                : server.id == hop.serverId,
+            'An Xray server/group is missing. Edit this strategy.',
+          );
+          standalone = XrayConfigBuilder.build(server, fragmentEnabled: false);
+        } else if (hop.protocol == 'proxy') {
+          final server = _choose(
+            proxyServers,
+            (server) => hop.group != null
+                ? server.group == hop.group
+                : server.id == hop.serverId,
+            'A proxy server/group is missing. Edit this strategy.',
+          );
+          // The standalone builder historically maps SOCKS4 to SOCKS5. Do not
+          // change its behavior here, and never misrepresent SOCKS4 in Mix.
+          if (server.protocol != 'socks5' && server.protocol != 'http') {
+            throw const FormatException(
+              'Mix supports SOCKS5 and HTTP proxies, not SOCKS4.',
+            );
+          }
+          tcpOnly = tcpOnly || server.protocol == 'http';
+          if (server.link.toLowerCase().startsWith('https://')) {
+            httpsProxyHost = server.address;
+          }
+          standalone = XrayConfigBuilder.buildForProxyServer(server);
+        } else {
+          throw FormatException(
+            MixStrategy.unavailableReason(hop.protocol) ??
+                'Unsupported Mix block.',
           );
         }
-        tcpOnly = tcpOnly || server.protocol == 'http';
-        if (server.link.toLowerCase().startsWith('https://')) {
-          httpsProxyHost = server.address;
-        }
-        standalone = XrayConfigBuilder.buildForProxyServer(server);
-      } else {
-        throw FormatException(
-          MixStrategy.unavailableReason(hop.protocol) ??
-              'Unsupported Mix block.',
+        final decoded = jsonDecode(standalone) as Map<String, dynamic>;
+        if (tunnels.isEmpty) base = decoded;
+        final outbound = Map<String, dynamic>.from(
+          (decoded['outbounds'] as List).first as Map,
         );
+        final index = tunnels.length;
+        outbound['tag'] = 'mix-hop-$index';
+        final stream = Map<String, dynamic>.from(
+          outbound['streamSettings'] as Map? ?? {},
+        );
+        if (httpsProxyHost != null) {
+          stream['security'] = 'tls';
+          stream['tlsSettings'] = {
+            'serverName': httpsProxyHost,
+            'allowInsecure': false,
+          };
+        }
+        final sockopt = Map<String, dynamic>.from(
+          stream['sockopt'] as Map? ?? {},
+        );
+        if (index > 0) sockopt['dialerProxy'] = 'mix-hop-${index - 1}';
+        // AsIs hands inner server names to the previous hop instead of resolving
+        // them on the physical connection. Only the first hop needs bootstrap DNS.
+        sockopt['domainStrategy'] = 'AsIs';
+        stream['sockopt'] = sockopt;
+        outbound['streamSettings'] = stream;
+        tunnels.add(outbound);
+      } catch (error, stackTrace) {
+        throw MixBlockException(hopIndex, error, stackTrace: stackTrace);
       }
-      final decoded = jsonDecode(standalone) as Map<String, dynamic>;
-      if (tunnels.isEmpty) base = decoded;
-      final outbound = Map<String, dynamic>.from(
-        (decoded['outbounds'] as List).first as Map,
-      );
-      final index = tunnels.length;
-      outbound['tag'] = 'mix-hop-$index';
-      final stream = Map<String, dynamic>.from(
-        outbound['streamSettings'] as Map? ?? {},
-      );
-      if (httpsProxyHost != null) {
-        stream['security'] = 'tls';
-        stream['tlsSettings'] = {
-          'serverName': httpsProxyHost,
-          'allowInsecure': false,
-        };
-      }
-      final sockopt = Map<String, dynamic>.from(
-        stream['sockopt'] as Map? ?? {},
-      );
-      if (index > 0) sockopt['dialerProxy'] = 'mix-hop-${index - 1}';
-      // AsIs hands inner server names to the previous hop instead of resolving
-      // them on the physical connection. Only the first hop needs bootstrap DNS.
-      sockopt['domainStrategy'] = 'AsIs';
-      stream['sockopt'] = sockopt;
-      outbound['streamSettings'] = stream;
-      tunnels.add(outbound);
     }
     // Keep the existing native traffic counter's tag for the exit only.
     final List<Map<String, dynamic>> outbounds;

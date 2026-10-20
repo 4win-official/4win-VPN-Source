@@ -451,6 +451,9 @@ class MainActivity: FlutterActivity() {
                         result.success(true) // Already granted
                     }
                 }
+                "getMixDiagnostics" -> {
+                    result.success(MixCoordinatorService.getMixDiagnostics())
+                }
                 "connectMixPlan" -> {
                     try {
                         val json = call.argument<String>("planJson") ?: error("Missing Mix plan")

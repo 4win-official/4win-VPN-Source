@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/mix_strategy.dart';
+import '../widgets/mix_chain_diagnostics.dart';
 import '../providers/vpn_provider.dart';
 import 'mix_strategy_editor_screen.dart';
 
@@ -9,14 +10,17 @@ import 'mix_strategy_editor_screen.dart';
 class MixStrategiesScreen extends StatelessWidget {
   const MixStrategiesScreen({super.key});
 
-  Future<void> _run(BuildContext context, Future<void> Function() action) async {
+  Future<void> _run(
+    BuildContext context,
+    Future<void> Function() action,
+  ) async {
     try {
       await action();
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.toString())),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
       }
     }
   }
@@ -52,7 +56,10 @@ class MixStrategiesScreen extends StatelessWidget {
       ),
     );
     if (confirmed == true && context.mounted) {
-      await _run(context, () => context.read<VpnProvider>().deleteMixStrategy(strategy.id));
+      await _run(
+        context,
+        () => context.read<VpnProvider>().deleteMixStrategy(strategy.id),
+      );
     }
   }
 
@@ -79,12 +86,19 @@ class MixStrategiesScreen extends StatelessWidget {
           if (strategies.isEmpty) {
             return _EmptyState(onCreate: () => _openEditor(context));
           }
+          final diagnostics = provider.mixDiagnostics;
+          final showDiagnostics =
+              diagnostics != null &&
+              diagnostics.strategyId == provider.selectedMixStrategyId;
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            itemCount: strategies.length,
+            itemCount: strategies.length + (showDiagnostics ? 1 : 0),
             separatorBuilder: (_, __) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
-              final strategy = strategies[index];
+              if (showDiagnostics && index == 0) {
+                return MixChainDiagnostics(diagnostics: diagnostics);
+              }
+              final strategy = strategies[index - (showDiagnostics ? 1 : 0)];
               final selected = provider.selectedMixStrategyId == strategy.id;
               final error = strategy.validationError;
               return Card(
@@ -133,7 +147,10 @@ class MixStrategiesScreen extends StatelessWidget {
                       color: error == null ? null : Colors.orange,
                     ),
                   ),
-                  onTap: () => _run(context, () => provider.selectMixStrategy(strategy.id)),
+                  onTap: () => _run(
+                    context,
+                    () => provider.selectMixStrategy(strategy.id),
+                  ),
                   trailing: PopupMenuButton<String>(
                     tooltip: 'Strategy actions',
                     onSelected: (value) {

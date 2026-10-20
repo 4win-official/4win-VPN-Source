@@ -80,8 +80,57 @@ class MixCoordinatorService : VpnService() {
         private var uplink = 0L
         private var downlink = 0L
 
+        /** Redacted, thread-safe snapshot exposed to Flutter without waiting on the engine. */
+        private class DiagnosticsSnapshot(val attemptId: String, blockCount: Int) {
+            private val lock = Any()
+            private val states = MutableList(blockCount) { "pending" }
+            private val details = MutableList<String?>(blockCount) { null }
+            private var phase = "Preparing chain"
+            private var failure: String? = null
+            fun starting(index: Int) = synchronized(lock) {
+                if (index in states.indices && states[index] != "failed") states[index] = "starting"
+                if (failure == null) phase = "Initializing blocks"
+            }
+            fun ready(index: Int) = synchronized(lock) {
+                if (index in states.indices && states[index] != "failed") {
+                    states[index] = "ready"; details[index] = null
+                }
+                if (failure == null && states.all { it == "ready" }) phase = "Blocks initialized"
+            }
+            fun failed(index: Int, detail: String = "Hop failed while starting") = synchronized(lock) {
+                if (index in states.indices) { states[index] = "failed"; details[index] = detail }
+                phase = "Chain failed"; if (failure == null) failure = detail
+            }
+            /** Global errors are deliberately not attributed to the final hop. */
+            fun globalFailure(message: String) = synchronized(lock) {
+                if (states.none { it == "failed" }) failure = message
+                phase = "Chain failed"
+            }
+            fun setPhase(value: String) = synchronized(lock) {
+                if (failure == null) phase = value
+            }
+            fun asMap(): Map<String, Any?> = synchronized(lock) {
+                val blocks = states.indices.map { index ->
+                    val block = LinkedHashMap<String, Any?>()
+                    block["index"] = index; block["state"] = states[index]
+                    details[index]?.let { block["detail"] = it }; block
+                }
+                val out = LinkedHashMap<String, Any?>()
+                out["attemptId"] = attemptId; out["phase"] = phase; out["blocks"] = blocks
+                failure?.let { out["error"] = it }; out
+            }
+        }
+        @Volatile private var diagnostics: DiagnosticsSnapshot? = null
+        private fun newDiagnostics(plan: JSONObject): DiagnosticsSnapshot {
+            val count = plan.optJSONArray("hops")?.length()?.coerceIn(0, 50) ?: 0
+            return DiagnosticsSnapshot(plan.optString("diagnosticsAttemptId", ""), count)
+        }
+        fun getMixDiagnostics(): Map<String, Any?> = diagnostics?.asMap()
+            ?: mapOf("attemptId" to "", "phase" to "idle", "blocks" to emptyList<Map<String, Any?>>())
+
         @Synchronized fun connect(context: Context, plan: JSONObject): CompletableFuture<Long> {
             check(active == null || active!!.stopped.isDone) { "Previous Mix session is not stopped" }
+            diagnostics = newDiagnostics(plan)
             val next = Request(UUID.randomUUID().toString(), JSONObject(plan.toString()))
             active = next
             val intent = Intent(context, MixCoordinatorService::class.java).setAction(ACTION_START)
@@ -123,6 +172,7 @@ class MixCoordinatorService : VpnService() {
                 "ready" -> worker.ready.complete(intent.getBooleanExtra("supportsUdp", false))
                 "stopped" -> worker.stopped.complete(Unit)
                 "error" -> {
+                    diagnostics?.failed(worker.hop)
                     val error = IllegalStateException("Stage ${worker.hop + 1}: ${intent.getStringExtra("error") ?: "engine failed"}")
                     worker.ready.completeExceptionally(error)
                     if (current.connected.isDone && !current.cancelled.get()) fail(current, error)
@@ -170,6 +220,7 @@ class MixCoordinatorService : VpnService() {
                 ensureLive(next)
                 startChain(next)
             } catch (error: Throwable) {
+                diagnostics?.globalFailure("Mix connection failed")
                 if (reconnectFrom !== next) next.connected.completeExceptionally(error)
                 next.cancelled.set(true)
                 cleanup(next)
@@ -232,59 +283,56 @@ class MixCoordinatorService : VpnService() {
         var supportsUdp = true
         for (i in 0 until hops.length()) {
             ensureLive(current)
-            val hop = hops.getJSONObject(i)
-            val protocol = hop.getString("protocol")
-            val worker = workers[i.toString()]
-            if (protocol == "direct_dns") {
-                val address = hop.optString("address").trim()
-                val resolver = newController(current)
-                resolverCores[i] = resolver
-                resolver.startLoop(MixRouting.resolver(address, dnsPorts.getValue(i),
-                    if (i == 0) null else rawPrefixPorts.getValue(i - 1)).toString(), -1)
-                continue
-            }
-            if (worker == null) {
-                if (protocol == "proxy" && hop.has("socks4")) {
-                    val settings = hop.getJSONObject("socks4")
-                    val adapter = MixSocks4Proxy(workerPorts.getValue(i),
-                        settings.getString("host"), settings.getInt("port"),
-                        settings.optString("userId"), if (i == 0) null else prefixPorts[i - 1])
-                    socks4Proxies[i] = adapter
-                    adapter.start()
+            diagnostics?.starting(i)
+            try {
+                val hop = hops.getJSONObject(i)
+                val protocol = hop.getString("protocol")
+                val worker = workers[i.toString()]
+                if (protocol == "direct_dns") {
+                    val resolver = newController(current)
+                    resolverCores[i] = resolver
+                    resolver.startLoop(MixRouting.resolver(hop.optString("address").trim(), dnsPorts.getValue(i),
+                        if (i == 0) null else rawPrefixPorts.getValue(i - 1)).toString(), -1)
+                    diagnostics?.ready(i)
+                } else if (worker == null) {
+                    if (protocol == "proxy" && hop.has("socks4")) {
+                        val settings = hop.getJSONObject("socks4")
+                        val adapter = MixSocks4Proxy(workerPorts.getValue(i), settings.getString("host"), settings.getInt("port"),
+                            settings.optString("userId"), if (i == 0) null else prefixPorts[i - 1])
+                        socks4Proxies[i] = adapter; adapter.start()
+                    }
+                    if (protocol == "xray" || protocol == "proxy") supportsUdp = MixCapabilities.afterXray(hop, supportsUdp)
+                    if (relayPorts.containsKey(i)) {
+                        startRelay(i, relayConfig!!, relayPorts.getValue(i), relayUnderlayPorts.getValue(i)); supportsUdp = true
+                    }
+                    diagnostics?.ready(i)
+                } else {
+                    require(i == 0 || supportsUdp || protocol != "warp") {
+                        "Stage ${i + 1}: WARP needs a UDP-capable preceding path; HTTP CONNECT and SOCKS4 do not carry UDP by themselves. No direct-network fallback is allowed"
+                    }
+                    showNotification("Connecting stage ${i + 1} of ${hops.length()}")
+                    val intent = Intent(this, MixWorkerService.CLASSES[worker.slot])
+                        .setAction(MixWorkerService.ACTION_START).putExtra("sessionId", current.id)
+                        .putExtra("hopId", i.toString()).putExtra("protocol", protocol)
+                        .putExtra("workerSlot", worker.slot).putExtra("upstreamSupportsUdp", supportsUdp)
+                        .putExtra("config", JSONObject(hop.optJSONObject("config")?.toString() ?: "{}").toString())
+                        .putExtra("listenPort", workerPorts.getValue(i))
+                    if (i > 0) intent.putExtra("upstreamSocksUrl", "socks5://127.0.0.1:${prefixPorts[i - 1]}")
+                    worker.started = true
+                    if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+                    supportsUdp = awaitReady(current, worker)
+                    diagnostics?.ready(i)
+                    if (relayPorts.containsKey(i)) {
+                        startRelay(i, relayConfig!!, relayPorts.getValue(i), relayUnderlayPorts.getValue(i)); supportsUdp = true
+                    }
                 }
-                if (hop.optString("protocol") == "xray" || hop.optString("protocol") == "proxy") {
-                    supportsUdp = MixCapabilities.afterXray(hop, supportsUdp)
-                }
-                if (relayPorts.containsKey(i)) {
-                    startRelay(i, relayConfig!!, relayPorts.getValue(i), relayUnderlayPorts.getValue(i))
-                    supportsUdp = true
-                }
-                continue
-            }
-            require(i == 0 || supportsUdp || protocol != "warp") {
-                "Stage ${i + 1}: WARP needs a UDP-capable preceding path; HTTP CONNECT and SOCKS4 do not carry UDP by themselves. No direct-network fallback is allowed"
-            }
-            showNotification("Connecting stage ${i + 1} of ${hops.length()}")
-            val intent = Intent(this, MixWorkerService.CLASSES[worker.slot])
-                .setAction(MixWorkerService.ACTION_START).putExtra("sessionId", current.id)
-                .putExtra("hopId", i.toString()).putExtra("protocol", protocol)
-                .putExtra("workerSlot", worker.slot)
-                .putExtra("upstreamSupportsUdp", supportsUdp)
-                .putExtra("config", JSONObject(hop.optJSONObject("config")?.toString() ?: "{}")
-                    .toString())
-                .putExtra("listenPort", workerPorts.getValue(i))
-            if (i > 0) intent.putExtra("upstreamSocksUrl", "socks5://127.0.0.1:${prefixPorts[i - 1]}")
-            worker.started = true
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
-            // Native packet tunnels can restore UDP over TCP underlays. Their
-            // output capability must not be ANDed with the previous transport.
-            supportsUdp = awaitReady(current, worker)
-            if (relayPorts.containsKey(i)) {
-                startRelay(i, relayConfig!!, relayPorts.getValue(i), relayUnderlayPorts.getValue(i))
-                supportsUdp = true
+            } catch (error: Throwable) {
+                diagnostics?.failed(i)
+                throw error
             }
         }
         ensureLive(current)
+        diagnostics?.setPhase("Testing complete chain")
         showNotification("Testing the complete chain")
         val dnsPrefixPort = (0 until hops.length()).lastOrNull {
             hops.getJSONObject(it).optString("protocol") == "direct_dns"
@@ -294,6 +342,7 @@ class MixCoordinatorService : VpnService() {
         val delay = Libv2ray.measureOutboundDelay(probe.toString(), "https://www.gstatic.com/generate_204")
         require(delay >= 0) { "The complete chain failed its connection test; no system tunnel was started" }
         ensureLive(current)
+        diagnostics?.setPhase("Starting system tunnel")
         val builder = Builder().setSession("4win VPN - Mix").setMtu(1280)
             .addAddress("172.19.0.1", 30).addRoute("0.0.0.0", 0)
             .addAddress("fdfe:dcba:9876::1", 126).addRoute("::", 0)
@@ -315,6 +364,7 @@ class MixCoordinatorService : VpnService() {
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
         isReconnecting = false
         showNotification("${hops.length()} stages active${if (supportsUdp) "" else " · TCP-only"}")
+        diagnostics?.setPhase("Connected — complete-chain test passed")
         current.connected.complete(delay)
     }
 
@@ -419,6 +469,7 @@ class MixCoordinatorService : VpnService() {
             // Deep-copy the actual running plan: strategy, ordered blocks and all configs.
             val next = Request(UUID.randomUUID().toString(), JSONObject(current.plan.toString()),
                 if (!current.connected.isDone) current.connected else CompletableFuture())
+            diagnostics = newDiagnostics(next.plan)
             reconnectFrom = null
             current.stopped.complete(Unit)
             active = next
@@ -428,6 +479,7 @@ class MixCoordinatorService : VpnService() {
             executor.execute {
                 try { ensureLive(next); startChain(next) }
                 catch (error: Throwable) {
+                    diagnostics?.globalFailure("Mix connection failed")
                     if (reconnectFrom !== next) next.connected.completeExceptionally(error)
                     next.cancelled.set(true)
                     isReconnecting = false

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_swift/models/mix_strategy.dart';
+import 'package:vpn_swift/models/mix_diagnostics.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 
 class TestVpnProvider extends VpnProvider {
@@ -105,6 +106,15 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call.method);
+          if (call.method == 'connectMixPlan') {
+            final plan =
+                jsonDecode((call.arguments as Map)['planJson'] as String)
+                    as Map;
+            final diagnostic = responses['getMixDiagnostics'];
+            if (diagnostic is Map) {
+              diagnostic['attemptId'] = plan['diagnosticsAttemptId'];
+            }
+          }
           final response = responses[call.method];
           if (response is Future<dynamic>) return response;
           return response;
@@ -264,6 +274,7 @@ void main() {
     expect(calls, contains('measureDelay'));
     expect(calls, isNot(contains('connectMix')));
     expect(provider.status, VpnConnectionStatus.disconnected);
+    expect(provider.mixDiagnostics!.phase, 'Connection cancelled');
     provider.dispose();
   });
 
@@ -329,4 +340,67 @@ void main() {
       provider.dispose();
     },
   );
+  test(
+    'native failure preserves exact reached/failed/pending positions',
+    () async {
+      final strategy = MixStrategy(
+        id: 'repeat',
+        name: 'Repeated',
+        hops: const [
+          MixHop(protocol: 'psiphon', serverId: 'default'),
+          MixHop(protocol: 'psiphon', serverId: 'default'),
+          MixHop(protocol: 'psiphon', serverId: 'default'),
+        ],
+      );
+      responses['getMixDiagnostics'] = <String, dynamic>{
+        'phase': 'Chain failed',
+        'blocks': [
+          {'index': 0, 'state': 'ready'},
+          {'index': 1, 'state': 'failed'},
+          {'index': 2, 'state': 'pending'},
+        ],
+      };
+      responses['connectMixPlan'] = -1;
+      final provider = await providerWith(strategy);
+      await provider.connect();
+      expect(provider.status, VpnConnectionStatus.error);
+      expect(
+        provider.mixDiagnostics!.hops.map((hop) => hop.toJson()).toList(),
+        strategy.hops.map((hop) => hop.toJson()).toList(),
+      );
+      expect(provider.mixDiagnostics!.states, [
+        MixBlockState.ready,
+        MixBlockState.failed,
+        MixBlockState.pending,
+      ]);
+      await provider.disconnect();
+      expect(provider.mixDiagnostics!.states[1], MixBlockState.failed);
+      provider.dispose();
+    },
+  );
+
+  test(
+    'combined-core failed test admits unknown block and starts no tunnel',
+    () async {
+      responses['measureDelay'] = -1;
+      final provider = await providerWith(_strategy());
+      await provider.connect();
+      expect(provider.mixDiagnostics!.states, [MixBlockState.unverified]);
+      expect(
+        provider.mixDiagnostics!.message,
+        contains('could not be identified'),
+      );
+      expect(calls, isNot(contains('connectMix')));
+      provider.dispose();
+    },
+  );
+
+  test('missing native telemetry does not invent block progress', () async {
+    final provider = await providerWith(_nativeStrategy());
+    await provider.connect();
+    expect(provider.status, VpnConnectionStatus.connected);
+    expect(provider.mixDiagnostics!.states, [MixBlockState.unverified]);
+    await provider.disconnect();
+    provider.dispose();
+  });
 }

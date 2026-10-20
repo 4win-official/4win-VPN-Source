@@ -24,6 +24,17 @@ class XrayConnection {
     }
   }
 
+  /// Optional diagnostics: lack of support never changes connection behavior.
+  static Future<Map<dynamic, dynamic>?> getMixDiagnostics() async {
+    try {
+      return await platform
+          .invokeMapMethod<dynamic, dynamic>('getMixDiagnostics')
+          .timeout(const Duration(milliseconds: 750));
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<void> disconnectMixPlan() async {
     try {
       await platform.invokeMethod('disconnectMixPlan');

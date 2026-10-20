@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models/dns_server.dart';
+import '../models/mix_block_exception.dart';
 import '../models/mix_strategy.dart';
 import '../models/openvpn_config.dart';
 import '../models/proxy_server.dart';
@@ -31,111 +32,122 @@ class MixPlanBuilder {
     // this later from the saved reference: repeated DNS blocks must retain
     // their order and the final plan metadata must describe the resolved hop.
     final resolvedDnsAddresses = <String>[];
-    for (final hop in strategy.hops) {
-      switch (hop.protocol) {
-        case 'direct_dns':
-          final resolver = _findDns(hop, dnsServers);
-          if (InternetAddress.tryParse(resolver.primaryDns) == null) {
-            throw const FormatException('Mix DNS must be an IP address.');
-          }
-          resolvedDnsAddresses.add(resolver.primaryDns);
-          hops.add({'protocol': 'direct_dns', 'address': resolver.primaryDns});
-          break;
-        case 'xray':
-          final s = _choose(
-            xrayServers,
-            hop,
-            (v) => v.id,
-            (v) => v.group,
-            'Xray server/group',
-          );
-          final decoded = _decode(
-            XrayConfigBuilder.build(s, fragmentEnabled: false),
-          );
-          hops.add({'protocol': 'xray', 'outbound': _firstOutbound(decoded)});
-          break;
-        case 'proxy':
-          final s = _choose(
-            proxyServers,
-            hop,
-            (v) => v.id,
-            (v) => v.group,
-            'proxy server/group',
-          );
-          final decoded = _decode(XrayConfigBuilder.buildForProxyServer(s));
-          final outbound = _firstOutbound(decoded);
-          if (s.link.toLowerCase().startsWith('https://')) {
-            outbound['streamSettings'] = {
-              'security': 'tls',
-              'tlsSettings': {'serverName': s.address, 'allowInsecure': false},
-            };
-          }
-          hops.add({
-            'protocol': 'proxy',
-            'outbound': outbound,
-            if (s.protocol.toLowerCase() == 'socks4')
-              'socks4': {
+    for (var hopIndex = 0; hopIndex < strategy.hops.length; hopIndex++) {
+      final hop = strategy.hops[hopIndex];
+      try {
+        switch (hop.protocol) {
+          case 'direct_dns':
+            final resolver = _findDns(hop, dnsServers);
+            if (InternetAddress.tryParse(resolver.primaryDns) == null) {
+              throw const FormatException('Mix DNS must be an IP address.');
+            }
+            resolvedDnsAddresses.add(resolver.primaryDns);
+            hops.add({
+              'protocol': 'direct_dns',
+              'address': resolver.primaryDns,
+            });
+            break;
+          case 'xray':
+            final s = _choose(
+              xrayServers,
+              hop,
+              (v) => v.id,
+              (v) => v.group,
+              'Xray server/group',
+            );
+            final decoded = _decode(
+              XrayConfigBuilder.build(s, fragmentEnabled: false),
+            );
+            hops.add({'protocol': 'xray', 'outbound': _firstOutbound(decoded)});
+            break;
+          case 'proxy':
+            final s = _choose(
+              proxyServers,
+              hop,
+              (v) => v.id,
+              (v) => v.group,
+              'proxy server/group',
+            );
+            final decoded = _decode(XrayConfigBuilder.buildForProxyServer(s));
+            final outbound = _firstOutbound(decoded);
+            if (s.link.toLowerCase().startsWith('https://')) {
+              outbound['streamSettings'] = {
+                'security': 'tls',
+                'tlsSettings': {
+                  'serverName': s.address,
+                  'allowInsecure': false,
+                },
+              };
+            }
+            hops.add({
+              'protocol': 'proxy',
+              'outbound': outbound,
+              if (s.protocol.toLowerCase() == 'socks4')
+                'socks4': {
+                  'host': s.address,
+                  'port': s.port,
+                  'userId': s.username,
+                },
+            });
+            break;
+          case 'warp':
+            if (hop.serverId != 'default') {
+              throw const FormatException(
+                'WARP Mix reference must be the default account.',
+              );
+            }
+            final account = warpAccount;
+            if (account == null) {
+              throw const FormatException('No WARP account is registered.');
+            }
+            hops.add({
+              'protocol': 'warp',
+              'config': _decode(XrayConfigBuilder.buildForWarp(account)),
+            });
+            break;
+          case 'psiphon':
+            if (hop.serverId != 'default') {
+              throw const FormatException(
+                'Psiphon Mix reference must be the default profile.',
+              );
+            }
+            hops.add({'protocol': 'psiphon', 'config': <String, dynamic>{}});
+            break;
+          case 'sstp':
+            final s = _chooseSstp(hop, sstpServers, sstpGroups);
+            hops.add({
+              'protocol': 'sstp',
+              'config': {
                 'host': s.address,
                 'port': s.port,
-                'userId': s.username,
+                'username': s.username,
+                'password': s.password,
+                'verifyCertificate': true,
               },
-          });
-          break;
-        case 'warp':
-          if (hop.serverId != 'default') {
-            throw const FormatException(
-              'WARP Mix reference must be the default account.',
+            });
+            break;
+          case 'openvpn':
+            final c = _choose(
+              openVpnConfigs,
+              hop,
+              (v) => v.name,
+              (_) => '',
+              'OpenVPN config',
             );
-          }
-          final account = warpAccount;
-          if (account == null) {
-            throw const FormatException('No WARP account is registered.');
-          }
-          hops.add({
-            'protocol': 'warp',
-            'config': _decode(XrayConfigBuilder.buildForWarp(account)),
-          });
-          break;
-        case 'psiphon':
-          if (hop.serverId != 'default') {
-            throw const FormatException(
-              'Psiphon Mix reference must be the default profile.',
-            );
-          }
-          hops.add({'protocol': 'psiphon', 'config': <String, dynamic>{}});
-          break;
-        case 'sstp':
-          final s = _chooseSstp(hop, sstpServers, sstpGroups);
-          hops.add({
-            'protocol': 'sstp',
-            'config': {
-              'host': s.address,
-              'port': s.port,
-              'username': s.username,
-              'password': s.password,
-              'verifyCertificate': true,
-            },
-          });
-          break;
-        case 'openvpn':
-          final c = _choose(
-            openVpnConfigs,
-            hop,
-            (v) => v.name,
-            (_) => '',
-            'OpenVPN config',
-          );
-          hops.add({
-            'protocol': 'openvpn',
-            'config': {
-              'config': c.normalizedConfig,
-              'username': c.effectiveUsername ?? '',
-              'password': c.effectivePassword ?? '',
-            },
-          });
-          break;
-        default:
-          throw FormatException('Unsupported Mix block: ${hop.protocol}');
+            hops.add({
+              'protocol': 'openvpn',
+              'config': {
+                'config': c.normalizedConfig,
+                'username': c.effectiveUsername ?? '',
+                'password': c.effectivePassword ?? '',
+              },
+            });
+            break;
+          default:
+            throw FormatException('Unsupported Mix block: ${hop.protocol}');
+        }
+      } catch (error, stackTrace) {
+        throw MixBlockException(hopIndex, error, stackTrace: stackTrace);
       }
     }
     // Native allocates all local listeners. The base config only supplies the
