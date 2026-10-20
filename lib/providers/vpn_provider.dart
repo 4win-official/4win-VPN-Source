@@ -45,6 +45,9 @@ part 'vpn_state_sync.dart';
 class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   static const _vpnStateChannel = MethodChannel('com.forwin.vpn/vpn_state');
   int _vpnStateRevision = 0;
+  late final Future<void> _startupLoaded;
+  bool _nativeSessionRestored = false;
+  Timer? _nativeStateTimer;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -53,8 +56,12 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     }
   }
 
-  /// Reconcile missed notification actions without starting a connection.
-  Future<void> refreshConnectionState() => _refreshNativeVpnState();
+  /// Reconcile the live service after preferences are restored, without
+  /// starting a connection (including after the Flutter UI was recreated).
+  Future<void> refreshConnectionState() async {
+    await _startupLoaded;
+    await _refreshNativeVpnState();
+  }
   final MixStrategyStore _mixStore = MixStrategyStore();
   List<MixStrategy> _mixStrategies = [];
   String? _selectedMixStrategyId;
@@ -127,12 +134,17 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       throw StateError('Disconnect before changing the Psiphon server.');
     }
     _psiphonSelectionRevision++;
-    _selectedPsiphonServerId = id?.trim().isNotEmpty == true ? id!.trim() : null;
+    _selectedPsiphonServerId = id?.trim().isNotEmpty == true
+        ? id!.trim()
+        : null;
     final prefs = await SharedPreferences.getInstance();
     if (_selectedPsiphonServerId == null) {
       await prefs.remove('psiphon_selected_server_id');
     } else {
-      await prefs.setString('psiphon_selected_server_id', _selectedPsiphonServerId!);
+      await prefs.setString(
+        'psiphon_selected_server_id',
+        _selectedPsiphonServerId!,
+      );
     }
     notifyListeners();
   }
@@ -358,8 +370,8 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     _vpnStateChannel.setMethodCallHandler(_onNativeVpnState);
     _mixLoaded = _loadMixStrategies();
     _init();
-    // بارگیری پروتکل انتخابی و در صورت نیاز اتصال خودکار به آخرین سرور OpenVPN
-    _startupRestore();
+    // Restore selections and observe an existing service; never auto-connect.
+    _startupLoaded = _startupRestore();
     // بارگیری سرورهای ایکس‌ری
     loadXrayServers();
     // بارگیری سرورهای پراکسی
@@ -386,7 +398,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (_psiphonSelectionRevision == 0) {
-        _selectedPsiphonServerId = prefs.getString('psiphon_selected_server_id');
+        _selectedPsiphonServerId = prefs.getString(
+          'psiphon_selected_server_id',
+        );
       }
       // One-time migration: Psiphon is the new default protocol. After this
       // migration the user's later protocol choices are preserved normally.
@@ -414,6 +428,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     try {
       await loadOpenVpnConfigs();
     } catch (_) {}
+    await _refreshNativeVpnState();
   }
 
   void _init() {
@@ -1067,7 +1082,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         // Do not tear it down merely because the core is still searching.
         final started = attempt > 0
             ? await _psiphonService.reconnect()
-            : await _psiphonService.start(targetServerId: _selectedPsiphonServerId);
+            : await _psiphonService.start(
+                targetServerId: _selectedPsiphonServerId,
+              );
         if (cancelled()) {
           await cleanUpCancelledStart();
           return;
@@ -3012,6 +3029,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
     final mixWasConnecting = _selectedProtocol == 'mix' && isConnecting;
     _vpnStateRevision++;
+    _nativeSessionRestored = false;
+    _nativeStateTimer?.cancel();
+    _nativeStateTimer = null;
     _sstpConnectGen++;
     _mixConnectGen++;
     // Invalidate any in-flight Xray connect (e.g. a group delay-test in
@@ -3442,6 +3462,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   void dispose() {
     _mixDisposed = true;
     _vpnStateRevision++;
+    _nativeStateTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _vpnStateChannel.setMethodCallHandler(null);
     _sstpConnectGen++;

@@ -60,6 +60,7 @@ class MainActivity: FlutterActivity() {
     // app detect a wrong username/password exactly like the official app.
     private var openvpnChannel: MethodChannel? = null
     private var openvpnStateListener: VpnStatus.StateListener? = null
+    @Volatile private var openvpnConnected = false
     // A log listener as a SECOND, redundant auth-failure signal: the OpenVPN
     // core always writes an "AUTH_FAILED" / "auth-failure" log line when the
     // server rejects the credentials, even in edge cases where the state
@@ -677,6 +678,9 @@ class MainActivity: FlutterActivity() {
                 level: ConnectionStatus?,
                 intent: Intent?
             ) {
+                // addStateListener immediately replays the core's current
+                // level, including when the Activity is newly recreated.
+                openvpnConnected = level == ConnectionStatus.LEVEL_CONNECTED
                 val stateName = state ?: ""
                 val levelName = level?.name ?: ""
                 val isAuthFailed = level == ConnectionStatus.LEVEL_AUTH_FAILED ||
@@ -1089,27 +1093,58 @@ class MainActivity: FlutterActivity() {
     private fun nativeVpnState(protocol: String): Map<String, Any> {
         var running = false
         var reconnecting = false
+        var connected = false
         when (protocol) {
             // Each standalone protocol can use either backend in VPN/proxy mode.
             "xray", "proxy", "warp" -> {
-                running = XrayVpnService.isServiceRunning || XrayProxyService.isServiceRunning
-                reconnecting = XrayVpnService.isReconnecting || XrayProxyService.isReconnecting
+                val xrayRunning = XrayVpnService.isServiceRunning
+                val proxyRunning = XrayProxyService.isServiceRunning
+                val xrayReconnecting = XrayVpnService.isReconnecting
+                val proxyReconnecting = XrayProxyService.isReconnecting
+                running = xrayRunning || proxyRunning
+                reconnecting = xrayReconnecting || proxyReconnecting
+                connected = (xrayRunning && !xrayReconnecting) ||
+                    (proxyRunning && !proxyReconnecting)
             }
-            "mix" -> { running = MixCoordinatorService.isRunning || XrayVpnService.isMixModeRunning; reconnecting = MixCoordinatorService.isReconnecting || XrayVpnService.isMixModeReconnecting }
-            "direct_dns" -> { running = DnsVpnService.isServiceRunning; reconnecting = DnsVpnService.isReconnecting }
-            "slowdns" -> { running = SlowDnsVpnService.isRunning(); reconnecting = SlowDnsVpnService.isReconnecting() }
-            "psiphon" -> { running = PsiphonStatusStore.isRunning(); reconnecting = PsiphonStatusStore.isReconnecting() }
+            "mix" -> {
+                val mixRunning = MixCoordinatorService.isRunning
+                val xrayMixRunning = XrayVpnService.isMixModeRunning
+                val mixReconnecting = MixCoordinatorService.isReconnecting
+                val xrayMixReconnecting = XrayVpnService.isMixModeReconnecting
+                running = mixRunning || xrayMixRunning
+                reconnecting = mixReconnecting || xrayMixReconnecting
+                connected = (mixRunning && !mixReconnecting) ||
+                    (xrayMixRunning && !xrayMixReconnecting)
+            }
+            "direct_dns" -> {
+                running = DnsVpnService.isServiceRunning
+                reconnecting = DnsVpnService.isReconnecting
+                connected = running && !reconnecting
+            }
+            "slowdns" -> {
+                val state = SlowDnsVpnService.status()
+                running = SlowDnsVpnService.isRunning()
+                reconnecting = state["reconnecting"] == true || SlowDnsVpnService.isReconnecting()
+                connected = state["connected"] == true
+            }
+            "psiphon" -> {
+                running = PsiphonStatusStore.isRunning()
+                reconnecting = PsiphonStatusStore.isReconnecting()
+                connected = PsiphonStatusStore.isConnected()
+            }
             "openvpn" -> {
                 running = VpnStatus.isVPNActive()
                 reconnecting = OpenVpnNotificationActions.isReconnecting()
+                connected = running && openvpnConnected && !reconnecting
             }
             "sstp" -> {
                 val state = SstpVpnService.state(applicationContext)
                 running = state["running"] == true
                 reconnecting = state["reconnecting"] == true
+                connected = state["connected"] == true
             }
         }
-        return mapOf("running" to running, "reconnecting" to reconnecting, "connected" to running)
+        return mapOf("running" to running, "reconnecting" to reconnecting, "connected" to connected)
     }
 
 }

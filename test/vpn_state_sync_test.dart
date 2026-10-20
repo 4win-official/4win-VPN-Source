@@ -198,42 +198,45 @@ void main() {
     },
   );
 
-  test('resume skips inactive states and ignores null/errors', () async {
-    final provider = await mixProvider();
-    stateCalls.clear();
-    provider.didChangeAppLifecycleState(AppLifecycleState.resumed);
-    await Future<void>.delayed(Duration.zero);
-    expect(stateCalls, isEmpty);
+  test(
+    'resume reads disconnected state, skips local connect and ignores errors',
+    () async {
+      final provider = await mixProvider();
+      stateCalls.clear();
+      provider.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      expect(stateCalls.single.arguments, {'protocol': 'mix'});
 
-    final connecting = Completer<int>();
-    xrayResponses['connectMixPlan'] = connecting.future;
-    final pendingConnect = provider.connect();
-    await Future<void>.delayed(Duration.zero);
-    // The native coordinator is now connecting; a resume must not query it.
-    stateCalls.clear();
-    provider.didChangeAppLifecycleState(AppLifecycleState.resumed);
-    await Future<void>.delayed(Duration.zero);
-    expect(stateCalls, isEmpty);
-    final stopping = provider.disconnect();
-    await Future<void>.delayed(Duration.zero);
-    connecting.complete(42);
-    await stopping;
-    await pendingConnect;
+      final connecting = Completer<int>();
+      xrayResponses['connectMixPlan'] = connecting.future;
+      final pendingConnect = provider.connect();
+      await Future<void>.delayed(Duration.zero);
+      // The native coordinator is now connecting; a resume must not query it.
+      stateCalls.clear();
+      provider.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      expect(stateCalls, isEmpty);
+      final stopping = provider.disconnect();
+      await Future<void>.delayed(Duration.zero);
+      connecting.complete(42);
+      await stopping;
+      await pendingConnect;
 
-    await provider.connect();
-    expect(provider.status, VpnConnectionStatus.connected);
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(stateChannel, (call) async => null);
-    await provider.refreshConnectionState();
-    expect(provider.status, VpnConnectionStatus.connected);
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(stateChannel, (call) async {
-          throw PlatformException(code: 'unavailable');
-        });
-    await provider.refreshConnectionState();
-    expect(provider.status, VpnConnectionStatus.connected);
-    provider.dispose();
-  });
+      await provider.connect();
+      expect(provider.status, VpnConnectionStatus.connected);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(stateChannel, (call) async => null);
+      await provider.refreshConnectionState();
+      expect(provider.status, VpnConnectionStatus.connected);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(stateChannel, (call) async {
+            throw PlatformException(code: 'unavailable');
+          });
+      await provider.refreshConnectionState();
+      expect(provider.status, VpnConnectionStatus.connected);
+      provider.dispose();
+    },
+  );
 
   test('late state query cannot disconnect after a protocol switch', () async {
     final provider = await mixProvider();
