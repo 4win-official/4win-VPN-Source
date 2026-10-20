@@ -10,6 +10,7 @@ enum AppTheme {
   summer,      // Day & Night; keep this index for existing saved selections.
   autumn,      // تم پاییزی - برگ‌ها می‌ریزند (فصلی)
   liquidGlass, // تم لیکویید گلس (دارک + لایت)
+  crying,      // Append only: preserve all existing persisted theme indices.
 }
 
 class ThemeProvider with ChangeNotifier {
@@ -133,6 +134,10 @@ class ThemeProvider with ChangeNotifier {
         return const Color(0xFFD35400);
       case AppTheme.liquidGlass:
         return const Color(0xFF5B8CFF);
+      case AppTheme.crying:
+        return _isDarkMode
+            ? const Color(0xFFB9AEFF)
+            : const Color(0xFF7863B5);
       case AppTheme.pixel:
       case AppTheme.system:
         return const Color(0xFF4CAF50);
@@ -145,9 +150,13 @@ class ThemeProvider with ChangeNotifier {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
-        scaffoldBackgroundColor: Colors.white,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.white,
+        scaffoldBackgroundColor: _selectedTheme == AppTheme.crying
+            ? const Color(0xFFFFF6FB)
+            : Colors.white,
+        appBarTheme: AppBarTheme(
+          backgroundColor: _selectedTheme == AppTheme.crying
+              ? const Color(0xFFFFF6FB)
+              : Colors.white,
           foregroundColor: Colors.black87,
           elevation: 0,
         ),
@@ -159,9 +168,13 @@ class ThemeProvider with ChangeNotifier {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFF121212),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF1E1E1E),
+        scaffoldBackgroundColor: _selectedTheme == AppTheme.crying
+            ? const Color(0xFF17172F)
+            : const Color(0xFF121212),
+        appBarTheme: AppBarTheme(
+          backgroundColor: _selectedTheme == AppTheme.crying
+              ? const Color(0xFF17172F)
+              : const Color(0xFF1E1E1E),
           foregroundColor: Colors.white,
           elevation: 0,
         ),

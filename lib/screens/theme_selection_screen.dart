@@ -168,6 +168,19 @@ class ThemeSelectionScreen extends StatelessWidget {
                   onTap: () => themeProvider.setTheme(AppTheme.pink),
                 ),
 
+                const SizedBox(height: 16),
+
+                _ThemeCard(
+                  title: 'Crying',
+                  description: 'Little tears, soft comfort (Light + Dark)',
+                  icon: Icons.sentiment_dissatisfied_rounded,
+                  color: isDark
+                      ? const Color(0xFFB9AEFF)
+                      : const Color(0xFF7863B5),
+                  isSelected: themeProvider.selectedTheme == AppTheme.crying,
+                  onTap: () => themeProvider.setTheme(AppTheme.crying),
+                ),
+
                 const SizedBox(height: 24),
 
                 // ── Seasonal Themes group ──────────────────────────────────

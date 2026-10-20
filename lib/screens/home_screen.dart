@@ -16,6 +16,7 @@ import '../widgets/rain_animation.dart';
 import '../widgets/rain_button_surface.dart';
 import '../widgets/autumn_animation.dart';
 import '../widgets/day_night_animation.dart';
+import '../widgets/crying_scene.dart';
 import '../widgets/heart_burst.dart';
 import '../widgets/protocol_selector_dialog.dart';
 import '../widgets/rainbow_heart_button.dart';
@@ -213,6 +214,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
     final isRainTheme = themeProvider.selectedTheme == AppTheme.rain;
     final isDayNightTheme = themeProvider.selectedTheme == AppTheme.summer;
+    final isCryingTheme = themeProvider.selectedTheme == AppTheme.crying;
     final isAutumnTheme = themeProvider.selectedTheme == AppTheme.autumn;
     final isLiquidGlassTheme =
         themeProvider.selectedTheme == AppTheme.liquidGlass;
@@ -234,6 +236,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       bgColor = isDark ? const Color(0xFF080F25) : const Color(0xFFFFFDF5);
       iconColor = isDark ? const Color(0xFFB8CFFF) : const Color(0xFFAD5100);
       textColor = isDark ? const Color(0xFFE5EDFF) : const Color(0xFF8A4000);
+    } else if (isCryingTheme) {
+      bgColor = isDark ? const Color(0xFF17172F) : const Color(0xFFFFF6FB);
+      iconColor = isDark ? const Color(0xFFC9BFFF) : const Color(0xFF7360A4);
+      textColor = isDark ? const Color(0xFFF1EBFF) : const Color(0xFF514371);
     } else if (isAutumnTheme) {
       bgColor = isDark
           ? const Color(0xFF20140B) // قهوه‌ای خیلی تیره
@@ -426,6 +432,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                     ),
                   ),
+                if (isCryingTheme)
+                  Positioned.fill(child: CryingScene(isDark: isDark)),
                 // انیمیشن برف (فقط در تم برفی) — RepaintBoundary keeps the
                 // continuous animation from repainting the rest of the tree.
                 if (isSnowTheme)
@@ -493,7 +501,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         // Center horizontally, but bias vertically slightly
                         // BELOW center so the power button sits centered and a
                         // touch lower, as requested.
-                        alignment: const Alignment(0.0, 0.15),
+                        alignment: isCryingTheme
+                            ? const Alignment(0.0, 0.5)
+                            : const Alignment(0.0, 0.15),
                         child: Consumer<VpnProvider>(
                           builder: (context, provider, _) {
                             // Show loading when servers are being fetched on startup
@@ -542,8 +552,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       ? 150
                                       : 100,
                                   child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    mainAxisAlignment: isCryingTheme
+                                        ? MainAxisAlignment.start
+                                        : MainAxisAlignment.end,
                                     children: [
+                                      // Keep a fixed name lane for the Crying selector.
+                                      if (isCryingTheme &&
+                                          MediaQuery.sizeOf(context).height >=
+                                              720)
+                                        const SizedBox(height: 50),
                                       // Keep the selector reachable in a compact
                                       // capsule, without repeating the selected
                                       // protocol name in a second pill.
@@ -607,13 +624,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(height: 18),
+                                      SizedBox(height: isCryingTheme ? 8 : 18),
 
                                       // Connection Status Text
                                       Text(
                                         _getStatusText(provider.status),
                                         style: TextStyle(
-                                          fontSize: 16,
+                                          fontSize: isCryingTheme ? 14 : 16,
                                           color: isDark
                                               ? Colors.white70
                                               : Colors.black54,
@@ -658,7 +675,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                       TextOverflow.ellipsis,
                                                   textAlign: TextAlign.center,
                                                   style: TextStyle(
-                                                    fontSize: 13,
+                                                    fontSize: isCryingTheme
+                                                        ? 12
+                                                        : 13,
                                                     fontWeight: FontWeight.w600,
                                                     color: isDark
                                                         ? Colors.white
@@ -707,7 +726,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                       TextOverflow.ellipsis,
                                                   textAlign: TextAlign.center,
                                                   style: TextStyle(
-                                                    fontSize: 13,
+                                                    fontSize: isCryingTheme
+                                                        ? 12
+                                                        : 13,
                                                     fontWeight: FontWeight.w600,
                                                     color: isDark
                                                         ? Colors.white
@@ -761,7 +782,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               provider.status,
                                               isDark,
                                             ),
-                                            border: isPixelTheme
+                                            gradient: isCryingTheme
+                                                ? LinearGradient(
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                    colors: [
+                                                      Color.lerp(
+                                                        _getButtonColor(
+                                                          provider.status,
+                                                          isDark,
+                                                        ),
+                                                        Colors.white,
+                                                        .18,
+                                                      )!,
+                                                      _getButtonColor(
+                                                        provider.status,
+                                                        isDark,
+                                                      ),
+                                                    ],
+                                                  )
+                                                : null,
+                                            border: isCryingTheme
+                                                ? Border.all(
+                                                    color: isDark
+                                                        ? const Color(
+                                                            0xFFE1DAFF,
+                                                          )
+                                                        : const Color(
+                                                            0xFFEEE7FF,
+                                                          ),
+                                                    width: 3,
+                                                  )
+                                                : isPixelTheme
                                                 ? Border.all(
                                                     color: Colors.black
                                                         .withValues(alpha: 0.3),
@@ -794,6 +846,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                       color: Color(0x1FBAEFFF),
                                                       blurRadius: 64,
                                                       spreadRadius: 8,
+                                                    ),
+                                                  ]
+                                                : isCryingTheme
+                                                ? [
+                                                    BoxShadow(
+                                                      color:
+                                                          _getButtonColor(
+                                                            provider.status,
+                                                            isDark,
+                                                          ).withValues(
+                                                            alpha: isDark
+                                                                ? .24
+                                                                : .18,
+                                                          ),
+                                                      blurRadius: 36,
+                                                      spreadRadius: 5,
+                                                      offset: const Offset(
+                                                        0,
+                                                        8,
+                                                      ),
                                                     ),
                                                   ]
                                                 : isDark
@@ -1511,6 +1583,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final themeProvider = context.watch<ThemeProvider>();
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
 
+    if (themeProvider.selectedTheme == AppTheme.crying) {
+      switch (status) {
+        case VpnConnectionStatus.connected:
+          return isDark ? const Color(0xFF97DDD0) : const Color(0xFF397F83);
+        case VpnConnectionStatus.connecting:
+        case VpnConnectionStatus.disconnecting:
+          return isDark ? const Color(0xFFF1C7A2) : const Color(0xFF93633E);
+        case VpnConnectionStatus.disconnected:
+          return isDark ? const Color(0xFFB9AEFF) : const Color(0xFF7863B5);
+        case VpnConnectionStatus.error:
+          return isDark ? const Color(0xFFFFAFCA) : const Color(0xFFB34269);
+      }
+    }
+
     // Pink theme: همه چی صورتی (با نسخه شب)
     if (isPinkTheme) {
       if (isDark) {
@@ -1703,6 +1789,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // رنگ نور ملایم از پایین صفحه
   Color _getGlowColor(VpnConnectionStatus status, bool isDark) {
+    if (context.watch<ThemeProvider>().selectedTheme == AppTheme.crying) {
+      return _getButtonColor(status, isDark);
+    }
     switch (status) {
       case VpnConnectionStatus.connected:
         return isDark
