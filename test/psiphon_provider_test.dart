@@ -208,4 +208,107 @@ void main() {
       provider.dispose();
     },
   );
+
+  testWidgets('kill-switch protection does not exhaust a live startup', (
+    tester,
+  ) async {
+    final provider = PsiphonTestProvider();
+    await tester.pump();
+    await provider.switchProtocol('psiphon');
+    nativeConnected = false;
+    killSwitch = true;
+    nativeStatus = 'Connecting to Psiphon...';
+    final operation = provider.connect();
+    await tester.pump();
+    for (var second = 0; second < 20; second++) {
+      await tester.pump(const Duration(seconds: 1));
+    }
+    expect(provider.status, VpnConnectionStatus.connecting);
+    expect(calls.where((call) => call == 'reconnect'), isEmpty);
+    expect(provider.errorMessage, contains('protecting traffic'));
+    nativeConnected = true;
+    killSwitch = false;
+    await tester.pump(const Duration(seconds: 1));
+    await operation;
+    expect(provider.status, VpnConnectionStatus.connected);
+    expect(provider.errorMessage, isNull);
+    await provider.disconnect();
+    provider.dispose();
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('four exhausted attempts leave an explicit persistent error', (
+    tester,
+  ) async {
+    final provider = PsiphonTestProvider();
+    await tester.pump();
+    await provider.switchProtocol('psiphon');
+    nativeConnected = false;
+    nativeStatus = 'Waiting for network...';
+    final operation = provider.connect();
+    await tester.pump();
+    for (var second = 0; second < 740; second++) {
+      await tester.pump(const Duration(seconds: 1));
+    }
+    await operation;
+    expect(calls.where((call) => call == 'start'), hasLength(1));
+    expect(calls.where((call) => call == 'reconnect'), hasLength(3));
+    expect(provider.status, VpnConnectionStatus.error);
+    expect(provider.errorMessage, contains('4/4 attempts'));
+    expect(provider.errorMessage, contains('Waiting for network'));
+    await tester.pump(const Duration(seconds: 11));
+    expect(provider.status, VpnConnectionStatus.error);
+    expect(provider.errorMessage, isNotEmpty);
+    provider.dispose();
+  });
+
+  test(
+    'failed startup cause survives reset and stopped-state reconciliation',
+    () async {
+      nativeConnected = false;
+      nativeStatus = 'Psiphon failed: selected server is no longer available';
+      const stateChannel = MethodChannel('com.forwin.vpn/vpn_state');
+      messenger.setMockMethodCallHandler(
+        stateChannel,
+        (call) async => {'running': false, 'reconnecting': false},
+      );
+      final provider = await makeProvider();
+      try {
+        await provider.connect();
+        final error = provider.errorMessage;
+        provider.resetState();
+        await provider.refreshConnectionState();
+        expect(provider.status, VpnConnectionStatus.error);
+        expect(provider.errorMessage, error);
+        expect(provider.errorMessage, contains('selected server'));
+        await provider.disconnect();
+        expect(provider.errorMessage, isNull);
+      } finally {
+        provider.dispose();
+        messenger.setMockMethodCallHandler(stateChannel, null);
+      }
+    },
+  );
+
+  test(
+    'terminal native failure keeps protection and exposes its cause',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('kill_switch', true);
+      nativeConnected = false;
+      killSwitch = true;
+      nativeStatus =
+          'Psiphon failed: traffic bridge failed to start — traffic blocked by kill switch';
+      final provider = await makeProvider();
+      await provider.connect();
+      expect(provider.status, VpnConnectionStatus.error);
+      expect(provider.errorMessage, contains('traffic bridge failed to start'));
+      expect(provider.errorMessage, contains('kill switch active'));
+      expect(calls.where((call) => call == 'reconnect'), isEmpty);
+      expect(calls.where((call) => call == 'stop'), isEmpty);
+      await provider.disconnect();
+      expect(calls, contains('stop'));
+      provider.dispose();
+    },
+  );
 }

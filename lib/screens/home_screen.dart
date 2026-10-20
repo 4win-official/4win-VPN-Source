@@ -533,33 +533,79 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               children: [
                                 // ===== TOP ZONE (fixed height): protocol + status =====
                                 SizedBox(
-                                  height: 150,
+                                  // Keep the selector/status lane proportional on
+                                  // short phones. The lower controls are a separate,
+                                  // constant viewport, so protocol content cannot
+                                  // move the power rect.
+                                  height:
+                                      MediaQuery.sizeOf(context).height >= 720
+                                      ? 150
+                                      : 100,
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.end,
                                     children: [
-                                      // Keep the selector reachable without repeating
-                                      // the selected protocol in a separate glass pill.
-                                      IconButton(
-                                        tooltip: 'Select protocol',
-                                        icon: const Icon(Icons.tune_rounded),
-                                        color: isDark
-                                            ? Colors.white70
-                                            : Colors.black54,
-                                        constraints: const BoxConstraints(
-                                          minWidth: 48,
-                                          minHeight: 48,
-                                        ),
-                                        onPressed: () {
-                                          showDialog(
-                                            context: context,
-                                            barrierColor: Colors.black
-                                                .withValues(
-                                                  alpha: isDark ? 0.22 : 0.16,
+                                      // Keep the selector reachable in a compact
+                                      // capsule, without repeating the selected
+                                      // protocol name in a second pill.
+                                      Tooltip(
+                                        message: 'Select protocol',
+                                        child: Semantics(
+                                          button: true,
+                                          label: 'Select protocol',
+                                          child: Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(24),
+                                              onTap: () {
+                                                showDialog(
+                                                  context: context,
+                                                  barrierColor: Colors.black
+                                                      .withValues(
+                                                        alpha: isDark
+                                                            ? 0.22
+                                                            : 0.16,
+                                                      ),
+                                                  builder: (context) =>
+                                                      const ProtocolSelectorDialog(),
+                                                );
+                                              },
+                                              child: Container(
+                                                key: const ValueKey(
+                                                  'protocol-selector-trigger',
                                                 ),
-                                            builder: (context) =>
-                                                const ProtocolSelectorDialog(),
-                                          );
-                                        },
+                                                width: 56,
+                                                height: 48,
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      (isDark
+                                                              ? Colors.white
+                                                              : Colors.black)
+                                                          .withValues(
+                                                            alpha: .08,
+                                                          ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(24),
+                                                  border: Border.all(
+                                                    color:
+                                                        (isDark
+                                                                ? Colors.white
+                                                                : Colors.black)
+                                                            .withValues(
+                                                              alpha: .18,
+                                                            ),
+                                                  ),
+                                                ),
+                                                child: Icon(
+                                                  Icons.tune_rounded,
+                                                  color: isDark
+                                                      ? Colors.white70
+                                                      : Colors.black54,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                       const SizedBox(height: 18),
 
@@ -696,109 +742,117 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           _handleConnectTap(context, provider),
                                       onLongPress: () =>
                                           _handleLongPress(context),
-                                      child: Container(
-                                        key: _powerButtonKey,
-                                        width: 200,
-                                        height: 200,
-                                        decoration: BoxDecoration(
-                                          // تم پیکسلی: مربع با گوشه‌های تیز
-                                          // تم عادی: دایره
-                                          shape: isPixelTheme
-                                              ? BoxShape.rectangle
-                                              : BoxShape.circle,
-                                          borderRadius: isPixelTheme
-                                              ? BorderRadius.zero
-                                              : null,
-                                          color: _getButtonColor(
-                                            provider.status,
-                                            isDark,
-                                          ),
-                                          border: isPixelTheme
-                                              ? Border.all(
-                                                  color: Colors.black
-                                                      .withValues(alpha: 0.3),
-                                                  width: 4,
-                                                )
-                                              : null,
-                                          boxShadow: isPixelTheme
-                                              ? [
-                                                  // سایه پیکسلی (بدون blur)
-                                                  BoxShadow(
-                                                    offset: const Offset(8, 8),
-                                                    blurRadius: 0,
-                                                    color: Colors.black
-                                                        .withValues(alpha: 0.5),
-                                                  ),
-                                                ]
-                                              : isSnowTheme
-                                              ? const [
-                                                  BoxShadow(
-                                                    color: Color(0x407AC9E8),
-                                                    blurRadius: 32,
-                                                    spreadRadius: 3,
-                                                  ),
-                                                  BoxShadow(
-                                                    color: Color(0x1FBAEFFF),
-                                                    blurRadius: 64,
-                                                    spreadRadius: 8,
-                                                  ),
-                                                ]
-                                              : isDark
-                                              ? [
-                                                  // نئون گلو در dark mode
-                                                  BoxShadow(
-                                                    color: _getButtonColor(
-                                                      provider.status,
-                                                      isDark,
-                                                    ).withValues(alpha: 0.6),
-                                                    blurRadius: 40,
-                                                    spreadRadius: 10,
-                                                  ),
-                                                  BoxShadow(
-                                                    color: _getButtonColor(
-                                                      provider.status,
-                                                      isDark,
-                                                    ).withValues(alpha: 0.4),
-                                                    blurRadius: 80,
-                                                    spreadRadius: 20,
-                                                  ),
-                                                ]
-                                              : [
-                                                  BoxShadow(
-                                                    color: _getButtonColor(
-                                                      provider.status,
-                                                      isDark,
-                                                    ).withValues(alpha: 0.3),
-                                                    blurRadius: 20,
-                                                    spreadRadius: 5,
-                                                  ),
-                                                ],
-                                        ),
-                                        child: RainButtonSurface(
-                                          enabled: isRainTheme,
-                                          child: SnowButtonSurface(
-                                            enabled: isSnowTheme,
-                                            tint: _getButtonColor(
+                                      child: KeyedSubtree(
+                                        key: const ValueKey('power-button'),
+                                        child: Container(
+                                          key: _powerButtonKey,
+                                          width: 200,
+                                          height: 200,
+                                          decoration: BoxDecoration(
+                                            // تم پیکسلی: مربع با گوشه‌های تیز
+                                            // تم عادی: دایره
+                                            shape: isPixelTheme
+                                                ? BoxShape.rectangle
+                                                : BoxShape.circle,
+                                            borderRadius: isPixelTheme
+                                                ? BorderRadius.zero
+                                                : null,
+                                            color: _getButtonColor(
                                               provider.status,
                                               isDark,
                                             ),
-                                            child: Center(
-                                              child: provider.isConnecting
-                                                  ? FourWinLoader(
-                                                      color: isDark
-                                                          ? Colors.black87
-                                                          : Colors.white,
-                                                      strokeWidth: 3,
-                                                    )
-                                                  : Icon(
-                                                      _getButtonIcon(
-                                                        provider.status,
+                                            border: isPixelTheme
+                                                ? Border.all(
+                                                    color: Colors.black
+                                                        .withValues(alpha: 0.3),
+                                                    width: 4,
+                                                  )
+                                                : null,
+                                            boxShadow: isPixelTheme
+                                                ? [
+                                                    // سایه پیکسلی (بدون blur)
+                                                    BoxShadow(
+                                                      offset: const Offset(
+                                                        8,
+                                                        8,
                                                       ),
-                                                      size: 80,
-                                                      color: isDark
-                                                          ? Colors.black87
-                                                          : Colors.white,
+                                                      blurRadius: 0,
+                                                      color: Colors.black
+                                                          .withValues(
+                                                            alpha: 0.5,
+                                                          ),
                                                     ),
+                                                  ]
+                                                : isSnowTheme
+                                                ? const [
+                                                    BoxShadow(
+                                                      color: Color(0x407AC9E8),
+                                                      blurRadius: 32,
+                                                      spreadRadius: 3,
+                                                    ),
+                                                    BoxShadow(
+                                                      color: Color(0x1FBAEFFF),
+                                                      blurRadius: 64,
+                                                      spreadRadius: 8,
+                                                    ),
+                                                  ]
+                                                : isDark
+                                                ? [
+                                                    // نئون گلو در dark mode
+                                                    BoxShadow(
+                                                      color: _getButtonColor(
+                                                        provider.status,
+                                                        isDark,
+                                                      ).withValues(alpha: 0.6),
+                                                      blurRadius: 40,
+                                                      spreadRadius: 10,
+                                                    ),
+                                                    BoxShadow(
+                                                      color: _getButtonColor(
+                                                        provider.status,
+                                                        isDark,
+                                                      ).withValues(alpha: 0.4),
+                                                      blurRadius: 80,
+                                                      spreadRadius: 20,
+                                                    ),
+                                                  ]
+                                                : [
+                                                    BoxShadow(
+                                                      color: _getButtonColor(
+                                                        provider.status,
+                                                        isDark,
+                                                      ).withValues(alpha: 0.3),
+                                                      blurRadius: 20,
+                                                      spreadRadius: 5,
+                                                    ),
+                                                  ],
+                                          ),
+                                          child: RainButtonSurface(
+                                            enabled: isRainTheme,
+                                            child: SnowButtonSurface(
+                                              enabled: isSnowTheme,
+                                              tint: _getButtonColor(
+                                                provider.status,
+                                                isDark,
+                                              ),
+                                              child: Center(
+                                                child: provider.isConnecting
+                                                    ? FourWinLoader(
+                                                        color: isDark
+                                                            ? Colors.black87
+                                                            : Colors.white,
+                                                        strokeWidth: 3,
+                                                      )
+                                                    : Icon(
+                                                        _getButtonIcon(
+                                                          provider.status,
+                                                        ),
+                                                        size: 80,
+                                                        color: isDark
+                                                            ? Colors.black87
+                                                            : Colors.white,
+                                                      ),
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -809,7 +863,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
                                 // ===== BOTTOM ZONE (fixed height): stats / errors =====
                                 SizedBox(
-                                  height: 150,
+                                  height:
+                                      MediaQuery.sizeOf(context).height >= 720
+                                      ? 150
+                                      : 100,
                                   child: SingleChildScrollView(
                                     child: Column(
                                       children: [
@@ -913,477 +970,507 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                     ),
 
-                    // Server Action Button (Next Server for SSTP, Server List for DNS)
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Consumer<VpnProvider>(
-                        builder: (context, provider, _) {
-                          if (provider.selectedProtocol == 'mix') {
-                            return Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  provider.selectedMixStrategy?.name ??
-                                      'No strategy selected',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 8),
-                                if (provider.mixDiagnostics != null &&
-                                    provider.mixDiagnostics!.strategyId ==
-                                        provider.selectedMixStrategyId)
-                                  MixChainDiagnostics(
-                                    diagnostics: provider.mixDiagnostics!,
+                    // Server Action Button (Next Server for SSTP, Server List for DNS).
+                    // Keep this zone at a stable height: Psiphon's list status and
+                    // Mix's failure action are both taller than the ordinary button,
+                    // and must not change the center position of the power controls.
+                    SizedBox(
+                      key: const ValueKey('home-bottom-controls-zone'),
+                      // This remains constant across protocols. Contents scroll
+                      // instead of being forced into the viewport: ordinary
+                      // buttons retain intrinsic height while Mix/Psiphon
+                      // diagnostics remain reachable on short screens.
+                      height: MediaQuery.sizeOf(context).height >= 720
+                          ? 216
+                          : 96,
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                        child: Consumer<VpnProvider>(
+                          builder: (context, provider, _) {
+                            if (provider.selectedProtocol == 'mix') {
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    provider.selectedMixStrategy?.name ??
+                                        'No strategy selected',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    icon: const Icon(Icons.account_tree),
-                                    label: const Text('Strategy'),
-                                    onPressed: () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            const MixStrategiesScreen(),
-                                      ),
+                                  const SizedBox(height: 8),
+                                  if (provider.mixDiagnostics != null &&
+                                      provider.mixDiagnostics!.strategyId ==
+                                          provider.selectedMixStrategyId)
+                                    MixChainDiagnostics(
+                                      diagnostics: provider.mixDiagnostics!,
                                     ),
-                                    style: OutlinedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 16,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-                          // DNS: Always show "Server List" button
-                          if (provider.selectedProtocol == 'direct_dns') {
-                            return SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const DnsServersScreen(),
-                                    ),
-                                  );
-                                },
-                                icon: Icon(
-                                  Icons.dns,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black87,
-                                ),
-                                label: Text(
-                                  'Server List',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black87,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  side: BorderSide(
-                                    color: isDark
-                                        ? Colors.white24
-                                        : Colors.black12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
-
-                          // SSTP: the grouped server list is always available.
-                          if (provider.selectedProtocol == 'sstp') {
-                            final group = provider.selectedSstpGroup;
-                            final server = provider.selectedServer;
-                            final groupNames = provider.sstpGroups.where(
-                              (g) => g.id == group,
-                            );
-                            final groupName = groupNames.isEmpty
-                                ? '4win Free Servers'
-                                : groupNames.first.name;
-                            final label = group == null
-                                ? (server == null
-                                      ? 'Choose an SSTP server'
-                                      : server.fullAddress)
-                                : server == null
-                                ? 'Group: $groupName'
-                                : '$groupName • ${server.fullAddress}';
-                            return Column(
-                              children: [
-                                Text(
-                                  label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            const SstpServersScreen(),
-                                      ),
-                                    ),
-                                    icon: const Icon(Icons.vpn_key),
-                                    label: const Text(
-                                      'Server List',
-                                      style: TextStyle(fontSize: 16),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 16,
-                                      ),
-                                      backgroundColor:
-                                          Colors.tealAccent.shade700,
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-
-                          // OpenVPN: Always show "OpenVPN Configs" button
-                          if (provider.selectedProtocol == 'openvpn') {
-                            return SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const OpenVpnConfigsScreen(),
-                                    ),
-                                  );
-                                },
-                                icon: Icon(
-                                  Icons.shield,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black87,
-                                ),
-                                label: Text(
-                                  'OpenVPN Configs',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black87,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  side: BorderSide(
-                                    color: isDark
-                                        ? Colors.white24
-                                        : Colors.black12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
-
-                          // Slow DNS: Show DNS Scanner and Configs buttons
-                          if (provider.selectedProtocol == 'slowdns') {
-                            return Column(
-                              children: [
-                                // DNS Scanner button
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () {
-                                      Navigator.push(
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      icon: const Icon(Icons.account_tree),
+                                      label: const Text('Strategy'),
+                                      onPressed: () => Navigator.push(
                                         context,
                                         MaterialPageRoute(
-                                          builder: (context) =>
-                                              const SlowDnsConfigsScreen(),
+                                          builder: (_) =>
+                                              const MixStrategiesScreen(),
                                         ),
-                                      );
-                                    },
-                                    icon: const Icon(Icons.radar),
-                                    label: const Text(
-                                      'DNS Scanner & Configs',
-                                      style: TextStyle(fontSize: 16),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 16,
                                       ),
-                                      backgroundColor: Colors.orange,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            );
-                          }
-
-                          // Proxy: Always show "Proxy Servers" button (mirrors Xray).
-                          if (provider.selectedProtocol == 'proxy') {
-                            final showNext = provider.proxyGroupSelected;
-                            final serverListBtn = ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        const ProxyServersScreen(),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.swap_horiz),
-                              label: const Text(
-                                'Proxy Servers',
-                                style: TextStyle(fontSize: 16),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
-                                backgroundColor: Colors.tealAccent.shade700,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            );
-
-                            final nextBtn = OutlinedButton.icon(
-                              onPressed: provider.isConnecting
-                                  ? null
-                                  : () async {
-                                      await provider.selectNextProxyServer();
-                                      final s = provider.selectedProxyServer;
-                                      if (!context.mounted || s == null) return;
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Next: ${s.remark.isEmpty ? s.address : s.remark}',
-                                          ),
-                                          duration: const Duration(seconds: 1),
-                                        ),
-                                      );
-                                    },
-                              icon: Icon(
-                                Icons.skip_next,
-                                color: isDark ? Colors.white70 : Colors.black87,
-                              ),
-                              label: Text(
-                                'Next',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black87,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
-                                side: BorderSide(
-                                  color: isDark
-                                      ? Colors.white24
-                                      : Colors.black12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            );
-
-                            return Row(
-                              children: [
-                                Expanded(
-                                  flex: showNext ? 3 : 1,
-                                  child: serverListBtn,
-                                ),
-                                if (showNext) ...[
-                                  const SizedBox(width: 10),
-                                  Expanded(flex: 2, child: nextBtn),
                                 ],
-                              ],
-                            );
-                          }
-
-                          // Xray: Always show "Xray Servers" button
-                          if (provider.selectedProtocol == 'xray') {
-                            final showNext = provider.xrayFreeGroupSelected;
-                            final serverListBtn = ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        const XrayServersScreen(),
+                              );
+                            }
+                            // DNS: Always show "Server List" button
+                            if (provider.selectedProtocol == 'direct_dns') {
+                              return SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            const DnsServersScreen(),
+                                      ),
+                                    );
+                                  },
+                                  icon: Icon(
+                                    Icons.dns,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black87,
                                   ),
-                                );
-                              },
-                              icon: const Icon(Icons.rocket_launch),
-                              label: const Text(
-                                'Xray Servers',
-                                style: TextStyle(fontSize: 16),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
+                                  label: Text(
+                                    'Server List',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.black87,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                    ),
+                                    side: BorderSide(
+                                      color: isDark
+                                          ? Colors.white24
+                                          : Colors.black12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
                                 ),
-                                backgroundColor: Colors.tealAccent.shade700,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            );
+                              );
+                            }
 
-                            final nextBtn = OutlinedButton.icon(
-                              onPressed: provider.isConnecting
-                                  ? null
-                                  : () async {
-                                      await provider.selectNextFreeServer();
-                                      final s = provider.selectedXrayServer;
-                                      if (!context.mounted || s == null) return;
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Next: ${s.remark.isEmpty ? s.address : s.remark}',
-                                          ),
-                                          duration: const Duration(seconds: 1),
-                                        ),
-                                      );
-                                    },
-                              icon: Icon(
-                                Icons.skip_next,
-                                color: isDark ? Colors.white70 : Colors.black87,
-                              ),
-                              label: Text(
-                                'Next',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black87,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
-                                side: BorderSide(
-                                  color: isDark
-                                      ? Colors.white24
-                                      : Colors.black12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            );
-
-                            // Next Server sits NEXT TO the Server List button, and
-                            // only when a whole group is selected as the target.
-                            return Row(
-                              children: [
-                                Expanded(
-                                  flex: showNext ? 3 : 1,
-                                  child: serverListBtn,
-                                ),
-                                if (showNext) ...[
-                                  const SizedBox(width: 10),
-                                  Expanded(flex: 2, child: nextBtn),
-                                ],
-                              ],
-                            );
-                          }
-
-                          if (provider.selectedProtocol == 'psiphon') {
-                            return PsiphonServerListStatus(isDark: isDark);
-                          }
-
-                          // WARP: no user-picked server list and no manual "register"
-                          // action — the app registers the Cloudflare identity by
-                          // itself automatically (on first connect, and again by
-                          // itself if a stored identity turns out to be unusable).
-                          // This is a plain read-only status readout showing the
-                          // Cloudflare edge endpoint currently in use, NOT a button.
-                          if (provider.selectedProtocol == 'warp') {
-                            final account = provider.warpAccount;
-                            final label = provider.warpRegistering
-                                ? 'Registering WARP identity…'
-                                : account != null
-                                ? 'WARP endpoint: ${account.peerEndpoint}'
-                                : 'WARP (sets up automatically on connect)';
-                            return Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 16,
-                                horizontal: 16,
-                              ),
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: const Color(
-                                    0xFFF38020,
-                                  ).withValues(alpha: 0.5),
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
+                            // SSTP: the grouped server list is always available.
+                            if (provider.selectedProtocol == 'sstp') {
+                              final group = provider.selectedSstpGroup;
+                              final server = provider.selectedServer;
+                              final groupNames = provider.sstpGroups.where(
+                                (g) => g.id == group,
+                              );
+                              final groupName = groupNames.isEmpty
+                                  ? '4win Free Servers'
+                                  : groupNames.first.name;
+                              final label = group == null
+                                  ? (server == null
+                                        ? 'Choose an SSTP server'
+                                        : server.fullAddress)
+                                  : server == null
+                                  ? 'Group: $groupName'
+                                  : '$groupName • ${server.fullAddress}';
+                              return Column(
                                 children: [
-                                  const Icon(
-                                    Icons.cloud_done,
-                                    color: Color(0xFFF38020),
+                                  Text(
+                                    label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      label,
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w500,
+                                  const SizedBox(height: 8),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const SstpServersScreen(),
+                                        ),
                                       ),
-                                      overflow: TextOverflow.ellipsis,
+                                      icon: const Icon(Icons.vpn_key),
+                                      label: const Text(
+                                        'Server List',
+                                        style: TextStyle(fontSize: 16),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                        ),
+                                        backgroundColor:
+                                            Colors.tealAccent.shade700,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ],
-                              ),
-                            );
-                          }
+                              );
+                            }
 
-                          return const SizedBox.shrink();
-                        },
+                            // OpenVPN: Always show "OpenVPN Configs" button
+                            if (provider.selectedProtocol == 'openvpn') {
+                              return SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            const OpenVpnConfigsScreen(),
+                                      ),
+                                    );
+                                  },
+                                  icon: Icon(
+                                    Icons.shield,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black87,
+                                  ),
+                                  label: Text(
+                                    'OpenVPN Configs',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.black87,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                    ),
+                                    side: BorderSide(
+                                      color: isDark
+                                          ? Colors.white24
+                                          : Colors.black12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
+
+                            // Slow DNS: Show DNS Scanner and Configs buttons
+                            if (provider.selectedProtocol == 'slowdns') {
+                              return Column(
+                                children: [
+                                  // DNS Scanner button
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                const SlowDnsConfigsScreen(),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.radar),
+                                      label: const Text(
+                                        'DNS Scanner & Configs',
+                                        style: TextStyle(fontSize: 16),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                        ),
+                                        backgroundColor: Colors.orange,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+
+                            // Proxy: Always show "Proxy Servers" button (mirrors Xray).
+                            if (provider.selectedProtocol == 'proxy') {
+                              final showNext = provider.proxyGroupSelected;
+                              final serverListBtn = ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ProxyServersScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.swap_horiz),
+                                label: const Text(
+                                  'Proxy Servers',
+                                  style: TextStyle(fontSize: 16),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  backgroundColor: Colors.tealAccent.shade700,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              );
+
+                              final nextBtn = OutlinedButton.icon(
+                                onPressed: provider.isConnecting
+                                    ? null
+                                    : () async {
+                                        await provider.selectNextProxyServer();
+                                        final s = provider.selectedProxyServer;
+                                        if (!context.mounted || s == null)
+                                          return;
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Next: ${s.remark.isEmpty ? s.address : s.remark}',
+                                            ),
+                                            duration: const Duration(
+                                              seconds: 1,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                icon: Icon(
+                                  Icons.skip_next,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87,
+                                ),
+                                label: Text(
+                                  'Next',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black87,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.black12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              );
+
+                              return Row(
+                                children: [
+                                  Expanded(
+                                    flex: showNext ? 3 : 1,
+                                    child: serverListBtn,
+                                  ),
+                                  if (showNext) ...[
+                                    const SizedBox(width: 10),
+                                    Expanded(flex: 2, child: nextBtn),
+                                  ],
+                                ],
+                              );
+                            }
+
+                            // Xray: Always show "Xray Servers" button
+                            if (provider.selectedProtocol == 'xray') {
+                              final showNext = provider.xrayFreeGroupSelected;
+                              final serverListBtn = ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const XrayServersScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.rocket_launch),
+                                label: const Text(
+                                  'Xray Servers',
+                                  style: TextStyle(fontSize: 16),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  backgroundColor: Colors.tealAccent.shade700,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              );
+
+                              final nextBtn = OutlinedButton.icon(
+                                onPressed: provider.isConnecting
+                                    ? null
+                                    : () async {
+                                        await provider.selectNextFreeServer();
+                                        final s = provider.selectedXrayServer;
+                                        if (!context.mounted || s == null)
+                                          return;
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Next: ${s.remark.isEmpty ? s.address : s.remark}',
+                                            ),
+                                            duration: const Duration(
+                                              seconds: 1,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                icon: Icon(
+                                  Icons.skip_next,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black87,
+                                ),
+                                label: Text(
+                                  'Next',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black87,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.black12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              );
+
+                              // Next Server sits NEXT TO the Server List button, and
+                              // only when a whole group is selected as the target.
+                              return Row(
+                                children: [
+                                  Expanded(
+                                    flex: showNext ? 3 : 1,
+                                    child: serverListBtn,
+                                  ),
+                                  if (showNext) ...[
+                                    const SizedBox(width: 10),
+                                    Expanded(flex: 2, child: nextBtn),
+                                  ],
+                                ],
+                              );
+                            }
+
+                            if (provider.selectedProtocol == 'psiphon') {
+                              return PsiphonServerListStatus(isDark: isDark);
+                            }
+
+                            // WARP: no user-picked server list and no manual "register"
+                            // action — the app registers the Cloudflare identity by
+                            // itself automatically (on first connect, and again by
+                            // itself if a stored identity turns out to be unusable).
+                            // This is a plain read-only status readout showing the
+                            // Cloudflare edge endpoint currently in use, NOT a button.
+                            if (provider.selectedProtocol == 'warp') {
+                              final account = provider.warpAccount;
+                              final label = provider.warpRegistering
+                                  ? 'Registering WARP identity…'
+                                  : account != null
+                                  ? 'WARP endpoint: ${account.peerEndpoint}'
+                                  : 'WARP (sets up automatically on connect)';
+                              return Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                  horizontal: 16,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: const Color(
+                                      0xFFF38020,
+                                    ).withValues(alpha: 0.5),
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.cloud_done,
+                                      color: Color(0xFFF38020),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        label,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+
+                            return const SizedBox.shrink();
+                          },
+                        ),
                       ),
                     ),
                   ],

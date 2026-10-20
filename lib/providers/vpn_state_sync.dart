@@ -42,6 +42,12 @@ extension _VpnStateSync on VpnProvider {
       // Missing/failed status reads are not proof of a stop. A reconnect or
       // kill-switch service still owns the session and must not be torn down.
       if (state['running'] == false && state['reconnecting'] == false) {
+        // A failed Psiphon startup normally stops its native service. That
+        // must not erase the persisted cause on resume. An explicit native
+        // onDisconnected event still follows the manual stop path above.
+        if (protocol == 'psiphon' && status == VpnConnectionStatus.error) {
+          return;
+        }
         await disconnect();
       }
     } on MissingPluginException {

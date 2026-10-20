@@ -643,7 +643,12 @@ class PsiphonVpnService : VpnService() {
         } catch (_: Throwable) {}
         psiphonTunnel = null
         psiphonSocksPort = 0
-        lastStatusText = "Kill switch active — traffic blocked"
+        // This path is terminal for the current native tunnel (core exit,
+        // bridge failure, or startup failure), not the transient blackhole
+        // retained by stopPsiphon(false) while a reconnect is in flight. Keep
+        // the concrete native cause in the externally visible state so the
+        // controller can distinguish a deterministic failure from progress.
+        lastStatusText = "Psiphon failed: $reason — traffic blocked by kill switch"
         plog("KILL SWITCH engaged ($reason) — holding TUN blackhole")
         try {
             showNotification(lastStatusText, true)

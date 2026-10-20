@@ -299,8 +299,10 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// every notifyListeners via the override below.
   void _syncErrorAutoClear() {
     final hasError = _errorMessage != null && _errorMessage!.isNotEmpty;
-    if ((_selectedProtocol == 'slowdns' || _selectedProtocol == 'psiphon') &&
-        _status == VpnConnectionStatus.error) {
+    if (((_selectedProtocol == 'slowdns' || _selectedProtocol == 'psiphon') &&
+            _status == VpnConnectionStatus.error) ||
+        (_selectedProtocol == 'psiphon' &&
+            _status == VpnConnectionStatus.connecting)) {
       // Its native TUN may deliberately remain a blackhole. Do not disguise
       // blocked traffic as an ordinary disconnected state after ten seconds.
       _errorAutoClearTimer?.cancel();
@@ -1045,6 +1047,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     _startPsiphonLogPump();
     const policy = RetryPolicy.psiphonConnect;
     String failure = 'Psiphon connection timed out';
+    String lastNativeStatus = '';
     try {
       final killSwitchEnabled = await isKillSwitchEnabled();
       if (cancelled()) return;
@@ -1096,6 +1099,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           }
           final nativeStatus = (await _psiphonService.statusText).trim();
           if (cancelled()) return;
+          if (nativeStatus.isNotEmpty) lastNativeStatus = nativeStatus;
           // Do not hide deterministic startup/bridge failures behind minutes
           // of polling or overwrite their cause with our subsequent stop().
           if (nativeStatus.startsWith('Psiphon failed:') ||
@@ -1106,16 +1110,26 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
             terminalFailure = true;
             break;
           }
-          if (await _psiphonService.isKillSwitchActive) {
-            if (cancelled()) return;
-            failure = nativeStatus.isEmpty
-                ? 'Psiphon tunnel failed'
-                : nativeStatus;
-            break;
-          }
+          // A blocking TUN protects traffic while the core searches or
+          // reconnects; it is not a failed connection attempt. Breaking here
+          // used to burn all four retries before the core could recover.
+          final blocking = await _psiphonService.isKillSwitchActive;
           if (cancelled()) return;
+          final progress = [
+            'Connecting to Psiphon (attempt ${attempt + 1}/${policy.maxAttempts})',
+            if (nativeStatus.isNotEmpty) nativeStatus,
+            if (blocking) 'Kill switch protecting traffic while connecting',
+          ].join(' — ');
+          if (_errorMessage != progress) {
+            _errorMessage = progress;
+            notifyListeners();
+          }
         }
         if (terminalFailure) break;
+        failure =
+            'Psiphon connection timed out after '
+            '${attempt + 1}/${policy.maxAttempts} attempts.'
+            '${lastNativeStatus.isEmpty ? '' : ' Last status: $lastNativeStatus'}';
         log.warning('psiphon', 'Attempt ${attempt + 1}: no ready tunnel yet');
       }
 
@@ -3163,6 +3177,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
   /// Keep persisted SSTP targets when returning from the background.
   void resetState() {
+    // Returning from Settings must not erase the only explanation for a
+    // failed Psiphon connection (including a retained kill-switch TUN).
+    if (_selectedProtocol == 'psiphon' && _status == VpnConnectionStatus.error) {
+      return;
+    }
     if (!isConnected && !isConnecting && !_sstpGroupTesting) {
       _errorMessage = null;
       _connectionDuration = Duration.zero;

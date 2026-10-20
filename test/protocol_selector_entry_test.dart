@@ -13,9 +13,9 @@ void main() {
     });
   });
 
-  for (final size in [const Size(320, 800), const Size(390, 844)]) {
+  for (final size in [const Size(320, 640), const Size(390, 844)]) {
     testWidgets(
-      'icon opens selector without a duplicate protocol pill at $size',
+      'capsule opens selector without a duplicate protocol pill at $size',
       (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
@@ -30,6 +30,11 @@ void main() {
         expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
         expect(tester.getSize(entry).width, greaterThanOrEqualTo(48));
         expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
+        final capsule = tester.widget<Container>(
+          find.byKey(const ValueKey('protocol-selector-trigger')),
+        );
+        final capsuleDecoration = capsule.decoration! as BoxDecoration;
+        expect(capsuleDecoration.borderRadius, BorderRadius.circular(24));
         await tester.tap(entry);
         // Home contains repeating animations, so settle only the dialog route.
         await tester.pump();
