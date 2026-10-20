@@ -143,6 +143,17 @@ class XrayConnection {
     }
   }
 
+  /// Fresh complete-chain delay for the running Mix session. Native code owns
+  /// the resolved chain; never reload/select servers or fall back to direct HTTP.
+  static Future<int> measureMixDelay() async {
+    try {
+      final result = await platform.invokeMethod('measureMixDelay');
+      return result is num ? result.toInt() : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+
   /// Reads the RTT recorded by the already-running native WARP tunnel.
   /// This never starts or probes a second core when the indicator is tapped.
   static Future<int> measureWarpDelay() async {

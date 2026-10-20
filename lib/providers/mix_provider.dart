@@ -3,6 +3,48 @@ part of 'vpn_provider.dart';
 /// All Mix behavior is kept in this library part. No standalone selection,
 /// account, connection settings or profile is modified by the strategy editor.
 extension _MixProviderLogic on VpnProvider {
+  Future<void> _manualMixPing() async {
+    if (_mixDisposed || !isConnected || _xrayPinging) return;
+    final generation = _mixConnectGen;
+    final revision = _vpnStateRevision;
+    final nativeSession = _nativeMetricsSessionId;
+    bool activeRequest() =>
+        !_mixDisposed &&
+        generation == _mixConnectGen &&
+        revision == _vpnStateRevision &&
+        _selectedProtocol == 'mix';
+    _xrayPinging = true;
+    _currentPing = null;
+    _pingFailed = false;
+    notifyListeners();
+    try {
+      final started = Stopwatch()..start();
+      final delay = await XrayConnection.measureMixDelay().timeout(
+        const Duration(seconds: 6),
+        onTimeout: () => -1,
+      );
+      final remaining = 220 - started.elapsedMilliseconds;
+      if (remaining > 0) {
+        await Future<void>.delayed(Duration(milliseconds: remaining));
+      }
+      if (!activeRequest() ||
+          !isConnected ||
+          nativeSession != _nativeMetricsSessionId) {
+        return;
+      }
+      _currentPing = delay >= 0 ? delay : null;
+      _pingFailed = delay < 0;
+    } finally {
+      // Disconnect/protocol switch owns resetting the old session's flags.
+      // A native reconnect may change status without a local disconnect; still
+      // release this request's loading flag so the next tap can retry.
+      if (activeRequest()) {
+        _xrayPinging = false;
+        notifyListeners();
+      }
+    }
+  }
+
   MixStrategy? get _selectedMixStrategy {
     for (final strategy in _mixStrategies) {
       if (strategy.id == _selectedMixStrategyId) return strategy;

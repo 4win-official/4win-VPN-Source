@@ -80,6 +80,21 @@ class XrayVpnService : VpnService() {
         @Volatile
         private var activeController: CoreController? = null
 
+        private data class MixDelayProbe(val controller: CoreController, val config: String)
+        @Volatile private var mixDelayProbe: MixDelayProbe? = null
+
+        fun measureActiveMixDelay(url: String): Long {
+            val probe = mixDelayProbe ?: return -1L
+            fun current() = isServiceRunning && isMixModeRunning &&
+                !isMixModeReconnecting && activeController === probe.controller &&
+                mixDelayProbe === probe
+            if (!current()) return -1L
+            val delay = runCatching {
+                Libv2ray.measureOutboundDelay(probe.config, url)
+            }.getOrDefault(-1L)
+            return if (current()) delay else -1L
+        }
+
         @Volatile private var nativeTrafficAvailable = false
         @Volatile private var totalUplink = 0L
         @Volatile private var totalDownlink = 0L
@@ -236,6 +251,10 @@ class XrayVpnService : VpnService() {
             isMixModeRunning = mixMode
             synchronized(Companion) {
                 activeController = controller
+                mixDelayProbe = if (mixMode) {
+                    val probe = JSONObject(config).apply { remove("inbounds") }
+                    MixDelayProbe(controller, probe.toString())
+                } else null
                 totalUplink = 0L
                 totalDownlink = 0L
             }
@@ -362,6 +381,7 @@ class XrayVpnService : VpnService() {
         isReconnecting = false
         isMixModeReconnecting = false
         activeConnectIntent = null
+        mixDelayProbe = null
     }
 
     private fun teardown(stopService: Boolean): Boolean {
@@ -369,6 +389,7 @@ class XrayVpnService : VpnService() {
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         aetherConnected=false; nativeTrafficAvailable=false
         isRunning=false; isServiceRunning=false; isMixModeRunning=false; isMixModeReconnecting=false
+        mixDelayProbe = null
         synchronized(Companion) { activeController=null; totalUplink=0L; totalDownlink=0L }
         if (aetherActive) runCatching { NativeCore.stop() }
         runCatching { coreController?.stopLoop() }; coreController=null

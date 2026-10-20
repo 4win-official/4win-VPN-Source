@@ -590,6 +590,19 @@ class MainActivity: FlutterActivity() {
                         runOnUiThread { result.success(delay) }
                     }.start()
                 }
+                "measureMixDelay" -> {
+                    // Never use Activity HTTP here: Mix excludes our UID from
+                    // the TUN. Probe the exact live chain, without reselecting it.
+                    Thread {
+                        val url = "https://www.gstatic.com/generate_204"
+                        val delay = when {
+                            MixCoordinatorService.isRunning -> MixCoordinatorService.measureActiveDelay(url)
+                            XrayVpnService.isMixModeRunning -> XrayVpnService.measureActiveMixDelay(url)
+                            else -> -1L
+                        }
+                        runOnUiThread { result.success(delay) }
+                    }.start()
+                }
                 "measureWarpDelay" -> {
                     // Perform a fresh HTTP request through the active Android
                     // VPN. NativeCore.lastRttMs() is only the connect-time

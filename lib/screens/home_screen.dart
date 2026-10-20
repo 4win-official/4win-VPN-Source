@@ -1804,14 +1804,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// The ping row under the timer. For Xray this is a tappable button
+  /// The ping row under the timer. For Xray, WARP and Mix this is a tappable button
   /// (tap-to-ping); the first time it shows "click to ping". Every subsequent
   /// tap runs a fresh measurement. Other protocols keep the auto display.
   Widget _buildPingIndicator(VpnProvider provider, bool isDark) {
     final ping = provider.currentPing;
 
     if (provider.selectedProtocol == 'xray' ||
-        provider.selectedProtocol == 'warp') {
+        provider.selectedProtocol == 'warp' ||
+        provider.selectedProtocol == 'mix') {
       final pinging = provider.xrayPinging;
       final awaitingFirst = provider.xrayPingAwaitingFirstTap;
 

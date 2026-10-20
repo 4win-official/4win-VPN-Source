@@ -755,6 +755,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// Manual, tap-triggered ping for Xray. Runs a single real-delay measurement
   /// each time the user taps the ping indicator on the home screen.
   Future<void> manualXrayPing() async {
+    if (_selectedProtocol == 'mix') return _manualMixPing();
     if (_selectedProtocol != 'xray' && _selectedProtocol != 'warp') return;
     if (_xrayPinging) return; // ignore rapid double taps
     _xrayPingAwaitingFirstTap = false;

@@ -77,6 +77,21 @@ class MixCoordinatorService : VpnService() {
         @Volatile var isReconnecting = false
             private set
         @Volatile private var statsCore: CoreController? = null
+        private data class DelayProbe(val request: Request, val config: String)
+        @Volatile private var delayProbe: DelayProbe? = null
+
+        fun measureActiveDelay(url: String): Long {
+            val probe = delayProbe ?: return -1L
+            fun current() = isRunning && !isReconnecting &&
+                active === probe.request && !probe.request.cancelled.get() &&
+                delayProbe === probe
+            if (!current()) return -1L
+            val delay = runCatching {
+                Libv2ray.measureOutboundDelay(probe.config, url)
+            }.getOrDefault(-1L)
+            return if (current()) delay else -1L
+        }
+
         private var uplink = 0L
         private var downlink = 0L
 
@@ -360,6 +375,9 @@ class MixCoordinatorService : VpnService() {
         statsCore = finalCore
         uplink = 0L
         downlink = 0L
+        // Keep the exact exit prefix, DNS boundary and UDP policy from startup.
+        // A tap reuses live workers; it never rebuilds/reorders the strategy.
+        delayProbe = DelayProbe(current, probe.toString())
         isRunning = true
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
         isReconnecting = false
@@ -424,6 +442,7 @@ class MixCoordinatorService : VpnService() {
         current.cancelled.set(true)
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         isRunning = false
+        delayProbe = null
         statsCore = null
         runCatching { finalCore?.stopLoop() }
         finalCore = null

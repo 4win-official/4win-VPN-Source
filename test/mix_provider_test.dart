@@ -134,6 +134,110 @@ void main() {
     return provider;
   }
 
+  for (final native in [false, true]) {
+    test(
+      'home Mix ping is fresh and preserves the chain (native=$native)',
+      () async {
+        final strategy = MixStrategy(
+          id: 'ordered-ping',
+          name: 'Ordered ping chain',
+          hops: [
+            const MixHop(protocol: 'proxy', serverId: 'p1'),
+            if (native) const MixHop(protocol: 'psiphon', serverId: 'default'),
+            const MixHop(protocol: 'xray', serverId: 'x1'),
+          ],
+        );
+        final provider = await providerWith(strategy);
+        await provider.connect();
+        final prefs = await SharedPreferences.getInstance();
+        final before = {for (final key in prefs.getKeys()) key: prefs.get(key)};
+        calls.clear();
+        final pending = Completer<int>();
+        responses['measureMixDelay'] = pending.future;
+        final ping = provider.manualXrayPing();
+        expect(provider.xrayPinging, isTrue);
+        expect(provider.currentPing, isNull);
+        await provider
+            .manualXrayPing(); // Double taps must not start another probe.
+        pending.complete(73);
+        await ping;
+        expect(calls, ['measureMixDelay']);
+        expect(provider.currentPing, 73);
+        expect(provider.pingFailed, isFalse);
+        expect(provider.xrayPinging, isFalse);
+        responses['measureMixDelay'] = 0;
+        await provider.manualXrayPing();
+        expect(provider.currentPing, 0);
+        expect(calls.where((call) => call != 'getMixDiagnostics'), [
+          'measureMixDelay',
+          'measureMixDelay',
+        ]);
+        expect(provider.selectedMixStrategy!.toJson(), strategy.toJson());
+        expect({
+          for (final key in prefs.getKeys()) key: prefs.get(key),
+        }, before);
+        expect(provider.isConnected, isTrue);
+        await provider.disconnect();
+        provider.dispose();
+      },
+    );
+  }
+
+  test('Mix ping failure allows retry without disconnecting', () async {
+    final provider = await providerWith(_nativeStrategy());
+    await provider.connect();
+    for (final failure in [-1, null, 'invalid']) {
+      responses['measureMixDelay'] = failure;
+      await provider.manualXrayPing();
+      expect(provider.currentPing, isNull);
+      expect(provider.pingFailed, isTrue);
+      expect(provider.xrayPinging, isFalse);
+      expect(provider.isConnected, isTrue);
+    }
+    responses['measureMixDelay'] = 91;
+    await provider.manualXrayPing();
+    expect(provider.currentPing, 91);
+    expect(provider.pingFailed, isFalse);
+    await provider.disconnect();
+    provider.dispose();
+  });
+
+  test('disconnected Mix does not start a ping', () async {
+    final provider = await providerWith(_strategy());
+    calls.clear();
+    await provider.manualXrayPing();
+    expect(calls, isEmpty);
+    expect(provider.xrayPinging, isFalse);
+    provider.dispose();
+  });
+
+  for (final action in ['disconnect', 'switch', 'reconnect', 'dispose']) {
+    test('late Mix ping is ignored after $action', () async {
+      final provider = await providerWith(_strategy());
+      await provider.connect();
+      final pending = Completer<int>();
+      responses['measureMixDelay'] = pending.future;
+      final ping = provider.manualXrayPing();
+      await Future<void>.delayed(Duration.zero);
+      if (action == 'dispose') {
+        provider.dispose();
+      } else if (action == 'switch') {
+        await provider.switchProtocol('xray');
+      } else {
+        await provider.disconnect();
+        if (action == 'reconnect') await provider.connect();
+      }
+      pending.complete(999);
+      await ping;
+      if (action != 'dispose') {
+        expect(provider.currentPing, action == 'reconnect' ? 42 : null);
+        expect(provider.xrayPinging, isFalse);
+        await provider.disconnect();
+        provider.dispose();
+      }
+    });
+  }
+
   test(
     'does not start native tunnel when no Mix strategy is selected',
     () async {
