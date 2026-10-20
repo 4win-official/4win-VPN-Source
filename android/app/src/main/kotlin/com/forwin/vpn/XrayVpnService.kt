@@ -86,6 +86,14 @@ class XrayVpnService : VpnService() {
         private data class MixDelayProbe(val controller: CoreController, val config: String)
         @Volatile private var mixDelayProbe: MixDelayProbe? = null
 
+        @Volatile private var activeAetherService: XrayVpnService? = null
+
+        /** Morning builds read native readiness directly. Keep that path, but
+         * only through the service that owns this standalone WARP request. */
+        fun pollWarpReadiness(request: Long) {
+            activeAetherService?.pollNativeWarpReadiness(request)
+        }
+
         fun measureActiveMixDelay(url: String): Long {
             val probe = mixDelayProbe ?: return -1L
             fun current() = isServiceRunning && isMixModeRunning &&
@@ -293,6 +301,7 @@ class XrayVpnService : VpnService() {
             val config = rawConfig.replace("__APP_FILES__", filesDir.absolutePath)
             aetherGeneration = token
             aetherActive = true
+            activeAetherService = this
             NativeCore.attach(this)
             val addresses = NativeCore.prepare(config)
             val builder = Builder()
@@ -339,6 +348,24 @@ class XrayVpnService : VpnService() {
         }
     }
 
+    private fun pollNativeWarpReadiness(request: Long) {
+        val token = aetherGeneration ?: return
+        if (request != warpRequest || !isCurrent(token) || !aetherActive || !isRunning) return
+        if (runCatching { NativeCore.isReady() }.getOrDefault(false)) {
+            acceptWarpReadiness(request, token)
+        }
+    }
+
+    private fun acceptWarpReadiness(request: Long, token: Long) {
+        if (request != warpRequest || !isCurrent(token) || !aetherActive || !isRunning) return
+        if (!WarpConnectionState.connected(request)) return
+        if (!aetherConnected) {
+            aetherConnected = true
+            runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
+        }
+        finishReconnect(token)
+    }
+
     /** Called by the Aether JNI callback; status=connected is emitted only after
      * its data-plane validation, unlike the old Xray handshake-only path. */
     fun onEvent(json: String) {
@@ -346,12 +373,7 @@ class XrayVpnService : VpnService() {
             val event = JSONObject(json)
             if (event.optString("type") == "status" && event.optString("status") == "connected") {
                 val token = aetherGeneration
-                if (token != null && isCurrent(token) && aetherActive) {
-                    aetherConnected = true
-                    WarpConnectionState.connected(warpRequest)
-                    runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
-                    finishReconnect(token)
-                }
+                if (token != null) acceptWarpReadiness(warpRequest, token)
             }
             if (event.optString("type") == "traffic" && aetherActive &&
                 aetherGeneration == generation && event.has("tx") && event.has("rx")) {
@@ -428,6 +450,7 @@ class XrayVpnService : VpnService() {
         engineThread=null
         if (aetherActive) runCatching { NativeCore.detach() }
         aetherActive=false
+        if (activeAetherService === this) activeAetherService = null
         aetherGeneration=null
         runCatching { vpnInterface?.close() }; vpnInterface=null
         if (stopService) { runCatching { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true) }; stopSelf() }

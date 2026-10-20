@@ -13,10 +13,11 @@ internal object WarpConnectionState {
         return request
     }
     @Synchronized fun snapshot(): Snapshot = state
-    @Synchronized fun connected(request: Long) {
+    @Synchronized fun connected(request: Long): Boolean {
         if (state.request == request && state.starting) {
             state = Snapshot(request, false, true, null)
         }
+        return state.request == request && state.connected
     }
     @Synchronized fun fail(request: Long, error: String) {
         if (state.request == request && (state.starting || state.connected)) {

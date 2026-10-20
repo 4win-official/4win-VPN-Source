@@ -529,6 +529,9 @@ class MainActivity: FlutterActivity() {
                             var state = WarpConnectionState.snapshot()
                             while (state.request == warpRequest && state.starting &&
                                 android.os.SystemClock.elapsedRealtime() < deadline) {
+                                // Restore the morning build's native-ready poll;
+                                // callback delivery alone must not decide success.
+                                XrayVpnService.pollWarpReadiness(warpRequest)
                                 Thread.sleep(250L)
                                 state = WarpConnectionState.snapshot()
                             }
