@@ -31,6 +31,7 @@ import 'proxy_servers_screen.dart';
 import 'secret_text_screen.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
+import '../widgets/psiphon_server_list_status.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -1141,10 +1142,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     );
                   }
 
-                  // Psiphon: automatic server selection, no server list/next
-                  // button to show — Psiphon's tunnel core picks the server.
                   if (provider.selectedProtocol == 'psiphon') {
-                    return const SizedBox.shrink();
+                    return PsiphonServerListStatus(isDark: isDark);
                   }
 
                   // WARP: no user-picked server list and no manual "register"

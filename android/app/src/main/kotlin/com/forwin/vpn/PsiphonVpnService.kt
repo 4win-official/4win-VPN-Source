@@ -44,6 +44,7 @@ class PsiphonVpnService : VpnService() {
     @Volatile private var tunnelRunning = false
     @Volatile private var killSwitchActive = false
     private var currentRegion = ""
+    private var currentTargetServerId: String? = null
     private var psiphonSocksPort = 0
     private var lastStatusText = ""
     // Exit regions the Psiphon core last reported as available (from
@@ -80,6 +81,7 @@ class PsiphonVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.forwin.vpn.PSIPHON_DISCONNECT"
         const val ACTION_RECONNECT = "com.forwin.vpn.PSIPHON_RECONNECT"
         const val EXTRA_EGRESS_REGION = "egress_region"
+        const val EXTRA_TARGET_SERVER_ID = "target_server_id"
         const val EXTRA_GENERATION = "generation"
 
         /** Cross-process state snapshot broadcast (consumed via PsiphonStatusStore). */
@@ -131,6 +133,7 @@ class PsiphonVpnService : VpnService() {
     /** Recomputes the externally-visible isTunnelConnected flag. */
     private fun updateConnectedState() {
         isTunnelConnected = psiphonCoreConnected && bridgeConfirmed
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, isTunnelConnected) }
     }
 
     // ------------------------------------------------------------------ logging
@@ -317,12 +320,16 @@ class PsiphonVpnService : VpnService() {
         val prefs = getSharedPreferences("psiphon_service", MODE_PRIVATE)
         when (intent?.action) {
             ACTION_CONNECT -> {
+                if (!tunnelRunning) runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 activeConnectIntent = Intent(intent)
                 connectionGeneration = UUID.randomUUID().toString()
                 reconnectInFlight.set(false)
                 reconnecting = false
                 currentRegion = intent.getStringExtra(EXTRA_EGRESS_REGION) ?: ""
-                prefs.edit().putBoolean("wanted", true).putString("region", currentRegion).apply()
+                currentTargetServerId = intent.getStringExtra(EXTRA_TARGET_SERVER_ID)?.takeIf { it.isNotBlank() }
+                prefs.edit().putBoolean("wanted", true).putString("region", currentRegion)
+                    .apply { if (currentTargetServerId == null) remove("target_server_id") else putString("target_server_id", currentTargetServerId) }
+                    .apply()
                 val region = currentRegion
                 try { showNotification("Connecting to Psiphon...", true) } catch (_: Throwable) {}
                 commands.execute { startPsiphon(region) }
@@ -331,6 +338,7 @@ class PsiphonVpnService : VpnService() {
                 val token = intent.getStringExtra(EXTRA_GENERATION)
                 if (token == null || token == connectionGeneration) VpnStateBroadcast.notifyDisconnected(this, "psiphon")
                 if (token != null && token != connectionGeneration) return START_STICKY
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 connectionGeneration = null
                 reconnectInFlight.set(false)
                 reconnecting = false
@@ -342,12 +350,15 @@ class PsiphonVpnService : VpnService() {
                 val token = intent.getStringExtra(EXTRA_GENERATION)
                 if (token != null && token != connectionGeneration) return START_STICKY
                 if (!reconnectInFlight.compareAndSet(false, true)) return START_STICKY
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 reconnecting = true
                 connectionGeneration = UUID.randomUUID().toString()
                 val reconnectGeneration = connectionGeneration
                 val reconnectIntent = activeConnectIntent?.let { Intent(it).apply { action = ACTION_CONNECT } }
                 currentRegion = reconnectIntent?.getStringExtra(EXTRA_EGRESS_REGION)
                     ?: prefs.getString("region", currentRegion) ?: currentRegion
+                currentTargetServerId = reconnectIntent?.getStringExtra(EXTRA_TARGET_SERVER_ID)?.takeIf { it.isNotBlank() }
+                    ?: prefs.getString("target_server_id", null)?.takeIf { it.isNotBlank() }
                 prefs.edit().putBoolean("wanted", true).apply()
                 // Keep this foreground service alive while teardown and restart are serialized.
                 try { showNotification("Reconnecting to Psiphon...", true) } catch (_: Throwable) {}
@@ -361,6 +372,7 @@ class PsiphonVpnService : VpnService() {
             }
             null -> if (prefs.getBoolean("wanted", false)) {
                 currentRegion = prefs.getString("region", "") ?: ""
+                currentTargetServerId = prefs.getString("target_server_id", null)?.takeIf { it.isNotBlank() }
                 try {
                     showNotification("Connecting to Psiphon...", true)
                 } catch (_: Throwable) {}
@@ -381,6 +393,7 @@ class PsiphonVpnService : VpnService() {
                 return
             }
 
+            com.example.sstp_flutter.VpnConnectionObserver.notifyStarting(this)
             // Keep a previous blackhole until establish() atomically replaces it.
             // Closing it first would briefly route apps outside the VPN.
             if (killSwitchActive) {
@@ -645,7 +658,25 @@ class PsiphonVpnService : VpnService() {
         val bootstrap = assets.open("mix_psiphon_bootstrap.json").bufferedReader().use {
             JSONObject(it.readText())
         }
-        val config = PsiphonConfig.build(bootstrap, region).toString()
+        // A fresh datastore must not depend on reaching the discovery drop
+        // before it has any server it can tunnel through (often blocked).
+        val embeddedServers = try {
+            PsiphonServerList.readLatest(applicationContext, bootstrap).also {
+                plog("verified ${it.count} cached/bundled bootstrap servers")
+            }.encoded
+        } catch (_: Exception) {
+            // A damaged/missing seed must not prevent cached/remote discovery.
+            plog("cached/bundled bootstrap unavailable; using SDK cached servers and signed remote discovery")
+            ""
+        }
+        val selectedEntry = currentTargetServerId?.let { requestedId ->
+            PsiphonServerListStore(
+                java.io.File(applicationContext.filesDir, "psiphon-server-list"),
+                bootstrap.getString("RemoteServerListSignaturePublicKey"),
+                { applicationContext.assets.open(PsiphonBootstrap.SERVER_LIST_ASSET) }
+            ).resolve(requestedId) ?: throw IllegalStateException("Selected Psiphon server is no longer in the verified snapshot")
+        }
+        val config = PsiphonConfig.build(bootstrap, region, selectedEntry?.encoded).toString()
         fun callback(tag: String, block: () -> Unit) {
             runGuarded(tag) { if (activeSession == session) block() }
         }
@@ -780,7 +811,7 @@ class PsiphonVpnService : VpnService() {
         tunnel.setVpnMode(true)
         psiphonTunnel = tunnel
         plog("starting tunnel core")
-        tunnel.startTunneling("")
+        tunnel.startTunneling(embeddedServers)
     }
 
     /** Runs [block], converting any throwable into a log line (never rethrows). */

@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/services.dart';
+import '../models/psiphon_server.dart';
 
 /// Dart bridge to the native Psiphon VPN service (`com.forwin.vpn/psiphon`).
 ///
@@ -23,11 +25,12 @@ class PsiphonService {
     }
   }
 
-  Future<bool> start({String egressRegion = ''}) async {
+  Future<bool> start({String egressRegion = '', String? targetServerId}) async {
     try {
       if (!await prepare()) return false;
       return await _channel.invokeMethod<bool>('start', {
             'egressRegion': egressRegion,
+            if (targetServerId != null) 'targetServerId': targetServerId,
           }) ??
           false;
     } catch (_) {
@@ -150,6 +153,63 @@ class PsiphonService {
       return {'count': count, 'regions': regions};
     } catch (_) {
       return const {'count': 0, 'regions': <String>[]};
+    }
+  }
+
+  /// Signed cached/bundled server metadata, distinct from runtime exit regions.
+  Future<PsiphonServerList> getServerList() async {
+    try {
+      final raw = await _channel.invokeMethod<Map>('getServerList');
+      if (raw != null) return PsiphonServerList.fromMap(raw);
+    } catch (_) {
+      // The UI may retry without affecting an active connection.
+    }
+    return const PsiphonServerList(
+      error: 'Unable to read the verified server list.',
+    );
+  }
+
+  /// Explicit manual refresh; native code verifies and atomically publishes off-thread.
+  Future<PsiphonRefreshResult> refreshServerListNow() async {
+    try {
+      final raw = await _channel.invokeMethod<Map>('refreshServerListNow');
+      if (raw != null) {
+        return PsiphonRefreshResult(
+          updated: raw['updated'] == true,
+          busy: raw['busy'] == true,
+          error: raw['error']?.toString(),
+        );
+      }
+    } catch (_) {
+      // Failed/manual maintenance must not stop the VPN or discard cached rows.
+    }
+    return const PsiphonRefreshResult(
+      error: 'Refresh unavailable. The last valid list is unchanged.',
+    );
+  }
+
+  /// TCP connect time only: no Psiphon authentication, VPN delay or ICMP measurement.
+  /// Uses normal app routing and never bypasses a VPN or kill switch.
+  Future<int?> testServerLatency(PsiphonServer server) async {
+    final address = InternetAddress.tryParse(server.ipAddress);
+    final port = server.port;
+    if (address == null || port == null || port < 1 || port > 65535) {
+      return null;
+    }
+    Socket? socket;
+    final stopwatch = Stopwatch()..start();
+    try {
+      socket = await Socket.connect(
+        address,
+        port,
+        timeout: const Duration(seconds: 3),
+      );
+      return stopwatch.elapsedMilliseconds;
+    } catch (_) {
+      return null;
+    } finally {
+      stopwatch.stop();
+      socket?.destroy();
     }
   }
 }

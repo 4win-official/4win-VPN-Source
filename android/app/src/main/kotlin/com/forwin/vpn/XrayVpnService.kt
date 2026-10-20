@@ -101,11 +101,13 @@ class XrayVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 val token: Long
                 synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); configJson=intent.getStringExtra(EXTRA_CONFIG_JSON); mixMode=intent.getBooleanExtra(EXTRA_MIX_MODE,false); isMixModeReconnecting=mixMode }
                 commandExecutor.execute { if (teardown(false) && isCurrent(token)) { runCatching { showNotification(token) }; launch(token) } }
             }
             ACTION_DISCONNECT -> if (isCurrentToken(intent)) {
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 VpnStateBroadcast.notifyDisconnected(this, when { mixMode -> "mix"; configJson?.contains("__APP_FILES__") == true -> "warp"; else -> "xray" })
                 synchronized(lifecycleLock) { invalidateConnectionLocked() }
                 commandExecutor.execute { teardown(true) }
@@ -151,6 +153,7 @@ class XrayVpnService : VpnService() {
             return
         }
 
+        com.example.sstp_flutter.VpnConnectionObserver.notifyStarting(this)
         try {
             if (config.contains("__APP_FILES__")) {
                 startAether(config, expectedGeneration)
@@ -214,6 +217,7 @@ class XrayVpnService : VpnService() {
                 return
             }
             isRunning = true
+            runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
             isServiceRunning = true
             isMixModeRunning = mixMode
             activeController = controller
@@ -288,7 +292,11 @@ class XrayVpnService : VpnService() {
         runCatching {
             val event = JSONObject(json)
             if (event.optString("type") == "status" && event.optString("status") == "connected") {
-                aetherGeneration?.let { finishReconnect(it) }
+                val token = aetherGeneration
+                if (token != null && isCurrent(token) && aetherActive) {
+                    runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
+                    finishReconnect(token)
+                }
             }
             if (event.optString("type") == "traffic") {
                 totalUplink = event.optLong("tx")
@@ -302,6 +310,7 @@ class XrayVpnService : VpnService() {
 
     private fun reconnect(intent: Intent?) {
         if (!isCurrentToken(intent)) return
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         val token: Long
         synchronized(lifecycleLock) {
             if (reconnectInProgress || activeConnectIntent == null) return
@@ -333,6 +342,7 @@ class XrayVpnService : VpnService() {
     }
 
     private fun teardown(stopService: Boolean): Boolean {
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         isRunning=false; isServiceRunning=false; isMixModeRunning=false; isMixModeReconnecting=false; activeController=null; totalUplink=0L; totalDownlink=0L
         if (aetherActive) runCatching { NativeCore.stop() }
         runCatching { coreController?.stopLoop() }; coreController=null

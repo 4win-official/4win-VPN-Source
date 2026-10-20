@@ -113,6 +113,25 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   final XrayServerService _xrayService = XrayServerService();
   final ProxyServerService _proxyService = ProxyServerService();
   final PsiphonService _psiphonService = PsiphonService();
+  String? _selectedPsiphonServerId;
+  int _psiphonSelectionRevision = 0;
+  String? get selectedPsiphonServerId => _selectedPsiphonServerId;
+
+  Future<void> selectPsiphonServer(String? id) async {
+    if (isConnected || isConnecting) {
+      throw StateError('Disconnect before changing the Psiphon server.');
+    }
+    _psiphonSelectionRevision++;
+    _selectedPsiphonServerId = id?.trim().isNotEmpty == true ? id!.trim() : null;
+    final prefs = await SharedPreferences.getInstance();
+    if (_selectedPsiphonServerId == null) {
+      await prefs.remove('psiphon_selected_server_id');
+    } else {
+      await prefs.setString('psiphon_selected_server_id', _selectedPsiphonServerId!);
+    }
+    notifyListeners();
+  }
+
   Timer? _psiphonMonitorTimer;
   Timer? _psiphonTrafficTimer;
   Timer? _psiphonLogTimer;
@@ -359,6 +378,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     await loadSelectedProtocol();
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (_psiphonSelectionRevision == 0) {
+        _selectedPsiphonServerId = prefs.getString('psiphon_selected_server_id');
+      }
       // One-time migration: Psiphon is the new default protocol. After this
       // migration the user's later protocol choices are preserved normally.
       final migrated = prefs.getBool('psiphon_default_v1') ?? false;
@@ -1037,7 +1059,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         // Do not tear it down merely because the core is still searching.
         final started = attempt > 0
             ? await _psiphonService.reconnect()
-            : await _psiphonService.start();
+            : await _psiphonService.start(targetServerId: _selectedPsiphonServerId);
         if (cancelled()) {
           await cleanUpCancelledStart();
           return;

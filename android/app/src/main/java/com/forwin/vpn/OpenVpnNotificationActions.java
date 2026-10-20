@@ -7,6 +7,7 @@ import android.net.Uri;
 import java.lang.reflect.Field;
 import java.util.UUID;
 import java.util.WeakHashMap;
+import com.example.sstp_flutter.VpnConnectionObserver;
 import de.blinkt.openvpn.core.ConnectionStatus;
 import de.blinkt.openvpn.core.OpenVPNManagement;
 import de.blinkt.openvpn.core.OpenVPNService;
@@ -34,6 +35,12 @@ public final class OpenVpnNotificationActions {
 
     private static boolean isMix(OpenVPNService service) {
         return service.getClass().getName().startsWith("com.forwin.vpn.mix.");
+    }
+
+    /** Called by the transformer at the beginning of the native engine-start method. */
+    public static void onEngineStarting(OpenVPNService service) {
+        if (isMix(service)) return;
+        VpnConnectionObserver.notifyStarting(service);
     }
 
     private static Object field(OpenVPNService service, String name) {
@@ -107,11 +114,13 @@ public final class OpenVpnNotificationActions {
             // profile, credentials and configuration. No prefs/profile lookup,
             // delayed task, new service, or protocol fallback can resurrect it.
             try {
+                VpnConnectionObserver.notifyStarting(service);
                 state.management.reconnect();
             } catch (RuntimeException failure) {
                 synchronized (SESSIONS) { state.reconnecting = false; }
             }
         } else {
+            VpnConnectionObserver.notifyState(service, false);
             VpnStateBroadcast.notifyDisconnected(service, "openvpn");
             try { service.stopVPN(false); } catch (android.os.RemoteException ignored) { }
         }
@@ -120,6 +129,9 @@ public final class OpenVpnNotificationActions {
 
     /** Called on service status changes, not periodic notification refreshes. */
     public static void onState(OpenVPNService service, ConnectionStatus status) {
+        if (!isMix(service)) {
+            VpnConnectionObserver.notifyState(service, status == ConnectionStatus.LEVEL_CONNECTED);
+        }
         synchronized (SESSIONS) {
             Session state = SESSIONS.get(service);
             if (state == null || !state.reconnecting) return;
@@ -130,6 +142,7 @@ public final class OpenVpnNotificationActions {
     }
 
     public static void invalidate(OpenVPNService service) {
+        if (!isMix(service)) VpnConnectionObserver.notifyState(service, false);
         synchronized (SESSIONS) { SESSIONS.remove(service); }
     }
 

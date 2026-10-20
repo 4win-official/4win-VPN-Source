@@ -6,7 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import com.example.sstp_flutter.VpnConnectionObserver
 
 /**
  * Custom Application that bridges Psiphon state across processes.
@@ -21,7 +24,28 @@ import android.util.Log
  * one) feeds them into [PsiphonStatusStore], which MainActivity's MethodChannel
  * handlers read synchronously.
  */
-class VpnApplication : Application() {
+class VpnApplication : Application(), VpnConnectionObserver {
+    private val connectedRefresh by lazy {
+        val handler = Handler(Looper.getMainLooper())
+        PsiphonConnectedRefresh(
+            schedule = { delay, action ->
+                val task = Runnable { action() }
+                handler.postDelayed(task, delay)
+                PsiphonConnectedRefresh.Cancellation { handler.removeCallbacks(task) }
+            },
+            refresh = { PsiphonServerList.refreshInBackground(this) },
+        )
+    }
+
+    override fun onVpnConnectionStarting(source: Context) {
+        // Startup cancels an old timer; it does not fetch before the VPN is connected.
+        connectedRefresh.starting(source)
+    }
+
+    override fun onVpnConnectionStateChanged(source: Context, connected: Boolean) {
+        connectedRefresh.stateChanged(source, connected)
+    }
+
     override fun onCreate() {
         super.onCreate()
         val filter = IntentFilter().apply {

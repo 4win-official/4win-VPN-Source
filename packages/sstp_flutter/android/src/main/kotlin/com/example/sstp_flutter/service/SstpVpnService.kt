@@ -17,6 +17,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.preference.PreferenceManager
 import com.example.sstp_flutter.FlutterCaller
 import com.example.sstp_flutter.R
+import com.example.sstp_flutter.VpnConnectionObserver
 import com.example.sstp_flutter.client.ClientBridge
 import com.example.sstp_flutter.client.control.ControlClient
 import com.example.sstp_flutter.client.control.LogWriter
@@ -75,6 +76,9 @@ class SstpVpnService : VpnService() {
     private var notificationActionInProgress = false
     private var activeSessionPrefs: SessionPreferences? = null
     private var sessionGeneration = 0L
+    private var observedHomeStatusPrefs: SharedPreferences? = null
+    private var homeStatusListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+    private var homeStatusListenerGeneration = 0L
 
     companion object {
         @Volatile var isReconnecting: Boolean = false
@@ -116,6 +120,7 @@ class SstpVpnService : VpnService() {
                 if(newState){
 //                    FlutterCaller().connecting()
                 }else{
+                    VpnConnectionObserver.notifyState(this, false)
                     val tempMap : HashMap<String,Any>  = HashMap()
                     connectionStatus = OscPrefKey.Disconnected.name
                     tempMap.put("status",connectionStatus)
@@ -159,6 +164,7 @@ class SstpVpnService : VpnService() {
 
                 FlutterCaller().connecting()
                 sessionGeneration++
+                detachHomeStatusListener()
                 controlClient?.kill(false, null)
                 activeSessionPrefs = SessionPreferences(prefs.all.toMap())
 
@@ -241,10 +247,42 @@ class SstpVpnService : VpnService() {
     }
 
     private fun initializeClient(sessionPrefs: SharedPreferences = activeSessionPrefs ?: SessionPreferences(prefs.all.toMap())) {
+        detachHomeStatusListener()
         activeSessionPrefs = sessionPrefs as? SessionPreferences ?: activeSessionPrefs
+        val observedPrefs = sessionPrefs
+        val generation = sessionGeneration
+        val listenerGeneration = homeStatusListenerGeneration + 1
+        homeStatusListenerGeneration = listenerGeneration
+        val registeredHomeStatusListener = SharedPreferences.OnSharedPreferenceChangeListener { source, key ->
+            if (key == OscPrefKey.HOME_STATUS.name &&
+                source === observedPrefs &&
+                observedHomeStatusPrefs === observedPrefs &&
+                homeStatusListenerGeneration == listenerGeneration &&
+                sessionGeneration == generation &&
+                activeSessionPrefs === observedPrefs
+            ) {
+                VpnConnectionObserver.notifyState(this,
+                    observedPrefs.getString(OscPrefKey.HOME_STATUS.name, "")?.isNotEmpty() == true)
+            }
+        }
+        homeStatusListener = registeredHomeStatusListener
+        observedHomeStatusPrefs = observedPrefs
+        observedPrefs.registerOnSharedPreferenceChangeListener(registeredHomeStatusListener)
+        VpnConnectionObserver.notifyStarting(this)
         controlClient = ControlClient(ClientBridge(this, sessionPrefs = sessionPrefs)).also {
             it.launchJobMain()
         }
+    }
+
+    private fun detachHomeStatusListener() {
+        homeStatusListenerGeneration++
+        val observedPrefs = observedHomeStatusPrefs
+        val listener = homeStatusListener
+        if (observedPrefs != null && listener != null) {
+            observedPrefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+        observedHomeStatusPrefs = null
+        homeStatusListener = null
     }
 
     private fun prepareLogWriter() {
@@ -279,6 +317,7 @@ class SstpVpnService : VpnService() {
     }
 
     internal fun launchJobReconnect() {
+        VpnConnectionObserver.notifyState(this, false)
         val generation = sessionGeneration
         jobReconnect = scope.launch {
             try {
@@ -368,6 +407,7 @@ class SstpVpnService : VpnService() {
     internal fun makeNotification(id: Int, message: String) {
         println("err msg : $message")
         errorConnection = true
+        VpnConnectionObserver.notifyState(this, false)
 
     }
 
@@ -385,6 +425,8 @@ class SstpVpnService : VpnService() {
     }
 
     internal fun close() {
+        detachHomeStatusListener()
+        VpnConnectionObserver.notifyState(this, false)
         setRootState(false)
         connectionStatus = OscPrefKey.Disconnected.name
         stopForeground(true)
@@ -392,6 +434,8 @@ class SstpVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        detachHomeStatusListener()
+        VpnConnectionObserver.notifyState(this, false)
         logWriter?.write("Terminate VPN connection")
         logWriter?.close()
         logWriter = null

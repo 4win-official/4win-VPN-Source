@@ -148,7 +148,11 @@ class MixCoordinatorService : VpnService() {
         if (intent?.action == ACTION_STOP || intent?.action == ACTION_RECONNECT) {
             // Notification actions belong to one chain only, including worker notifications.
             if (next != null && intent.getStringExtra("sessionId") == next.id) {
-                if (intent.action == ACTION_RECONNECT) requestReconnect(next) else {
+                if (intent.action == ACTION_RECONNECT) {
+                    runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
+                    requestReconnect(next)
+                } else {
+                    runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                     VpnStateBroadcast.notifyDisconnected(this, "mix")
                     requestStop(next)
                 }
@@ -184,6 +188,7 @@ class MixCoordinatorService : VpnService() {
         // Reject known impossible UDP underlays before binding listeners or
         // starting any worker. Native readiness still validates real transport.
         MixCapabilities.validatePlan(plan, relayConfig != null)
+        com.example.sstp_flutter.VpnConnectionObserver.notifyStarting(this)
         fun reservePort(): Int {
             val socket = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
             heldPorts.add(socket)
@@ -307,6 +312,7 @@ class MixCoordinatorService : VpnService() {
         uplink = 0L
         downlink = 0L
         isRunning = true
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
         isReconnecting = false
         showNotification("${hops.length()} stages active${if (supportsUdp) "" else " · TCP-only"}")
         current.connected.complete(delay)
@@ -366,6 +372,7 @@ class MixCoordinatorService : VpnService() {
         if (request !== current) return
         if (!cleaned.compareAndSet(false, true)) return
         current.cancelled.set(true)
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         isRunning = false
         statsCore = null
         runCatching { finalCore?.stopLoop() }

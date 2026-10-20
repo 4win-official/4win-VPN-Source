@@ -80,6 +80,7 @@ class XrayProxyService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 val token: Long
                 synchronized(lifecycleLock) {
                     generation++; token = generation
@@ -91,6 +92,7 @@ class XrayProxyService : Service() {
                 commandExecutor.execute { teardown(false); if (isCurrent(token)) { runCatching { showNotification(token) }; launch(token) } }
             }
             ACTION_DISCONNECT -> if (isCurrentToken(intent)) {
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 // Notify Flutter before invalidating the generation or tearing down
                 // the core.  A stale notification action is rejected above.
                 VpnStateBroadcast.notifyDisconnected(this, "xray")
@@ -128,6 +130,7 @@ class XrayProxyService : Service() {
             commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
             return
         }
+        com.example.sstp_flutter.VpnConnectionObserver.notifyStarting(this)
         try {
             Seq.setContext(applicationContext)
             Libv2ray.initCoreEnv(filesDir.absolutePath, "")
@@ -143,6 +146,7 @@ class XrayProxyService : Service() {
                 return
             }
             isRunning = true
+            runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
             isServiceRunning = true
             activeController = controller
             totalUplink = 0L
@@ -158,6 +162,7 @@ class XrayProxyService : Service() {
 
     private fun reconnect(intent: Intent?) {
         if (!isCurrentToken(intent)) return
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         val token: Long
         synchronized(lifecycleLock) {
             if (reconnectInProgress || activeConnectIntent == null) return
@@ -188,6 +193,7 @@ class XrayProxyService : Service() {
     }
 
     private fun teardown(stopService: Boolean) {
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         isRunning = false; isServiceRunning = false; activeController = null
         totalUplink = 0L; totalDownlink = 0L
         runCatching { coreController?.stopLoop() }

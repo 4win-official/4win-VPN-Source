@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.os.ParcelFileDescriptor
 import ca.psiphon.PsiphonTunnel
+import com.forwin.vpn.PsiphonServerList
 import gi.Seq
 import org.json.JSONObject
 import psi.Psi
@@ -90,6 +91,13 @@ class PsiphonMixAdapter : MixAdapter {
         }
         val bootstrap = environment.context.assets.open("mix_psiphon_bootstrap.json")
             .bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
+        // Local-only seed loading performs no direct network fetch, so a
+        // non-entry stage still sends all discovery/tunnel dials upstream.
+        val embeddedServers = try {
+            PsiphonServerList.readLatest(environment.context, bootstrap).encoded
+        } catch (_: Exception) {
+            "" // Cached entries and the SDK's signed remote discovery remain usable.
+        }
         val pair = MixPacketStack.createPacketPair()
         packetPair = pair
         // Psiphon explicitly permits arbitrary local IPs and rewrites them at
@@ -173,7 +181,7 @@ class PsiphonMixAdapter : MixAdapter {
                 }, 100, 250, TimeUnit.MILLISECONDS)
             }
         }
-        created.startTunneling("")
+        created.startTunneling(embeddedServers)
     }
 
     private fun publishReadyLocked(token: Long, environment: MixAdapterEnvironment) {

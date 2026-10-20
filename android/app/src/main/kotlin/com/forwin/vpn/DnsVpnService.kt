@@ -66,12 +66,14 @@ class DnsVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 val token: Long
                 val primary: String; val secondary: String
                 synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); primary=intent.getStringExtra(EXTRA_DNS_PRIMARY) ?: "8.8.8.8"; secondary=intent.getStringExtra(EXTRA_DNS_SECONDARY) ?: "8.8.4.4" }
                 lifecycleExecutor.execute { stopVpn(false); if (token == generation) startVpn(primary, secondary, token) }
             }
             ACTION_DISCONNECT -> if (isCurrentToken(intent)) {
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 VpnStateBroadcast.notifyDisconnected(this, "direct_dns")
                 synchronized(lifecycleLock) { invalidateConnectionLocked() }
                 lifecycleExecutor.execute { stopVpn(true) }
@@ -137,7 +139,8 @@ class DnsVpnService : VpnService() {
         if (isRunning) {
             return
         }
-        
+
+        com.example.sstp_flutter.VpnConnectionObserver.notifyStarting(this)
         try {
             showNotification(primaryDns, token)
 
@@ -161,6 +164,7 @@ class DnsVpnService : VpnService() {
             
             if (vpnInterface != null) {
                 isRunning = true
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
                 instance = this // ثبت نمونه‌ی فعال برای پینگ protected
                 
                 // Start minimal packet handler thread
@@ -216,6 +220,7 @@ class DnsVpnService : VpnService() {
     
     private fun reconnect(intent: Intent?) {
         if (!isCurrentToken(intent)) return
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         val token: Long
         val restart: Intent
         synchronized(lifecycleLock) {
@@ -251,6 +256,7 @@ class DnsVpnService : VpnService() {
     }
 
     private fun stopVpn(stopService: Boolean) {
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         isRunning = false
         if (instance === this) {
             instance = null // پاک کردن نمونه‌ی فعال

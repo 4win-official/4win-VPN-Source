@@ -68,6 +68,7 @@ class SlowDnsVpnService : VpnService() {
                     if (session == null) stopSelf()
                     return START_NOT_STICKY
                 }
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 val raw = intent.getStringExtra(EXTRA_CONFIG) ?: ""
                 val generation = UUID.randomUUID().toString()
                 connectionGeneration = generation
@@ -92,6 +93,7 @@ class SlowDnsVpnService : VpnService() {
                 val token = intent.getStringExtra(EXTRA_GENERATION)
                 if (current == null || token == null || token != connectionGeneration) return START_NOT_STICKY
                 if (!reconnectInFlight.compareAndSet(false, true)) return START_NOT_STICKY
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 current.cancelled = true
                 val reconnectGeneration = UUID.randomUUID().toString()
                 connectionGeneration = reconnectGeneration
@@ -119,6 +121,7 @@ class SlowDnsVpnService : VpnService() {
                 val current = session
                 val token = intent.getStringExtra(EXTRA_GENERATION)
                 if (token != null && connectionGeneration != token) return START_NOT_STICKY
+                runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 VpnStateBroadcast.notifyDisconnected(this, "slowdns")
                 connectionGeneration = null
                 current?.cancelled = true
@@ -142,6 +145,7 @@ class SlowDnsVpnService : VpnService() {
         try {
             val cfg = SlowDnsConfig.fromJson(raw)
             if (!active(s)) return
+            com.example.sstp_flutter.VpnConnectionObserver.notifyStarting(this)
             val builder = Builder().setSession("4win VPN - Slow DNS").setMtu(1280)
                 .addAddress("26.26.26.1", 30).addRoute("0.0.0.0", 0)
                 .addAddress("da26:2626::1", 126).addRoute("::", 0)
@@ -194,6 +198,7 @@ class SlowDnsVpnService : VpnService() {
             reconnecting = false
             reconnectInFlight.set(false)
             state = snapshot(true, s.resolver, "")
+            runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
             notifyState("Connected via ${s.resolver}")
             s.result.complete(state)
             var lastHealth = System.nanoTime()
@@ -231,6 +236,7 @@ class SlowDnsVpnService : VpnService() {
     }
 
     private fun failClosed(s: Session, failure: Throwable) {
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         if (session !== s || s.cancelled || s.failed) return
         s.failed = true
         reconnecting = false
@@ -246,6 +252,7 @@ class SlowDnsVpnService : VpnService() {
     }
 
     private fun cancelCurrent(preserveReconnect: Boolean = false) {
+        runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         val previous = session ?: return
         session = null
         if (!preserveReconnect) reconnecting = false

@@ -4,9 +4,9 @@ import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../widgets/four_win_loader.dart';
 import '../models/dns_server.dart';
-import '../services/psiphon_service.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
+import '../widgets/psiphon_server_list_status.dart';
 import 'slowdns_configs_screen.dart';
 import 'split_tunnel_screen.dart';
 
@@ -1830,7 +1830,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _SettingsSection(
                     title: 'Psiphon Settings',
                     children: [
-                      _PsiphonServerCountCard(isDark: isDark),
+                      PsiphonServerListStatus(isDark: isDark),
                     ],
                   ),
                   const SizedBox(height: 24),
@@ -2094,191 +2094,6 @@ class _ConnModeTile extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Live "Psiphon servers" card for the Psiphon settings section.
-///
-/// Psiphon has no fixed server list — its tunnel core continuously reports
-/// the exit regions (each backed by many servers) it can currently connect
-/// through via `onAvailableEgressRegions`. This card shows how many exit
-/// regions the core last reported plus the region codes, with a manual
-/// refresh. Before the first connect it shows a hint instead of a count,
-/// because the core only reports while the tunnel is running.
-class _PsiphonServerCountCard extends StatefulWidget {
-  final bool isDark;
-
-  const _PsiphonServerCountCard({required this.isDark});
-
-  @override
-  State<_PsiphonServerCountCard> createState() =>
-      _PsiphonServerCountCardState();
-}
-
-class _PsiphonServerCountCardState extends State<_PsiphonServerCountCard> {
-  final PsiphonService _psiphon = PsiphonService();
-  int _count = 0;
-  List<String> _regions = const [];
-  bool _loading = true;
-  bool _showAll = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    final servers = await _psiphon.getServers();
-    if (!mounted) return;
-    setState(() {
-      _count = servers['count'] as int;
-      _regions = servers['regions'] as List<String>;
-      _loading = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = widget.isDark;
-    final borderColor = const Color(0xFF1DE9B6).withValues(alpha: 0.3);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.05)
-            : Colors.black.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.travel_explore,
-                  color: Color(0xFF1DE9B6), size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Psiphon servers',
-                  style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black87,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: 'Refresh',
-                icon: _loading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: FourWinLoader(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.refresh, size: 20),
-                color: isDark ? Colors.white70 : Colors.black54,
-                onPressed: _loading ? null : _load,
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          if (_count > 0) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  '$_count',
-                  style: const TextStyle(
-                    color: Color(0xFF1DE9B6),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 26,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'exit region${_count == 1 ? '' : 's'} available',
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.black54,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Each region is served by many Psiphon servers; the tunnel core '
-              'picks the fastest automatically.',
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark ? Colors.white38 : Colors.black45,
-              ),
-            ),
-            const SizedBox(height: 10),
-            // Region chips (collapsible when the core reports many regions).
-            AnimatedSize(
-              duration: const Duration(milliseconds: 200),
-              alignment: Alignment.topLeft,
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final region
-                      in (_showAll ? _regions : _regions.take(12)))
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1DE9B6)
-                            .withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        region.toUpperCase(),
-                        style: const TextStyle(
-                          color: Color(0xFF1DE9B6),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                  if (!_showAll && _regions.length > 12)
-                    InkWell(
-                      onTap: () => setState(() => _showAll = true),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 4),
-                        child: Text(
-                          '+${_regions.length - 12} more',
-                          style: TextStyle(
-                            color: isDark ? Colors.white54 : Colors.black45,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ] else
-            Text(
-              _loading
-                  ? 'Reading server list…'
-                  : 'No servers reported yet. Connect to Psiphon once — the '
-                      'tunnel core reports its available servers while '
-                      'running.',
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white38 : Colors.black45,
-              ),
-            ),
-        ],
       ),
     );
   }

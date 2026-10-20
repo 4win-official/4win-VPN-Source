@@ -13,7 +13,7 @@ public final class OpenVpnAarTransformer {
         if (args.length != 2) throw new IllegalArgumentException("usage: input.aar output.aar");
         Path input = Paths.get(args[0]), output = Paths.get(args[1]);
         Files.createDirectories(output.getParent());
-        boolean[] touched = new boolean[6];
+        boolean[] touched = new boolean[7];
         try (JarFile jar = new JarFile(input.toFile());
              JarOutputStream out = new JarOutputStream(Files.newOutputStream(output))) {
             java.util.Enumeration<JarEntry> entries = jar.entries();
@@ -91,6 +91,17 @@ public final class OpenVpnAarTransformer {
                             super.visitInsn(Opcodes.IRETURN);
                             super.visitLabel(original);
                             super.visitFrame(Opcodes.F_SAME, 0, null, 0, null);
+                        }
+                    };
+                }
+                if (name.equals("startOpenVPN") && desc.equals("()V")) {
+                    touched[6] = true;
+                    return new MethodVisitor(Opcodes.ASM9, base) {
+                        @Override public void visitCode() {
+                            super.visitCode();
+                            super.visitVarInsn(Opcodes.ALOAD, 0);
+                            super.visitMethodInsn(Opcodes.INVOKESTATIC, HELPER, "onEngineStarting",
+                                    SERVICE_ARG + ")V", false);
                         }
                     };
                 }

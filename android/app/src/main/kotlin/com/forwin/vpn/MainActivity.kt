@@ -214,6 +214,33 @@ class MainActivity: FlutterActivity() {
         // native code so the Dart provider cannot report a false connection.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PSIPHON_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
+                "refreshServerList" -> {
+                    PsiphonServerList.refreshInBackground(applicationContext)
+                    result.success(null)
+                }
+                "getServerList" -> {
+                    Thread {
+                        try {
+                            val bootstrap = assets.open("mix_psiphon_bootstrap.json").bufferedReader().use { org.json.JSONObject(it.readText()) }
+                            val snapshot = PsiphonServerList.readCatalog(applicationContext, bootstrap)
+                            val servers = snapshot.entries.map { entry ->
+                                mapOf("id" to entry.id, "ipAddress" to entry.ipAddress, "region" to entry.region, "port" to entry.port)
+                            }
+                            runOnUiThread { result.success(mapOf("servers" to servers, "source" to snapshot.source, "updatedAt" to snapshot.updatedAt)) }
+                        } catch (t: Throwable) {
+                            runOnUiThread { result.success(mapOf("servers" to emptyList<Map<String, Any>>(), "source" to "unavailable", "updatedAt" to null, "error" to (t.message ?: "server list unavailable"))) }
+                        }
+                    }.apply { isDaemon = true; name = "psiphon-list-read" }.start()
+                }
+                "refreshServerListNow" -> {
+                    PsiphonServerList.refreshNow(applicationContext) { outcome ->
+                        val payload = when (outcome) {
+                            is PsiphonServerList.RefreshResult.Finished -> mapOf("updated" to outcome.updated, "busy" to false)
+                            PsiphonServerList.RefreshResult.AlreadyRunning -> mapOf("updated" to false, "busy" to true)
+                        }
+                        runOnUiThread { result.success(payload) }
+                    }
+                }
                 "prepare" -> {
                     val intent = VpnService.prepare(applicationContext)
                     if (intent != null) {
@@ -234,6 +261,9 @@ class MainActivity: FlutterActivity() {
                     val intent = Intent(this, PsiphonVpnService::class.java).apply {
                         action = PsiphonVpnService.ACTION_CONNECT
                         putExtra(PsiphonVpnService.EXTRA_EGRESS_REGION, call.argument<String>("egressRegion") ?: "")
+                        call.argument<String>("targetServerId")?.takeIf { it.isNotBlank() }?.let {
+                            putExtra(PsiphonVpnService.EXTRA_TARGET_SERVER_ID, it)
+                        }
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
                     result.success(true)
