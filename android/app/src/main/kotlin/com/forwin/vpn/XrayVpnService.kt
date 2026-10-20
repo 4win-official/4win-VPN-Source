@@ -38,6 +38,7 @@ class XrayVpnService : VpnService() {
     @Volatile private var aetherConnected = false
     @Volatile private var aetherActive = false
     @Volatile private var aetherGeneration: Long? = null
+    @Volatile private var warpRequest = 0L
     private val lifecycleLock = Any()
     @Volatile private var generation = System.nanoTime()
     private var reconnectInProgress = false
@@ -49,6 +50,8 @@ class XrayVpnService : VpnService() {
         const val ACTION_CONNECT = "com.forwin.vpn.XRAY_CONNECT"
         const val ACTION_DISCONNECT = "com.forwin.vpn.XRAY_DISCONNECT"
         const val ACTION_RECONNECT = "com.forwin.vpn.XRAY_RECONNECT"
+        const val ACTION_CANCEL_WARP = "com.forwin.vpn.WARP_CANCEL_START"
+        const val EXTRA_WARP_REQUEST = "warp_request"
         private const val EXTRA_GENERATION = "connection_generation"
         const val EXTRA_CONFIG_JSON = "config_json"
         const val EXTRA_PROXY_MODE = "proxy_mode"
@@ -133,13 +136,25 @@ class XrayVpnService : VpnService() {
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 val token: Long
                 synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); configJson=intent.getStringExtra(EXTRA_CONFIG_JSON); mixMode=intent.getBooleanExtra(EXTRA_MIX_MODE,false); isMixModeReconnecting=mixMode }
+                if (configJson?.contains("__APP_FILES__") == true) {
+                    warpRequest = intent.getLongExtra(EXTRA_WARP_REQUEST, 0L).takeIf { it != 0L }
+                        ?: WarpConnectionState.begin()
+                }
                 commandExecutor.execute { if (teardown(false) && isCurrent(token)) { runCatching { showNotification(token) }; launch(token) } }
             }
             ACTION_DISCONNECT -> if (isCurrentToken(intent)) {
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 VpnStateBroadcast.notifyDisconnected(this, when { mixMode -> "mix"; configJson?.contains("__APP_FILES__") == true -> "warp"; else -> "xray" })
+                WarpConnectionState.cancel(warpRequest)
                 synchronized(lifecycleLock) { invalidateConnectionLocked() }
                 commandExecutor.execute { teardown(true) }
+            }
+            ACTION_CANCEL_WARP -> if (intent.getLongExtra(EXTRA_WARP_REQUEST, 0L) == warpRequest &&
+                WarpConnectionState.snapshot().let { it.request == warpRequest && it.error != null }) {
+                // A timeout belongs only to its own attempt, never a newer VPN.
+                // Retain its error; this is not an explicit user disconnect.
+                synchronized(lifecycleLock) { invalidateConnectionLocked() }
+                commandExecutor.execute { teardown(false) }
             }
             ACTION_RECONNECT -> reconnect(intent)
         }
@@ -272,6 +287,7 @@ class XrayVpnService : VpnService() {
      * emits ready after endpoint handshake plus a real HTTP probe. */
     private fun startAether(rawConfig: String, token: Long) {
         if (isRunning || aetherActive) return
+        val request = warpRequest
         var tun: ParcelFileDescriptor? = null
         try {
             val config = rawConfig.replace("__APP_FILES__", filesDir.absolutePath)
@@ -308,9 +324,11 @@ class XrayVpnService : VpnService() {
             check(isCurrent(token)) { "WARP startup cancelled" }
             val result = NativeCore.start(config, tun.fd)
             if (result != 0) error(NativeCore.lastError().ifBlank { "Aether exited with code $result" })
+            if (isCurrent(token)) WarpConnectionState.fail(request, "WARP tunnel stopped before you disconnected. Check the connection log and retry.")
             teardown(false)
         } catch (t: Throwable) {
             android.util.Log.e(TAG, "Aether WARP failed: ${t.message}", t)
+            if (isCurrent(token)) WarpConnectionState.fail(request, "WARP connection failed: ${t.message ?: t.javaClass.simpleName}")
             runCatching { tun?.close() }
             runCatching { NativeCore.stop() }
             runCatching { NativeCore.detach() }
@@ -330,6 +348,7 @@ class XrayVpnService : VpnService() {
                 val token = aetherGeneration
                 if (token != null && isCurrent(token) && aetherActive) {
                     aetherConnected = true
+                    WarpConnectionState.connected(warpRequest)
                     runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
                     finishReconnect(token)
                 }
@@ -364,6 +383,7 @@ class XrayVpnService : VpnService() {
         runCatching { showNotification(token) }
         commandExecutor.execute {
             if (teardown(false) && isCurrent(token)) {
+                if (configJson?.contains("__APP_FILES__") == true) warpRequest = WarpConnectionState.begin()
                 runCatching { showNotification(token) }
                 launch(token)
             } else finishReconnect(token)
@@ -485,12 +505,14 @@ class XrayVpnService : VpnService() {
     }
 
     override fun onRevoke() {
+        WarpConnectionState.fail(warpRequest, "WARP VPN permission was revoked by Android or another VPN. Grant VPN permission and retry.")
         synchronized(lifecycleLock) { invalidateConnectionLocked() }
         commandExecutor.execute { teardown(true) }
         super.onRevoke()
     }
 
     override fun onDestroy() {
+        WarpConnectionState.fail(warpRequest, "WARP service stopped unexpectedly. Check the connection log and retry.")
         synchronized(lifecycleLock) { invalidateConnectionLocked() }
         commandExecutor.execute { teardown(true); commandExecutor.shutdown() }
         super.onDestroy()

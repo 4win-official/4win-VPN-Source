@@ -481,6 +481,14 @@ class MainActivity: FlutterActivity() {
                     val configJson = call.argument<String>("configJson") ?: ""
                     val mixMode = call.method == "connectMix"
                     val proxyMode = !mixMode && (call.argument<Boolean>("proxyMode") ?: false)
+                    val isWarp = configJson.contains("__APP_FILES__")
+                    // The proxy service runs Xray, not Aether. Never hand it an
+                    // Aether config and silently wait for another core's ready flag.
+                    if (isWarp && proxyMode) {
+                        result.error("WARP_MODE", "WARP is not available in Proxy mode. Select VPN mode in Settings and retry.", null)
+                        return@setMethodCallHandler
+                    }
+                    val warpRequest = if (isWarp) WarpConnectionState.begin() else 0L
 
                     // Proxy mode uses a PLAIN foreground service (no VpnService),
                     // so Android shows no VPN key icon; VPN mode uses XrayVpnService.
@@ -495,29 +503,54 @@ class MainActivity: FlutterActivity() {
                             putExtra(XrayVpnService.EXTRA_CONFIG_JSON, configJson)
                             putExtra(XrayVpnService.EXTRA_PROXY_MODE, false)
                             putExtra(XrayVpnService.EXTRA_MIX_MODE, mixMode)
+                            if (isWarp) putExtra(XrayVpnService.EXTRA_WARP_REQUEST, warpRequest)
                         }
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(intent)
-                    } else {
-                        startService(intent)
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                    } catch (error: Exception) {
+                        if (!isWarp) throw error
+                        val message = "Android could not start the WARP service: ${error.message ?: error.javaClass.simpleName}"
+                        WarpConnectionState.fail(warpRequest, message)
+                        result.error("WARP_START", message, null)
+                        return@setMethodCallHandler
                     }
-                    if (configJson.contains("__APP_FILES__")) {
+                    if (isWarp) {
                         // Aether scans endpoints and performs a real data-plane
                         // check before emitting ready. Do not let Flutter mark
                         // the tunnel connected merely because the service was
                         // accepted by Android.
                         Thread {
-                            val deadline = System.currentTimeMillis() + 45_000L
-                            var ready = false
-                            while (System.currentTimeMillis() < deadline) {
-                                if (runCatching { NativeCore.isReady() }.getOrDefault(false)) {
-                                    ready = true
-                                    break
-                                }
+                            val deadline = android.os.SystemClock.elapsedRealtime() + 45_000L
+                            var state = WarpConnectionState.snapshot()
+                            while (state.request == warpRequest && state.starting &&
+                                android.os.SystemClock.elapsedRealtime() < deadline) {
                                 Thread.sleep(250L)
+                                state = WarpConnectionState.snapshot()
                             }
-                            runOnUiThread { result.success(ready) }
+                            if (state.request == warpRequest && state.starting) {
+                                val timedOut = WarpConnectionState.timeout(warpRequest, "WARP timed out while validating the tunnel. Cloudflare may be unreachable on this network. Check the connection log and retry.")
+                                if (timedOut) runCatching {
+                                    startService(Intent(this, XrayVpnService::class.java).apply {
+                                        action = XrayVpnService.ACTION_CANCEL_WARP
+                                        putExtra(XrayVpnService.EXTRA_WARP_REQUEST, warpRequest)
+                                    })
+                                }
+                                state = WarpConnectionState.snapshot()
+                            }
+                            val outcome = state
+                            runOnUiThread {
+                                when {
+                                    outcome.request != warpRequest -> result.error("WARP_CANCELLED", "WARP connection was replaced by a newer request.", null)
+                                    outcome.connected -> result.success(true)
+                                    outcome.error != null -> result.error("WARP_CONNECT", outcome.error, null)
+                                    else -> result.error("WARP_CANCELLED", "WARP connection was cancelled.", null)
+                                }
+                            }
                         }.start()
                         return@setMethodCallHandler
                     }
@@ -1111,7 +1144,14 @@ class MainActivity: FlutterActivity() {
         var metricsOwner = protocol
         var standaloneMetrics: Map<String, Any>? = null
         when (protocol) {
-            "xray", "proxy", "warp" -> {
+            "warp" -> {
+                val state = WarpConnectionState.snapshot()
+                running = state.starting || state.connected
+                connected = state.connected
+                metricsOwner = "xray"
+                stats = XrayVpnService.queryTrafficStats()
+            }
+            "xray", "proxy" -> {
                 val xr = XrayVpnService.isServiceRunning
                 val pr = XrayProxyService.isServiceRunning
                 val xrr = XrayVpnService.isReconnecting
@@ -1172,6 +1212,7 @@ class MainActivity: FlutterActivity() {
         val out = hashMapOf<String, Any>(
             "running" to running, "reconnecting" to reconnecting, "connected" to connected
         )
+        if (protocol == "warp") WarpConnectionState.snapshot().error?.let { out["error"] = it }
         snap?.let {
             out["sessionId"] = it.sessionId
             out["elapsedMillis"] = it.elapsedMillis

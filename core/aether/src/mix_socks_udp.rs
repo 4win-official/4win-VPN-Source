@@ -22,16 +22,21 @@ impl WgUdpSocket {
         match upstream.map(str::trim).filter(|s| !s.is_empty()) {
             Some(url) => Ok(Self::Socks(MixUdpSocket::connect(url, peer).await?)),
             None => {
-                let socket = UdpSocket::bind(if peer.is_ipv4() {
-                    "0.0.0.0:0"
-                } else {
-                    "[::]:0"
-                })
-                .await?;
-                socket.connect(peer).await?;
-                Ok(Self::Direct(socket))
+                Self::bind_direct(peer, crate::platform::protect_socket).await
             }
         }
+    }
+    async fn bind_direct(
+        peer: SocketAddr,
+        protect: impl FnOnce(&UdpSocket) -> io::Result<()>,
+    ) -> io::Result<Self> {
+        let socket = UdpSocket::bind(if peer.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }).await?;
+        // Preserve standalone WARP's original order. UDP connect performs a
+        // route lookup; protecting afterwards is too late when Android's TUN
+        // already captures the default route (especially under lockdown).
+        protect(&socket)?;
+        socket.connect(peer).await?;
+        Ok(Self::Direct(socket))
     }
     pub async fn send(&self, packet: &[u8]) -> io::Result<usize> {
         match self {
@@ -284,6 +289,37 @@ mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn direct_socket_is_protected_before_connect_and_roundtrips() {
+        let peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let address = peer.local_addr().unwrap();
+        let socket = WgUdpSocket::bind_direct(address, |raw| {
+            assert!(raw.peer_addr().is_err(), "Android protect must precede UDP connect");
+            Ok(())
+        }).await.unwrap();
+        socket.send(b"warp").await.unwrap();
+        let mut buf = [0u8; 32];
+        let (n, source) = tokio::time::timeout(std::time::Duration::from_secs(2), peer.recv_from(&mut buf))
+            .await.unwrap().unwrap();
+        assert_eq!(&buf[..n], b"warp");
+        peer.send_to(b"reply", source).await.unwrap();
+        let n = tokio::time::timeout(std::time::Duration::from_secs(2), socket.recv(&mut buf))
+            .await.unwrap().unwrap();
+        assert_eq!(&buf[..n], b"reply");
+    }
+
+    #[tokio::test]
+    async fn failed_protection_never_connects_or_sends() {
+        let peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let result = WgUdpSocket::bind_direct(peer.local_addr().unwrap(), |raw| {
+            assert!(raw.peer_addr().is_err());
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "protection rejected"))
+        }).await;
+        assert!(matches!(result, Err(e) if e.kind() == io::ErrorKind::PermissionDenied));
+        let mut buf = [0u8; 32];
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(25), peer.recv_from(&mut buf)).await.is_err());
+    }
 
     async fn fake_socks(close_control: bool) -> (String, tokio::task::JoinHandle<()>) {
         let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();

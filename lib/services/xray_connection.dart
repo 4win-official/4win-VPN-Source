@@ -75,6 +75,7 @@ class XrayConnection {
   static Future<bool> connect(
     String configJson, {
     bool proxyMode = false,
+    bool propagateErrors = false,
   }) async {
     try {
       final result = await platform.invokeMethod('connectXray', {
@@ -84,6 +85,7 @@ class XrayConnection {
       return result == true;
     } catch (e) {
       if (kDebugMode) debugPrint('❌ Xray connect error: $e');
+      if (propagateErrors) rethrow;
       return false;
     }
   }

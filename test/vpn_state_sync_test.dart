@@ -224,7 +224,7 @@ void main() {
           });
       await provider.refreshConnectionState();
       expect(provider.status, VpnConnectionStatus.disconnected);
-      expect(xrayCalls, contains('disconnectXray'));
+      expect(xrayCalls, isNot(contains('disconnectXray')));
       provider.dispose();
     },
   );

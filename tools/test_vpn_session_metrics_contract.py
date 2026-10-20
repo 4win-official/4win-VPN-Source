@@ -18,7 +18,12 @@ class VpnSessionMetricsContractTest(unittest.TestCase):
 
     def test_protocol_aliases_follow_actual_transport_owner(self):
         activity = (NATIVE / "MainActivity.kt").read_text()
-        self.assertIn('"xray", "proxy", "warp" ->', activity)
+        self.assertIn('"xray", "proxy" ->', activity)
+        warp = activity.split('"warp" -> {', 1)[1].split('"xray", "proxy" ->', 1)[0]
+        self.assertIn('WarpConnectionState.snapshot()', warp)
+        self.assertIn('connected = state.connected', warp)
+        self.assertIn('metricsOwner = "xray"', warp)
+        self.assertIn('stats = XrayVpnService.queryTrafficStats()', warp)
         self.assertIn('metricsOwner = if (pr || prr) "proxy" else "xray"', activity)
         self.assertIn('metricsOwner = if (mr || mrr) "mix" else "xray"', activity)
         self.assertIn('if (mr) MixCoordinatorService.traffic() else XrayVpnService.queryTrafficStats()', activity)

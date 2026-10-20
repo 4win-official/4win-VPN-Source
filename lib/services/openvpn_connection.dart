@@ -41,6 +41,18 @@ class OpenVpnConnection {
     authFailed = false;
   }
 
+  /// Observe an already-stopped native session without disconnecting/restarting
+  /// anything. Cancel UI-owned recovery so it cannot resurrect that session.
+  static void observeNativeStop() {
+    _generation++;
+    _userStopped = true;
+    _stopHealthMonitor();
+    _currentStage = VPNStage.disconnected;
+    onAuthFailed = null;
+    onStageChanged = null;
+    onByteCount = null;
+  }
+
   static void _markAuthFailed() {
     if (authFailed) return;
     authFailed = true;

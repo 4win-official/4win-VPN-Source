@@ -319,7 +319,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// Called on every notifyListeners via the override below.
   void _syncErrorAutoClear() {
     final hasError = _errorMessage != null && _errorMessage!.isNotEmpty;
-    if ((_selectedProtocol == 'sstp' && hasError) ||
+    if ((const {'sstp', 'warp'}.contains(_selectedProtocol) && hasError) ||
         ((_selectedProtocol == 'slowdns' || _selectedProtocol == 'psiphon') &&
             _status == VpnConnectionStatus.error) ||
         (_selectedProtocol == 'psiphon' &&
@@ -1000,6 +1000,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     }
 
     final revision = ++_vpnStateRevision;
+    // New user requests own their transitions. A previous restored session
+    // must not let read-only polling cancel this startup.
+    _nativeSessionRestored = false;
     final sstpToken = _selectedProtocol == 'sstp' ? ++_sstpConnectGen : null;
     if (_selectedProtocol == 'sstp') _errorMessage = null;
     // ⚡ CRITICAL: Set to connecting immediately so user sees feedback
@@ -2967,9 +2970,18 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     }
   }
 
-  /// Connect using Cloudflare WARP (WireGuard), routed through the same
-  /// Xray core as the xray/proxy protocols (Xray's native library already
-  /// implements the "wireguard" outbound — no separate native runtime).
+  void _setWarpFailure(String message) {
+    _status = VpnConnectionStatus.error;
+    _warpError = message;
+    _errorMessage = message;
+    _stopDurationTimer();
+    _stopPingTimer();
+    _stopXrayTraffic();
+    notifyListeners();
+  }
+
+  /// Connect WARP through Aether. Native readiness requires a successful
+  /// handshake and data-plane check, not merely an accepted service intent.
   /// Unlike Xray/Proxy there is no server list and no user-facing "register"
   /// action: a single device identity is auto-registered with Cloudflare on
   /// first use and reused afterwards. Everything — registration, retrying a
@@ -2978,6 +2990,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   Future<void> _connectWarp() async {
     final int myGen = ++_warpConnectGen;
     bool cancelled() =>
+        _mixDisposed ||
         myGen != _warpConnectGen ||
         _status == VpnConnectionStatus.disconnecting ||
         _status == VpnConnectionStatus.disconnected;
@@ -2985,6 +2998,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     try {
       _status = VpnConnectionStatus.connecting;
       _warpError = null;
+      _errorMessage = null;
       notifyListeners();
 
       final prefs = await SharedPreferences.getInstance();
@@ -2993,10 +3007,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
       if (!proxyMode) {
         final granted = await XrayConnection.requestPermission();
+        if (cancelled()) return;
         if (!granted) {
-          _status = VpnConnectionStatus.error;
-          _errorMessage = 'VPN permission denied';
-          notifyListeners();
+          _setWarpFailure('WARP could not start: VPN permission denied.');
           return;
         }
       }
@@ -3010,12 +3023,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       // interaction. This is the self-healing the protocol needs instead of
       // ever asking the user to press a "register" button.
       const maxAttempts = 2;
+      var retryNativeOnly = false;
       for (var attempt = 1; attempt <= maxAttempts; attempt++) {
         if (cancelled()) return;
 
         WarpAccount account;
         try {
-          if (_warpAccount != null && attempt == 1) {
+          if (_warpAccount != null && (attempt == 1 || retryNativeOnly)) {
             account = _warpAccount!;
           } else {
             _warpRegistering = true;
@@ -3025,10 +3039,8 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           }
         } catch (e) {
           if (kDebugMode) debugPrint('⚠️ WARP registration failed: $e');
-          _status = VpnConnectionStatus.error;
-          _warpError = 'Could not register WARP identity: ${e.toString()}';
-          _errorMessage = _warpError;
-          notifyListeners();
+          if (cancelled()) return;
+          _setWarpFailure('Could not register WARP identity: $e');
           return;
         } finally {
           _warpRegistering = false;
@@ -3049,28 +3061,40 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           );
         }
 
-        final started = await XrayConnection.connect(
-          configJson,
-          proxyMode: proxyMode,
-        );
-        if (cancelled()) {
-          try {
-            await XrayConnection.disconnect();
-          } catch (_) {}
+        bool started;
+        try {
+          started = await XrayConnection.connect(
+            configJson,
+            proxyMode: proxyMode,
+            propagateErrors: true,
+          );
+        } on PlatformException catch (e) {
+          if (cancelled()) return;
+          if (e.code == 'WARP_CONNECT' && attempt < maxAttempts) {
+            // Preserve the existing one-retry recovery. Aether owns the
+            // native identity and endpoint scan: do not register an unrelated
+            // Dart identity just because that native attempt failed.
+            retryNativeOnly = true;
+            continue;
+          }
+          // A native failure is already specific (registration, handshake,
+          // interface, timeout, etc.). Do not replace it with a generic false
+          // or overwrite it by registering an unrelated new Dart identity.
+          _setWarpFailure(
+            e.message?.trim().isNotEmpty == true
+                ? e.message!
+                : 'WARP could not start (${e.code}).',
+          );
           return;
         }
+        // Explicit disconnect/protocol switch already stopped this attempt.
+        // Its late result must never stop a newer native session.
+        if (cancelled()) return;
         if (!started) {
           if (attempt < maxAttempts) continue;
-          _status = VpnConnectionStatus.error;
-          _errorMessage = 'Failed to start WARP tunnel';
-          notifyListeners();
-          return;
-        }
-
-        if (cancelled()) {
-          try {
-            await XrayConnection.disconnect();
-          } catch (_) {}
+          _setWarpFailure(
+            'WARP tunnel failed to start. Check the connection log and retry.',
+          );
           return;
         }
 
@@ -3090,15 +3114,12 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       }
 
       // Exhausted retries.
-      _status = VpnConnectionStatus.error;
-      _warpError = 'WARP could not reach Cloudflare on this network';
-      _errorMessage = _warpError;
-      notifyListeners();
+      if (!cancelled()) {
+        _setWarpFailure('WARP could not reach Cloudflare on this network.');
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ WARP connect failed: $e');
-      _status = VpnConnectionStatus.error;
-      _errorMessage = 'Failed to connect: ${e.toString()}';
-      notifyListeners();
+      if (!cancelled()) _setWarpFailure('WARP connection failed: $e');
     }
   }
 
@@ -3290,7 +3311,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   void resetState() {
     // Returning from Settings must not erase the only explanation for a
     // failed connection (including Psiphon's retained kill-switch TUN).
-    if ((_selectedProtocol == 'psiphon' || _selectedProtocol == 'sstp') &&
+    if (const {'psiphon', 'sstp', 'warp'}.contains(_selectedProtocol) &&
         _status == VpnConnectionStatus.error) {
       return;
     }

@@ -22,6 +22,56 @@ extension _VpnStateSync on VpnProvider {
     _nativeTrafficAuthoritative = false;
   }
 
+  void _adoptStoppedNativeSession() {
+    // Reopening the UI is observational, not a disconnect request. Invalidate
+    // Dart retry/probe callbacks without sending any command to a service.
+    _vpnStateRevision++;
+    _sstpConnectGen++;
+    _psiphonConnectGen++;
+    _slowDnsConnectGen++;
+    _mixConnectGen++;
+    _xrayConnectGen++;
+    _proxyConnectGen++;
+    _warpConnectGen++;
+    _nativeSessionRestored = false;
+    _nativeStateTimer?.cancel();
+    _nativeStateTimer = null;
+    _nativeRestoreTimer?.cancel();
+    _realDataUsageTimer?.cancel();
+    _mixMonitor?.cancel();
+    _mixDiagnosticsTimer?.cancel();
+    _stopDurationTimer();
+    _stopPingTimer();
+    _stopXrayTraffic();
+    _stopPsiphonMonitor();
+    _stopPsiphonTraffic();
+    _stopPsiphonLogPump();
+    if (_selectedProtocol == 'openvpn') OpenVpnConnection.observeNativeStop();
+    if (_selectedProtocol == 'slowdns') SlowDnsConnection.detach();
+    _clearNativeSessionMetrics();
+    _connectedServer = null;
+    _activeXrayServer = null;
+    _activeProxyServer = null;
+    _connectionDuration = Duration.zero;
+    _currentPing = null;
+    _pingFailed = false;
+    _totalDownloadBytes = 0;
+    _totalUploadBytes = 0;
+    _lastDownloadBytes = 0;
+    _lastUploadBytes = 0;
+    _dnsBaselineRxBytes = -1;
+    _dnsBaselineTxBytes = -1;
+    if (_selectedProtocol == 'warp') {
+      _setWarpFailure(
+        'WARP tunnel stopped unexpectedly. Check the connection log and retry.',
+      );
+    } else {
+      _status = VpnConnectionStatus.disconnected;
+      _errorMessage = null;
+      notifyListeners();
+    }
+  }
+
   void _applyNativeSessionMetrics(Map<String, dynamic> state) {
     final id = state['sessionId'];
     if (id is! String || id.isEmpty) return;
@@ -96,6 +146,15 @@ extension _VpnStateSync on VpnProvider {
       }
       final connected = state['connected'] == true;
       final active = state['running'] == true || state['reconnecting'] == true;
+      final nativeError = state['error'];
+      if (protocol == 'warp' &&
+          nativeError is String &&
+          nativeError.isNotEmpty) {
+        _nativeSessionRestored = true;
+        _setWarpFailure(nativeError);
+        _ensureNativeStatePolling();
+        return;
+      }
       if (active && state['connected'] is bool) {
         _applyNativeSessionMetrics(state);
         // A fresh provider may adopt an explicitly live native session. Local
@@ -135,11 +194,13 @@ extension _VpnStateSync on VpnProvider {
       if (metricsOnly) return;
       if (state['running'] == false && state['reconnecting'] == false) {
         if (status == VpnConnectionStatus.disconnected) return;
-        if ((protocol == 'psiphon' || protocol == 'sstp') &&
+        if ((protocol == 'psiphon' ||
+                protocol == 'sstp' ||
+                protocol == 'warp') &&
             status == VpnConnectionStatus.error) {
           return;
         }
-        await disconnect();
+        _adoptStoppedNativeSession();
       }
     } on MissingPluginException {
       // Compatibility with platforms/builds without the native state bridge.

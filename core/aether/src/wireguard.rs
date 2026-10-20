@@ -109,9 +109,6 @@ impl WgTunnel {
     }
     pub async fn new_with_upstream(cfg: WgConfig, inbound_tx: mpsc::Sender<Vec<u8>>, upstream: Option<&str>) -> Result<Self> {
         let sock = WgUdpSocket::bind(cfg.peer_endpoint, upstream).await?;
-        if let Some(raw) = sock.direct() {
-            crate::platform::protect_socket(raw)?;
-        }
 
         let local_secret = StaticSecret::from(cfg.local_private_key);
         let peer_public = PublicKey::from(cfg.peer_public_key);
@@ -826,9 +823,6 @@ pub async fn verify_endpoint_keep_session(
 
     let upstream_proxy = std::env::var("AETHER_WG_UPSTREAM_SOCKS").ok();
     let sock = WgUdpSocket::bind(peer, upstream_proxy.as_deref()).await?;
-    if let Some(raw) = sock.direct() {
-        crate::platform::protect_socket(raw)?;
-    }
 
     let start = Instant::now();
     let deadline = start + timeout;
