@@ -98,56 +98,69 @@ class _GlassEdge extends CustomPainter {
       Radius.circular((curve - inset).clamp(0.0, curve)),
     );
 
-    // Low-energy caustic at the perimeter; the centre is left clear.
-    final edgeBand = Path()
-      ..fillType = PathFillType.evenOdd
-      ..addRRect(edge(0.7))
-      ..addRRect(edge(3.2));
-    canvas.drawPath(
-      edgeBand,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withValues(alpha: isDark ? 0.09 : 0.13),
-            Colors.transparent,
-            Colors.white.withValues(alpha: isDark ? 0.04 : 0.08),
-          ],
-          stops: const [0, 0.48, 1],
-        ).createShader(rect),
-    );
+    // Model the rounded cross-section, not a bevel made of concentric lines:
+    // a soft shoulder catches light, turns through a narrow shade, then lets
+    // a faint inner caustic fade back into the unchanged clear centre.
+    // These are optical cues only; no extra blur/filter touches the content.
+    final rimWidth = 5.8.clamp(0.0, size.shortestSide / 4);
+    const profile = <(double, double, double)>[
+      (0, 0.08, 0.025),
+      (0.8, 0.25, 0.04),
+      (1.5, 0.20, 0.065),
+      (2.5, 0.07, 0.11),
+      (3.5, 0.015, 0.08),
+      (4.5, 0.055, 0.025),
+      (5.8, 0, 0),
+    ];
+    const slices = 24;
+    final paint = Paint();
+    var segment = 0;
+    for (var i = 0; i < slices; i++) {
+      final outer = rimWidth * i / slices;
+      final inner = rimWidth * (i + 1) / slices;
+      final sample = (i + 0.5) * 5.8 / slices;
+      while (sample > profile[segment + 1].$1) {
+        segment++;
+      }
+      final a = profile[segment];
+      final b = profile[segment + 1];
+      final t = (sample - a.$1) / (b.$1 - a.$1);
+      final light = (a.$2 + (b.$2 - a.$2) * t) * (isDark ? 0.85 : 1.0);
+      final shade = (a.$3 + (b.$3 - a.$3) * t) * (isDark ? 1.0 : 0.7);
+      paint.shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withValues(alpha: light),
+          Colors.white.withValues(alpha: light * 0.18),
+          Colors.black.withValues(alpha: shade),
+          Colors.white.withValues(alpha: light * 0.55),
+        ],
+        stops: const [0, 0.36, 0.67, 1],
+      ).createShader(rect);
+      // Adjacent subpixel bands share exact boundaries. Disabling AA here
+      // avoids seams; the clipped silhouette and final glint remain AA'd.
+      paint.isAntiAlias = false;
+      canvas.drawDRRect(edge(outer), edge(inner), paint);
+    }
+
+    // A single fine glint describes the outside silhouette, never an opaque
+    // outline. The broader, fading shoulder above supplies the thickness.
     canvas.drawRRect(
       edge(0.5),
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.7
+        ..strokeWidth = 0.65
         ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withValues(alpha: isDark ? 0.55 : 0.82),
-            Colors.white.withValues(alpha: isDark ? 0.10 : 0.24),
-            Colors.black.withValues(alpha: isDark ? 0.14 : 0.07),
-            Colors.white.withValues(alpha: isDark ? 0.30 : 0.64),
+            Colors.white.withValues(alpha: isDark ? 0.48 : 0.68),
+            Colors.white.withValues(alpha: isDark ? 0.09 : 0.18),
+            Colors.black.withValues(alpha: isDark ? 0.12 : 0.06),
+            Colors.white.withValues(alpha: isDark ? 0.28 : 0.48),
           ],
           stops: const [0, 0.35, 0.65, 1],
-        ).createShader(rect),
-    );
-    // A barely visible inner shadow replaces the previous multi-pixel bevel.
-    canvas.drawRRect(
-      edge(1.8),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.5
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: isDark ? 0.15 : 0.09),
-            Colors.transparent,
-            Colors.white.withValues(alpha: isDark ? 0.08 : 0.22),
-          ],
         ).createShader(rect),
     );
   }
