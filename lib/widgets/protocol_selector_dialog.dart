@@ -304,6 +304,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   subtitle:
                                       'Ordered, real multi-hop strategies',
                                   icon: Icons.account_tree,
+                                  badge: 'Beta',
                                 ),
                                 _protocolTile(
                                   context,

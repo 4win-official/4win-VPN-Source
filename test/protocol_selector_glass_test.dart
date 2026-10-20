@@ -53,6 +53,34 @@ Future<void> _open(
 
 void main() {
   for (final brightness in Brightness.values) {
+    testWidgets('Mix has an English Beta badge in ${brightness.name}', (
+      tester,
+    ) async {
+      final provider = _SelectorProvider();
+      await _open(tester, provider, brightness);
+      final mixRow = find.byKey(const ValueKey('protocol-row-mix'));
+      final beta = find.descendant(of: mixRow, matching: find.text('Beta'));
+      expect(
+        find.descendant(of: mixRow, matching: find.text('Mix')),
+        findsOneWidget,
+      );
+      expect(beta, findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('protocol-row-xray')),
+          matching: find.text('Default'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(beta);
+      await tester.pumpAndSettle();
+      expect(provider.switchedTo, 'mix');
+      expect(find.byType(ProtocolSelectorDialog), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      provider.dispose();
+    });
+
     testWidgets('clear glass and readable controls in ${brightness.name}', (
       tester,
     ) async {
