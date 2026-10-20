@@ -17,6 +17,7 @@ import '../widgets/rain_button_surface.dart';
 import '../widgets/autumn_animation.dart';
 import '../widgets/day_night_animation.dart';
 import '../widgets/crying_scene.dart';
+import '../widgets/cat_scene.dart';
 import '../widgets/heart_burst.dart';
 import '../widgets/protocol_selector_dialog.dart';
 import '../widgets/rainbow_heart_button.dart';
@@ -215,6 +216,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isRainTheme = themeProvider.selectedTheme == AppTheme.rain;
     final isDayNightTheme = themeProvider.selectedTheme == AppTheme.summer;
     final isCryingTheme = themeProvider.selectedTheme == AppTheme.crying;
+    final isCatTheme = themeProvider.selectedTheme == AppTheme.cat;
+    final isMascotTheme = isCryingTheme || isCatTheme;
     final isAutumnTheme = themeProvider.selectedTheme == AppTheme.autumn;
     final isLiquidGlassTheme =
         themeProvider.selectedTheme == AppTheme.liquidGlass;
@@ -236,6 +239,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       bgColor = isDark ? const Color(0xFF080F25) : const Color(0xFFFFFDF5);
       iconColor = isDark ? const Color(0xFFB8CFFF) : const Color(0xFFAD5100);
       textColor = isDark ? const Color(0xFFE5EDFF) : const Color(0xFF8A4000);
+    } else if (isCatTheme) {
+      bgColor = isDark ? const Color(0xFF15252B) : const Color(0xFFFFF8EE);
+      iconColor = isDark ? const Color(0xFFAFD5C3) : const Color(0xFFAC6549);
+      textColor = isDark ? const Color(0xFFE3F1E9) : const Color(0xFF684735);
     } else if (isCryingTheme) {
       bgColor = isDark ? const Color(0xFF17172F) : const Color(0xFFFFF6FB);
       iconColor = isDark ? const Color(0xFFC9BFFF) : const Color(0xFF7360A4);
@@ -432,6 +439,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                     ),
                   ),
+                if (isCatTheme)
+                  Positioned.fill(child: CatScene(isDark: isDark)),
                 if (isCryingTheme)
                   Positioned.fill(child: CryingScene(isDark: isDark)),
                 // انیمیشن برف (فقط در تم برفی) — RepaintBoundary keeps the
@@ -501,7 +510,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         // Center horizontally, but bias vertically slightly
                         // BELOW center so the power button sits centered and a
                         // touch lower, as requested.
-                        alignment: isCryingTheme
+                        alignment: isMascotTheme
                             ? const Alignment(0.0, 0.5)
                             : const Alignment(0.0, 0.15),
                         child: Consumer<VpnProvider>(
@@ -552,12 +561,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       ? 150
                                       : 100,
                                   child: Column(
-                                    mainAxisAlignment: isCryingTheme
+                                    mainAxisAlignment: isMascotTheme
                                         ? MainAxisAlignment.start
                                         : MainAxisAlignment.end,
                                     children: [
-                                      // Keep a fixed name lane for the Crying selector.
-                                      if (isCryingTheme &&
+                                      // Keep a fixed name lane for the mascot themes.
+                                      if (isMascotTheme &&
                                           MediaQuery.sizeOf(context).height >=
                                               720)
                                         const SizedBox(height: 50),
@@ -624,13 +633,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       ),
-                                      SizedBox(height: isCryingTheme ? 8 : 18),
+                                      SizedBox(height: isMascotTheme ? 8 : 18),
 
                                       // Connection Status Text
                                       Text(
                                         _getStatusText(provider.status),
                                         style: TextStyle(
-                                          fontSize: isCryingTheme ? 14 : 16,
+                                          fontSize: isMascotTheme ? 14 : 16,
                                           color: isDark
                                               ? Colors.white70
                                               : Colors.black54,
@@ -675,7 +684,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                       TextOverflow.ellipsis,
                                                   textAlign: TextAlign.center,
                                                   style: TextStyle(
-                                                    fontSize: isCryingTheme
+                                                    fontSize: isMascotTheme
                                                         ? 12
                                                         : 13,
                                                     fontWeight: FontWeight.w600,
@@ -726,7 +735,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                       TextOverflow.ellipsis,
                                                   textAlign: TextAlign.center,
                                                   style: TextStyle(
-                                                    fontSize: isCryingTheme
+                                                    fontSize: isMascotTheme
                                                         ? 12
                                                         : 13,
                                                     fontWeight: FontWeight.w600,
@@ -782,7 +791,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               provider.status,
                                               isDark,
                                             ),
-                                            gradient: isCryingTheme
+                                            gradient: isMascotTheme
                                                 ? LinearGradient(
                                                     begin: Alignment.topLeft,
                                                     end: Alignment.bottomRight,
@@ -802,15 +811,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                     ],
                                                   )
                                                 : null,
-                                            border: isCryingTheme
+                                            border: isMascotTheme
                                                 ? Border.all(
-                                                    color: isDark
-                                                        ? const Color(
-                                                            0xFFE1DAFF,
-                                                          )
-                                                        : const Color(
-                                                            0xFFEEE7FF,
-                                                          ),
+                                                    color: isCatTheme
+                                                        ? (isDark
+                                                              ? const Color(
+                                                                  0xFFCDE8DC,
+                                                                )
+                                                              : const Color(
+                                                                  0xFFFFE6D3,
+                                                                ))
+                                                        : (isDark
+                                                              ? const Color(
+                                                                  0xFFE1DAFF,
+                                                                )
+                                                              : const Color(
+                                                                  0xFFEEE7FF,
+                                                                )),
                                                     width: 3,
                                                   )
                                                 : isPixelTheme
@@ -848,7 +865,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                       spreadRadius: 8,
                                                     ),
                                                   ]
-                                                : isCryingTheme
+                                                : isMascotTheme
                                                 ? [
                                                     BoxShadow(
                                                       color:
@@ -1583,6 +1600,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final themeProvider = context.watch<ThemeProvider>();
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
 
+    if (themeProvider.selectedTheme == AppTheme.cat) {
+      switch (status) {
+        case VpnConnectionStatus.connected:
+          return isDark ? const Color(0xFF78BDA0) : const Color(0xFF477F68);
+        case VpnConnectionStatus.connecting:
+        case VpnConnectionStatus.disconnecting:
+          return isDark ? const Color(0xFFE5BB83) : const Color(0xFFAD7539);
+        case VpnConnectionStatus.error:
+          return isDark ? const Color(0xFFF0A3A3) : const Color(0xFFB34D55);
+        case VpnConnectionStatus.disconnected:
+          return isDark ? const Color(0xFF709D93) : const Color(0xFFAC6549);
+      }
+    }
     if (themeProvider.selectedTheme == AppTheme.crying) {
       switch (status) {
         case VpnConnectionStatus.connected:
@@ -1789,7 +1819,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // رنگ نور ملایم از پایین صفحه
   Color _getGlowColor(VpnConnectionStatus status, bool isDark) {
-    if (context.watch<ThemeProvider>().selectedTheme == AppTheme.crying) {
+    if (context.watch<ThemeProvider>().selectedTheme == AppTheme.crying ||
+        context.watch<ThemeProvider>().selectedTheme == AppTheme.cat) {
       return _getButtonColor(status, isDark);
     }
     switch (status) {

@@ -13,7 +13,8 @@ void main() {
   testWidgets('shows Day & Night and enables the toggle when selected',
       (tester) async {
     final provider = ThemeProvider();
-    await Future<void>.delayed(Duration.zero);
+    // Advance the widget test clock instead of awaiting an unpumped fake timer.
+    await tester.pump();
     addTearDown(provider.dispose);
 
     await tester.pumpWidget(
@@ -30,14 +31,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(find.text('Day & Night').hitTestable(), 250);
     expect(find.text('Day & Night'), findsOneWidget);
     final dayNight = find.ancestor(
       of: find.text('Day & Night'),
       matching: find.byType(InkWell),
     );
     expect(dayNight, findsOneWidget);
-    await tester.ensureVisible(dayNight);
-    await tester.tap(dayNight);
+    await tester.tap(find.text('Day & Night').hitTestable());
     await tester.pumpAndSettle();
 
     expect(provider.selectedTheme, AppTheme.summer);

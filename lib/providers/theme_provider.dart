@@ -2,15 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum AppTheme {
-  system,      // دیفالت - دارک/لایت عادی
-  snow,        // تم برفی (فصلی)
-  pixel,       // تم پیکسلی
-  pink,        // تم صورتی کیوت
-  rain,        // تم بارانی (فصلی)
-  summer,      // Day & Night; keep this index for existing saved selections.
-  autumn,      // تم پاییزی - برگ‌ها می‌ریزند (فصلی)
+  system, // دیفالت - دارک/لایت عادی
+  snow, // تم برفی (فصلی)
+  pixel, // تم پیکسلی
+  pink, // تم صورتی کیوت
+  rain, // تم بارانی (فصلی)
+  summer, // Day & Night; keep this index for existing saved selections.
+  autumn, // تم پاییزی - برگ‌ها می‌ریزند (فصلی)
   liquidGlass, // تم لیکویید گلس (دارک + لایت)
-  crying,      // Append only: preserve all existing persisted theme indices.
+  crying, // Append only: preserve all existing persisted theme indices.
+  cat, // Append only: Cat keeps every existing saved theme stable.
 }
 
 class ThemeProvider with ChangeNotifier {
@@ -88,23 +89,22 @@ class ThemeProvider with ChangeNotifier {
 
   /// Whether the day/night toggle is locked for the currently-selected theme.
   bool get isModeLocked =>
-      _selectedTheme == AppTheme.snow ||
-      _selectedTheme == AppTheme.rain;
+      _selectedTheme == AppTheme.snow || _selectedTheme == AppTheme.rain;
 
   Future<void> setTheme(AppTheme theme) async {
     _selectedTheme = theme;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_themeKey, theme.index);
-    
+
     // تم برفی: دارک مود فعال
     if (theme == AppTheme.snow) {
       _isDarkMode = true;
       await prefs.setBool(_darkModeKey, true);
     }
-    
+
     // تم صورتی: حالا هم نسخه روز و هم نسخه شب دارد. هنگام انتخاب،
     // حالت فعلی دارک/لایت کاربر حفظ می‌شود و با دکمه تعویض قابل تغییر است.
-    
+
     // تم بارانی: دارک مود فعال
     if (theme == AppTheme.rain) {
       _isDarkMode = true;
@@ -127,17 +127,15 @@ class ThemeProvider with ChangeNotifier {
       case AppTheme.snow:
         return const Color(0xFF4FC3F7);
       case AppTheme.summer:
-        return _isDarkMode
-            ? const Color(0xFF9AB8FF)
-            : const Color(0xFFFF9800);
+        return _isDarkMode ? const Color(0xFF9AB8FF) : const Color(0xFFFF9800);
       case AppTheme.autumn:
         return const Color(0xFFD35400);
       case AppTheme.liquidGlass:
         return const Color(0xFF5B8CFF);
       case AppTheme.crying:
-        return _isDarkMode
-            ? const Color(0xFFB9AEFF)
-            : const Color(0xFF7863B5);
+        return _isDarkMode ? const Color(0xFFB9AEFF) : const Color(0xFF7863B5);
+      case AppTheme.cat:
+        return _isDarkMode ? const Color(0xFFAFD5C3) : const Color(0xFFAC6549);
       case AppTheme.pixel:
       case AppTheme.system:
         return const Color(0xFF4CAF50);
@@ -145,40 +143,48 @@ class ThemeProvider with ChangeNotifier {
   }
 
   ThemeData get lightTheme => ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _seedColor,
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        scaffoldBackgroundColor: _selectedTheme == AppTheme.crying
-            ? const Color(0xFFFFF6FB)
-            : Colors.white,
-        appBarTheme: AppBarTheme(
-          backgroundColor: _selectedTheme == AppTheme.crying
-              ? const Color(0xFFFFF6FB)
-              : Colors.white,
-          foregroundColor: Colors.black87,
-          elevation: 0,
-        ),
-      );
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: _seedColor,
+      brightness: Brightness.light,
+    ),
+    useMaterial3: true,
+    scaffoldBackgroundColor: _selectedTheme == AppTheme.cat
+        ? const Color(0xFFFFF8EE)
+        : _selectedTheme == AppTheme.crying
+        ? const Color(0xFFFFF6FB)
+        : Colors.white,
+    appBarTheme: AppBarTheme(
+      backgroundColor: _selectedTheme == AppTheme.cat
+          ? const Color(0xFFFFF8EE)
+          : _selectedTheme == AppTheme.crying
+          ? const Color(0xFFFFF6FB)
+          : Colors.white,
+      foregroundColor: Colors.black87,
+      elevation: 0,
+    ),
+  );
 
   ThemeData get darkTheme => ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _seedColor,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-        scaffoldBackgroundColor: _selectedTheme == AppTheme.crying
-            ? const Color(0xFF17172F)
-            : const Color(0xFF121212),
-        appBarTheme: AppBarTheme(
-          backgroundColor: _selectedTheme == AppTheme.crying
-              ? const Color(0xFF17172F)
-              : const Color(0xFF1E1E1E),
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-      );
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: _seedColor,
+      brightness: Brightness.dark,
+    ),
+    useMaterial3: true,
+    scaffoldBackgroundColor: _selectedTheme == AppTheme.cat
+        ? const Color(0xFF15252B)
+        : _selectedTheme == AppTheme.crying
+        ? const Color(0xFF17172F)
+        : const Color(0xFF121212),
+    appBarTheme: AppBarTheme(
+      backgroundColor: _selectedTheme == AppTheme.cat
+          ? const Color(0xFF15252B)
+          : _selectedTheme == AppTheme.crying
+          ? const Color(0xFF17172F)
+          : const Color(0xFF1E1E1E),
+      foregroundColor: Colors.white,
+      elevation: 0,
+    ),
+  );
 
   ThemeData get currentTheme => _isDarkMode ? darkTheme : lightTheme;
 }

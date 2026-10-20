@@ -183,6 +183,19 @@ class ThemeSelectionScreen extends StatelessWidget {
 
                 const SizedBox(height: 24),
 
+                _ThemeCard(
+                  title: 'Cat',
+                  description: 'Cozy paws, quiet company (Light + Dark)',
+                  icon: Icons.pets_rounded,
+                  color: isDark
+                      ? const Color(0xFFAFD5C3)
+                      : const Color(0xFFAC6549),
+                  isSelected: themeProvider.selectedTheme == AppTheme.cat,
+                  onTap: () => themeProvider.setTheme(AppTheme.cat),
+                ),
+
+                const SizedBox(height: 24),
+
                 // ── Seasonal Themes group ──────────────────────────────────
                 _GroupHeader(
                   title: 'Seasonal Themes',
