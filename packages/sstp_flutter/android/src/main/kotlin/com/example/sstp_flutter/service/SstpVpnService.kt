@@ -10,6 +10,7 @@ import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
+import android.os.SystemClock
 import android.service.quicksettings.TileService
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -17,6 +18,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.preference.PreferenceManager
 import com.example.sstp_flutter.FlutterCaller
 import com.example.sstp_flutter.R
+import com.example.sstp_flutter.TrafficRateSampler
 import com.example.sstp_flutter.VpnConnectionObserver
 import com.example.sstp_flutter.client.ClientBridge
 import com.example.sstp_flutter.client.control.ControlClient
@@ -79,6 +81,13 @@ class SstpVpnService : VpnService() {
     private var observedHomeStatusPrefs: SharedPreferences? = null
     private var homeStatusListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     private var homeStatusListenerGeneration = 0L
+    @Volatile private var trafficNotificationVisible = false
+    private val trafficRateSampler = TrafficRateSampler()
+    private val trafficLock = Any()
+    private var trafficSamplerJob: Job? = null
+    @Volatile private var activeTrafficOwner: Any? = null
+    private var trafficUploadBytes = 0L
+    private var trafficDownloadBytes = 0L
 
     companion object {
         @Volatile var isReconnecting: Boolean = false
@@ -120,6 +129,7 @@ class SstpVpnService : VpnService() {
                 if(newState){
 //                    FlutterCaller().connecting()
                 }else{
+                    resetTraffic()
                     VpnConnectionObserver.notifyState(this, false)
                     val tempMap : HashMap<String,Any>  = HashMap()
                     connectionStatus = OscPrefKey.Disconnected.name
@@ -168,6 +178,7 @@ class SstpVpnService : VpnService() {
                 controlClient?.kill(false, null)
                 activeSessionPrefs = SessionPreferences(prefs.all.toMap())
 
+                resetTraffic()
                 beForegrounded()
                 resetReconnectionLife(activeSessionPrefs ?: prefs)
                 if (getBooleanPrefValue(OscPrefKey.LOG_DO_SAVE_LOG, activeSessionPrefs ?: prefs)) {
@@ -197,6 +208,7 @@ class SstpVpnService : VpnService() {
                     controlClient?.shutdownForReconnect()
                     if (generation != sessionGeneration || !getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)) return@launch
                     controlClient = null
+                    resetTraffic()
                     beForegrounded()
                     initializeClient(activeSessionPrefs ?: return@launch)
                     setRootState(true)
@@ -269,7 +281,11 @@ class SstpVpnService : VpnService() {
         observedHomeStatusPrefs = observedPrefs
         observedPrefs.registerOnSharedPreferenceChangeListener(registeredHomeStatusListener)
         VpnConnectionObserver.notifyStarting(this)
-        controlClient = ControlClient(ClientBridge(this, sessionPrefs = sessionPrefs)).also {
+        val bridge = ClientBridge(this, sessionPrefs = sessionPrefs)
+        synchronized(trafficLock) {
+            activeTrafficOwner = bridge
+        }
+        controlClient = ControlClient(bridge).also {
             it.launchJobMain()
         }
     }
@@ -318,6 +334,7 @@ class SstpVpnService : VpnService() {
 
     internal fun launchJobReconnect() {
         VpnConnectionObserver.notifyState(this, false)
+        resetTraffic()
         val generation = sessionGeneration
         jobReconnect = scope.launch {
             try {
@@ -344,63 +361,83 @@ class SstpVpnService : VpnService() {
         }
     }
 
-    private fun beForegrounded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel(
-                NOTIFICATION_CHANNEL_NAME,
-                NOTIFICATION_CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).also {
-                notificationManager.createNotificationChannel(it)
-            }
-        }
-
-        notificationSessionToken = UUID.randomUUID().toString()
-        val sessionToken = notificationSessionToken
-        val disconnectIntent = Intent(this, SstpVpnService::class.java)
-            .setAction(ACTION_VPN_DISCONNECT)
+    private fun buildNotification(throughput: String? = null): android.app.Notification {
+        val sessionToken = notificationSessionToken ?: UUID.randomUUID().toString().also { notificationSessionToken = it }
+        val disconnectIntent = Intent(this, SstpVpnService::class.java).setAction(ACTION_VPN_DISCONNECT)
             .setData(android.net.Uri.parse("sstp://disconnect/$sessionToken"))
-            .putExtra(EXTRA_NOTIFICATION_SESSION, sessionToken)
-            .putExtra("manuallyDisconnected", true)
-        val reconnectIntent = Intent(this, SstpVpnService::class.java)
-            .setAction(ACTION_VPN_RECONNECT)
+            .putExtra(EXTRA_NOTIFICATION_SESSION, sessionToken).putExtra("manuallyDisconnected", true)
+        val reconnectIntent = Intent(this, SstpVpnService::class.java).setAction(ACTION_VPN_RECONNECT)
             .setData(android.net.Uri.parse("sstp://reconnect/$sessionToken"))
             .putExtra(EXTRA_NOTIFICATION_SESSION, sessionToken)
-        val pendingIntent = PendingIntent.getService(
-            this,
-            301,
-            disconnectIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val reconnectPendingIntent = PendingIntent.getService(
-            this,
-            302,
-            reconnectIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val notificationText = prefs.getString(OscPrefKey.NotificationText.name,"")
-        val showNotification = prefs.getBoolean(OscPrefKey.NOTIFICATION_DO_SHOW_DISCONNECT.name,false)
-        println("notificationText : $notificationText")
-        println("showNotification : $showNotification")
-
-
-
-        val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_NAME).also {
-            it.priority = NotificationCompat.PRIORITY_DEFAULT
-            it.setOngoing(true)
-            it.setAutoCancel(false)
-            it.setSmallIcon(R.drawable.baseline_vpn_key_24)
-            it.setContentTitle(notificationText)
-            if(showNotification){
-                it.addAction(0, "Reconnect", reconnectPendingIntent)
-                it.addAction(0, "Disconnect", pendingIntent)
+        val showNotification = prefs.getBoolean(OscPrefKey.NOTIFICATION_DO_SHOW_DISCONNECT.name, false)
+        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_NAME).also { builder ->
+            builder.priority = NotificationCompat.PRIORITY_DEFAULT
+            builder.setOngoing(true).setAutoCancel(false).setOnlyAlertOnce(true).setSmallIcon(R.drawable.baseline_vpn_key_24)
+            builder.setContentTitle(prefs.getString(OscPrefKey.NotificationText.name, "") ?: "")
+            builder.setContentText(throughput ?: "")
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(throughput ?: ""))
+            if (showNotification) {
+                builder.addAction(0, "Reconnect", PendingIntent.getService(this, 302, reconnectIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                builder.addAction(0, "Disconnect", PendingIntent.getService(this, 301, disconnectIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             }
+        }.build()
+    }
+
+    private fun beForegrounded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager.createNotificationChannel(NotificationChannel(NOTIFICATION_CHANNEL_NAME, NOTIFICATION_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT))
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_DISCONNECT_ID, builder.build(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIFICATION_DISCONNECT_ID, builder.build())
+        notificationSessionToken = UUID.randomUUID().toString()
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) startForeground(NOTIFICATION_DISCONNECT_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        else startForeground(NOTIFICATION_DISCONNECT_ID, notification)
+        trafficNotificationVisible = true
+    }
+
+    internal fun recordTraffic(owner: Any, uploadBytes: Long, downloadBytes: Long) {
+        synchronized(trafficLock) {
+            if (owner !== activeTrafficOwner) return
+            // Parallel TUN readers/writers may report snapshots out of order.
+            trafficUploadBytes = maxOf(trafficUploadBytes, uploadBytes)
+            trafficDownloadBytes = maxOf(trafficDownloadBytes, downloadBytes)
+        }
+    }
+
+    private fun resetTraffic() {
+        trafficSamplerJob?.cancel()
+        trafficSamplerJob = null
+        synchronized(trafficLock) {
+            activeTrafficOwner = null
+            trafficUploadBytes = 0L
+            trafficDownloadBytes = 0L
+            trafficRateSampler.reset()
+        }
+    }
+
+    internal fun startTrafficSampling() {
+        trafficSamplerJob?.cancel()
+        val owner = synchronized(trafficLock) {
+            trafficRateSampler.reset()
+            trafficRateSampler.sample(trafficUploadBytes, trafficDownloadBytes, SystemClock.elapsedRealtime())
+            activeTrafficOwner
+        } ?: return
+        trafficSamplerJob = scope.launch {
+            while (connectionStatus == OscPrefKey.Connected.name &&
+                getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)) {
+                delay(1000L)
+                // Reset and publication share a lock: a cancelled session can
+                // never publish a late notification after stopForeground().
+                synchronized(trafficLock) {
+                    if (owner === activeTrafficOwner && connectionStatus == OscPrefKey.Connected.name &&
+                        getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)) {
+                        val text = trafficRateSampler.sample(
+                            trafficUploadBytes, trafficDownloadBytes, SystemClock.elapsedRealtime()
+                        )
+                        if (text != null) notificationManager.notify(
+                            NOTIFICATION_DISCONNECT_ID, buildNotification(text))
+                    }
+                }
+            }
         }
     }
 
@@ -418,6 +455,7 @@ class SstpVpnService : VpnService() {
     internal fun onReconnectFinished() {
         isReconnecting = false
         notificationActionInProgress = false
+        if (connectionStatus == OscPrefKey.Connected.name) startTrafficSampling()
     }
 
     internal fun closeIfCurrent(owner: ControlClient) {
@@ -425,6 +463,8 @@ class SstpVpnService : VpnService() {
     }
 
     internal fun close() {
+        resetTraffic()
+        trafficNotificationVisible = false
         detachHomeStatusListener()
         VpnConnectionObserver.notifyState(this, false)
         setRootState(false)
@@ -434,6 +474,8 @@ class SstpVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        resetTraffic()
+        trafficNotificationVisible = false
         detachHomeStatusListener()
         VpnConnectionObserver.notifyState(this, false)
         logWriter?.write("Terminate VPN connection")

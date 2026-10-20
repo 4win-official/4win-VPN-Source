@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import com.forwin.vpn.R
+import com.forwin.vpn.LiveTrafficNotification
 import com.forwin.vpn.VpnStateBroadcast
 import go.Seq
 import libv2ray.CoreCallbackHandler
@@ -41,9 +42,13 @@ class SlowDnsVpnService : VpnService() {
         var tun: ParcelFileDescriptor? = null
         var coreTun: ParcelFileDescriptor? = null
         var core: CoreController? = null
+        var totalUplink = 0L
+        var totalDownlink = 0L
     }
 
     private val worker = Executors.newSingleThreadExecutor()
+    private val liveTraffic by lazy { LiveTrafficNotification(this) }
+    private var notificationBuilder: NotificationCompat.Builder? = null
     @Volatile private var session: Session? = null
     private val reconnectInFlight = AtomicBoolean(false)
     @Volatile private var reconnecting = false
@@ -69,6 +74,7 @@ class SlowDnsVpnService : VpnService() {
                     return START_NOT_STICKY
                 }
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
+                liveTraffic.stop()
                 val raw = intent.getStringExtra(EXTRA_CONFIG) ?: ""
                 val generation = UUID.randomUUID().toString()
                 connectionGeneration = generation
@@ -93,6 +99,7 @@ class SlowDnsVpnService : VpnService() {
                 val token = intent.getStringExtra(EXTRA_GENERATION)
                 if (current == null || token == null || token != connectionGeneration) return START_NOT_STICKY
                 if (!reconnectInFlight.compareAndSet(false, true)) return START_NOT_STICKY
+                liveTraffic.stop()
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 current.cancelled = true
                 val reconnectGeneration = UUID.randomUUID().toString()
@@ -121,6 +128,7 @@ class SlowDnsVpnService : VpnService() {
                 val current = session
                 val token = intent.getStringExtra(EXTRA_GENERATION)
                 if (token != null && connectionGeneration != token) return START_NOT_STICKY
+                liveTraffic.stop()
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 VpnStateBroadcast.notifyDisconnected(this, "slowdns")
                 connectionGeneration = null
@@ -189,6 +197,8 @@ class SlowDnsVpnService : VpnService() {
             synchronized(s.lock) {
                 if (!active(s)) return
                 s.core = controller
+                s.totalUplink = 0L
+                s.totalDownlink = 0L
                 val coreTun = ParcelFileDescriptor.dup(tun.fileDescriptor)
                 s.coreTun = coreTun
                 controller.startLoop(SlowDnsXrayConfig.build(localPort, cfg.username, cfg.password), coreTun.fd)
@@ -200,6 +210,7 @@ class SlowDnsVpnService : VpnService() {
             state = snapshot(true, s.resolver, "")
             runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
             notifyState("Connected via ${s.resolver}")
+            startTrafficNotification(s)
             s.result.complete(state)
             var lastHealth = System.nanoTime()
             while (active(s)) {
@@ -238,6 +249,7 @@ class SlowDnsVpnService : VpnService() {
     private fun failClosed(s: Session, failure: Throwable) {
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         if (session !== s || s.cancelled || s.failed) return
+        liveTraffic.stop()
         s.failed = true
         reconnecting = false
         reconnectInFlight.set(false)
@@ -262,6 +274,7 @@ class SlowDnsVpnService : VpnService() {
     }
 
     private fun closeResources(s: Session, keepTun: Boolean) {
+        liveTraffic.stop()
         val oldCore: CoreController?
         val oldProcess: Process?
         val oldTun: ParcelFileDescriptor?
@@ -277,6 +290,26 @@ class SlowDnsVpnService : VpnService() {
         runCatching { oldCore?.stopLoop() }
         runCatching { oldCoreTun?.close() }
         runCatching { oldTun?.close() }
+    }
+
+    private fun trafficCounters(s: Session): LongArray? = synchronized(s.lock) {
+        val controller = s.core ?: return@synchronized null
+        runCatching {
+            val up = controller.queryStats("slowdns", "uplink")
+            if (up < 0L) return@synchronized null
+            s.totalUplink += up
+            val down = controller.queryStats("slowdns", "downlink")
+            if (down < 0L) return@synchronized null
+            s.totalDownlink += down
+            longArrayOf(s.totalUplink, s.totalDownlink)
+        }.getOrNull()
+    }
+
+    private fun startTrafficNotification(s: Session) {
+        val builder = notificationBuilder ?: return
+        liveTraffic.start(NOTIFICATION_ID, builder, "Connected via ${s.resolver}",
+            connected = { active(s) && synchronized(s.lock) { s.core?.isRunning == true } },
+            counters = { trafficCounters(s) })
     }
 
     private inner class Callback(private val owner: Session) : CoreCallbackHandler {
@@ -310,8 +343,9 @@ class SlowDnsVpnService : VpnService() {
             .setContentIntent(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE))
             .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnect)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnect)
-            .setOngoing(true).setPriority(NotificationCompat.PRIORITY_LOW).build()
-        startForeground(NOTIFICATION_ID, notification)
+            .setOngoing(true).setPriority(NotificationCompat.PRIORITY_LOW)
+        notificationBuilder = notification
+        startForeground(NOTIFICATION_ID, notification.build())
     }
 
     private fun invalidateSession() {
@@ -321,8 +355,9 @@ class SlowDnsVpnService : VpnService() {
         session?.cancelled = true
     }
 
-    override fun onRevoke() { invalidateSession(); cancelCurrent(); state = snapshot(false, "", "VPN permission revoked."); stopSelf(); super.onRevoke() }
+    override fun onRevoke() { liveTraffic.stop(); invalidateSession(); cancelCurrent(); state = snapshot(false, "", "VPN permission revoked."); stopSelf(); super.onRevoke() }
     override fun onDestroy() {
+        liveTraffic.stop()
         invalidateSession()
         cancelCurrent(); worker.shutdownNow()
         if (instance === this) { instance = null; state = snapshot(false, "", "Disconnected") }
@@ -361,6 +396,7 @@ class SlowDnsVpnService : VpnService() {
             return result
         }
         fun stop(context: Context) {
+            instance?.liveTraffic?.stop()
             requests.values.forEach { it.completeExceptionally(IllegalStateException("Slow DNS cancelled.")) }
             requests.clear()
             instance?.let {

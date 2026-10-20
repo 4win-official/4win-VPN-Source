@@ -13,7 +13,7 @@ public final class OpenVpnAarTransformer {
         if (args.length != 2) throw new IllegalArgumentException("usage: input.aar output.aar");
         Path input = Paths.get(args[0]), output = Paths.get(args[1]);
         Files.createDirectories(output.getParent());
-        boolean[] touched = new boolean[7];
+        boolean[] touched = new boolean[8];
         try (JarFile jar = new JarFile(input.toFile());
              JarOutputStream out = new JarOutputStream(Files.newOutputStream(output))) {
             java.util.Enumeration<JarEntry> entries = jar.entries();
@@ -115,6 +115,20 @@ public final class OpenVpnAarTransformer {
                             super.visitVarInsn(Opcodes.ALOAD, 4);
                             super.visitMethodInsn(Opcodes.INVOKESTATIC, HELPER, "onState",
                                     SERVICE_ARG + "Lde/blinkt/openvpn/core/ConnectionStatus;)V", false);
+                        }
+                        };
+                }
+                if (name.equals("updateByteCount") && desc.equals("(JJJJ)V")) {
+                    touched[7] = true;
+                    return new MethodVisitor(Opcodes.ASM9, base) {
+                        @Override public void visitCode() {
+                            super.visitCode();
+                            // VpnStatus supplies cumulative inbound/outbound bytes first.
+                            super.visitVarInsn(Opcodes.ALOAD, 0);
+                            super.visitVarInsn(Opcodes.LLOAD, 1);
+                            super.visitVarInsn(Opcodes.LLOAD, 3);
+                            super.visitMethodInsn(Opcodes.INVOKESTATIC, HELPER, "onByteCount",
+                                    SERVICE_ARG + "JJ)V", false);
                         }
                     };
                 }

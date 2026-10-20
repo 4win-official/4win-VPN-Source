@@ -4,9 +4,11 @@ import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.SystemClock;
 import java.lang.reflect.Field;
 import java.util.UUID;
 import java.util.WeakHashMap;
+import com.example.sstp_flutter.TrafficRateSampler;
 import com.example.sstp_flutter.VpnConnectionObserver;
 import de.blinkt.openvpn.core.ConnectionStatus;
 import de.blinkt.openvpn.core.OpenVPNManagement;
@@ -25,6 +27,9 @@ public final class OpenVpnNotificationActions {
         String token = UUID.randomUUID().toString();
         boolean reconnecting;
         boolean sawRestart;
+        boolean connected;
+        final TrafficRateSampler rateSampler = new TrafficRateSampler();
+        String rateText;
         Session(Object profile, OpenVPNManagement management) {
             this.profile = profile;
             this.management = management;
@@ -64,6 +69,9 @@ public final class OpenVpnNotificationActions {
             if (state == null || state.profile != profile || state.management != management) {
                 state = new Session(profile, management);
                 SESSIONS.put(service, state);
+            }
+            if (state.connected && state.rateText != null) {
+                builder.setSubText(state.rateText);
             }
             token = state.token;
         }
@@ -105,6 +113,9 @@ public final class OpenVpnNotificationActions {
                 if (state.reconnecting) return true;
                 state.reconnecting = true;
                 state.sawRestart = false;
+                state.connected = false;
+                state.rateText = null;
+                state.rateSampler.reset();
                 state.token = UUID.randomUUID().toString();
             } else SESSIONS.remove(service);
         }
@@ -129,12 +140,26 @@ public final class OpenVpnNotificationActions {
 
     /** Called on service status changes, not periodic notification refreshes. */
     public static void onState(OpenVPNService service, ConnectionStatus status) {
-        if (!isMix(service)) {
-            VpnConnectionObserver.notifyState(service, status == ConnectionStatus.LEVEL_CONNECTED);
-        }
+        if (isMix(service)) return;
+        VpnConnectionObserver.notifyState(service, status == ConnectionStatus.LEVEL_CONNECTED);
         synchronized (SESSIONS) {
+            Object profile = field(service, "mProfile");
+            OpenVPNManagement management = (OpenVPNManagement) field(service, "mManagement");
             Session state = SESSIONS.get(service);
-            if (state == null || !state.reconnecting) return;
+            // updateState runs before upstream showNotification; establish the
+            // session here so the first connected byte callback is not dropped.
+            if (state == null || state.profile != profile || state.management != management) {
+                state = new Session(profile, management);
+                SESSIONS.put(service, state);
+            }
+            if (status == ConnectionStatus.LEVEL_CONNECTED) {
+                state.connected = true;
+            } else {
+                state.connected = false;
+                state.rateText = null;
+                state.rateSampler.reset();
+            }
+            if (!state.reconnecting) return;
             if (status != ConnectionStatus.LEVEL_CONNECTED) state.sawRestart = true;
             if ((status == ConnectionStatus.LEVEL_CONNECTED && state.sawRestart) ||
                     status == ConnectionStatus.LEVEL_AUTH_FAILED) state.reconnecting = false;
@@ -144,6 +169,17 @@ public final class OpenVpnNotificationActions {
     public static void invalidate(OpenVPNService service) {
         if (!isMix(service)) VpnConnectionObserver.notifyState(service, false);
         synchronized (SESSIONS) { SESSIONS.remove(service); }
+    }
+
+    /** Called from the upstream ByteCountListener callback with cumulative VPN bytes. */
+    public static void onByteCount(OpenVPNService service, long bytesIn, long bytesOut) {
+        if (isMix(service)) return;
+        synchronized (SESSIONS) {
+            Session state = SESSIONS.get(service);
+            if (state == null || !state.connected || bytesIn < 0L || bytesOut < 0L) return;
+            state.rateText = state.rateSampler.sample(
+                    bytesOut, bytesIn, SystemClock.elapsedRealtime());
+        }
     }
 
     /** True while an accepted notification reconnect is in progress. */

@@ -30,10 +30,12 @@ import java.util.concurrent.Executors
 class XrayVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
+    private val liveTraffic by lazy { LiveTrafficNotification(this) }
     private var coreController: CoreController? = null
     private var configJson: String? = null
     private var mixMode = false
     @Volatile private var isRunning = false
+    @Volatile private var aetherConnected = false
     @Volatile private var aetherActive = false
     @Volatile private var aetherGeneration: Long? = null
     private val lifecycleLock = Any()
@@ -78,19 +80,30 @@ class XrayVpnService : VpnService() {
         @Volatile
         private var activeController: CoreController? = null
 
+        @Volatile private var nativeTrafficAvailable = false
         @Volatile private var totalUplink = 0L
         @Volatile private var totalDownlink = 0L
 
-        fun queryTrafficStats(): LongArray {
-            val controller = activeController ?: return longArrayOf(totalUplink, totalDownlink)
-            try {
+        // queryStats drains native counters. Serialize all UI/notification readers
+        // and accumulate once so neither reader steals bytes from the other.
+        @Synchronized
+        private fun readTrafficStats(): LongArray? {
+            val controller = activeController
+                ?: return if (nativeTrafficAvailable) longArrayOf(totalUplink, totalDownlink) else null
+            return try {
                 val up = controller.queryStats("proxy", "uplink")
+                if (up < 0) return null
+                totalUplink += up
                 val down = controller.queryStats("proxy", "downlink")
-                if (up > 0) totalUplink += up
-                if (down > 0) totalDownlink += down
-            } catch (_: Throwable) { }
-            return longArrayOf(totalUplink, totalDownlink)
+                if (down < 0) return null
+                totalDownlink += down
+                longArrayOf(totalUplink, totalDownlink)
+            } catch (_: Throwable) { null }
         }
+
+        @Synchronized
+        fun queryTrafficStats(): LongArray =
+            readTrafficStats() ?: longArrayOf(totalUplink, totalDownlink)
     }
 
     override fun onCreate() {
@@ -101,6 +114,7 @@ class XrayVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
+                liveTraffic.stop()
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 val token: Long
                 synchronized(lifecycleLock) { generation++; token=generation; reconnectInProgress=false; isReconnecting=false; activeConnectIntent=Intent(intent); configJson=intent.getStringExtra(EXTRA_CONFIG_JSON); mixMode=intent.getBooleanExtra(EXTRA_MIX_MODE,false); isMixModeReconnecting=mixMode }
@@ -220,9 +234,11 @@ class XrayVpnService : VpnService() {
             runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
             isServiceRunning = true
             isMixModeRunning = mixMode
-            activeController = controller
-            totalUplink = 0L
-            totalDownlink = 0L
+            synchronized(Companion) {
+                activeController = controller
+                totalUplink = 0L
+                totalDownlink = 0L
+            }
             finishReconnect(expectedGeneration)
 
             android.util.Log.d(TAG, "Xray core started successfully")
@@ -294,13 +310,18 @@ class XrayVpnService : VpnService() {
             if (event.optString("type") == "status" && event.optString("status") == "connected") {
                 val token = aetherGeneration
                 if (token != null && isCurrent(token) && aetherActive) {
+                    aetherConnected = true
                     runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
                     finishReconnect(token)
                 }
             }
-            if (event.optString("type") == "traffic") {
-                totalUplink = event.optLong("tx")
-                totalDownlink = event.optLong("rx")
+            if (event.optString("type") == "traffic" && aetherActive &&
+                aetherGeneration == generation && event.has("tx") && event.has("rx")) {
+                synchronized(Companion) {
+                    totalUplink = event.optLong("tx", -1L)
+                    totalDownlink = event.optLong("rx", -1L)
+                    nativeTrafficAvailable = totalUplink >= 0L && totalDownlink >= 0L
+                }
             }
             android.util.Log.d(TAG, "Aether event: $json")
         }
@@ -320,6 +341,7 @@ class XrayVpnService : VpnService() {
             generation++
             token = generation
         }
+        liveTraffic.stop()
         runCatching { showNotification(token) }
         commandExecutor.execute {
             if (teardown(false) && isCurrent(token)) {
@@ -334,6 +356,7 @@ class XrayVpnService : VpnService() {
             intent.getLongExtra(EXTRA_GENERATION, Long.MIN_VALUE) == generation
 
     private fun invalidateConnectionLocked() {
+        liveTraffic.stop()
         generation++
         reconnectInProgress = false
         isReconnecting = false
@@ -342,8 +365,11 @@ class XrayVpnService : VpnService() {
     }
 
     private fun teardown(stopService: Boolean): Boolean {
+        liveTraffic.stop()
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
-        isRunning=false; isServiceRunning=false; isMixModeRunning=false; isMixModeReconnecting=false; activeController=null; totalUplink=0L; totalDownlink=0L
+        aetherConnected=false; nativeTrafficAvailable=false
+        isRunning=false; isServiceRunning=false; isMixModeRunning=false; isMixModeReconnecting=false
+        synchronized(Companion) { activeController=null; totalUplink=0L; totalDownlink=0L }
         if (aetherActive) runCatching { NativeCore.stop() }
         runCatching { coreController?.stopLoop() }; coreController=null
         val old=engineThread
@@ -405,7 +431,7 @@ class XrayVpnService : VpnService() {
         )
 
         val isWarp = configJson?.contains("__APP_FILES__") == true
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(VpnNotificationLabels.xrayTitle(mixMode, isWarp))
             .setContentText("Tap to open • Reconnect or disconnect")
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -414,9 +440,13 @@ class XrayVpnService : VpnService() {
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
-            .build()
 
-        startForeground(NOTIFICATION_ID, notification)
+        startForeground(NOTIFICATION_ID, builder.build())
+        if (!mixMode) liveTraffic.start(
+            NOTIFICATION_ID, builder, "Tap to open • Reconnect or disconnect",
+            connected = { token == generation && isRunning && !isReconnecting && !mixMode && (!aetherActive || aetherConnected) },
+            counters = { readTrafficStats() }
+        )
     }
 
     private fun createNotificationChannel() {

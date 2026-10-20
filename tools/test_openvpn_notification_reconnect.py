@@ -11,6 +11,7 @@ HELPER = ROOT / "android/app/src/main/java/com/forwin/vpn/OpenVpnNotificationAct
 STUBS = {
     "android/R.java": "package android; public class R { public static class drawable { public static int ic_popup_sync=1, ic_menu_close_clear_cancel=2; }}",
     "android/os/RemoteException.java": "package android.os; public class RemoteException extends Exception {}",
+    "android/os/SystemClock.java": "package android.os; public final class SystemClock { public static long elapsedRealtime() { return 1000L; } }",
     "android/net/Uri.java": "package android.net; public class Uri { public String value; public static Uri parse(String s) { Uri u=new Uri(); u.value=s; return u; }}",
     "android/content/Intent.java": """package android.content;
         public class Intent {
@@ -37,10 +38,19 @@ STUBS = {
         public class Notification { public static class Builder {
             public java.util.List<String> labels=new java.util.ArrayList<>();
             public java.util.List<PendingIntent> actions=new java.util.ArrayList<>();
+            public String subText;
+            public Builder setSubText(CharSequence text) { subText=String.valueOf(text); return this; }
             public Builder addAction(int icon,String label,PendingIntent intent) {
                 labels.add(label); actions.add(intent); return this;
             }
         }}""",
+    "com/example/sstp_flutter/TrafficRateSampler.java": """package com.example.sstp_flutter;
+        public class TrafficRateSampler {
+            public synchronized String sample(long upload, long download, long elapsed) {
+                return elapsed > 0 ? "Download 1 KB/s • Upload 2 KB/s" : null;
+            }
+            public synchronized void reset() {}
+        }""",
     "de/blinkt/openvpn/core/ConnectionStatus.java": "package de.blinkt.openvpn.core; public enum ConnectionStatus { LEVEL_CONNECTED, LEVEL_START, LEVEL_AUTH_FAILED }",
     "de/blinkt/openvpn/core/OpenVPNManagement.java": "package de.blinkt.openvpn.core; public interface OpenVPNManagement { void reconnect(); }",
     "de/blinkt/openvpn/core/OpenVPNService.java": """package de.blinkt.openvpn.core;
@@ -96,6 +106,10 @@ STUBS = {
                 check(engine.calls==1,"new notification bypassed in-flight guard");
                 OpenVpnNotificationActions.onState(service,ConnectionStatus.LEVEL_CONNECTED);
                 check(service.stateEvents==2 && service.connected,"connected status not observed");
+                OpenVpnNotificationActions.onByteCount(service,100L,200L);
+                OpenVpnNotificationActions.onByteCount(service,300L,500L);
+                Notification.Builder withRate=notification(service);
+                check(withRate.subText != null && withRate.subText.contains("Download") && withRate.subText.contains("Upload"),"measured rate missing from connected notification");
                 OpenVpnNotificationActions.handleReconnect(service,pending.actions.get(0).intent);
                 check(engine.calls==1,"stale connected callback cleared guard");
                 OpenVpnNotificationActions.onState(service,ConnectionStatus.LEVEL_START);

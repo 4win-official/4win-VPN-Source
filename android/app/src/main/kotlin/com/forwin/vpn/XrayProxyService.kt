@@ -25,6 +25,7 @@ import libv2ray.Libv2ray
  */
 class XrayProxyService : Service() {
 
+    private val liveTraffic by lazy { LiveTrafficNotification(this) }
     private var coreController: CoreController? = null
     private var configJson: String? = null
     @Volatile private var isRunning = false
@@ -57,17 +58,26 @@ class XrayProxyService : Service() {
         @Volatile private var totalUplink = 0L
         @Volatile private var totalDownlink = 0L
 
-        fun queryTrafficStats(): LongArray {
+        // queryStats drains native counters. Serialize all UI/notification readers
+        // and accumulate once so neither reader steals bytes from the other.
+        @Synchronized
+        private fun readTrafficStats(): LongArray? {
             val controller = activeController
-                ?: return longArrayOf(totalUplink, totalDownlink)
-            try {
+                ?: return null
+            return try {
                 val up = controller.queryStats("proxy", "uplink")
+                if (up < 0) return null
+                totalUplink += up
                 val down = controller.queryStats("proxy", "downlink")
-                if (up > 0) totalUplink += up
-                if (down > 0) totalDownlink += down
-            } catch (_: Throwable) { }
-            return longArrayOf(totalUplink, totalDownlink)
+                if (down < 0) return null
+                totalDownlink += down
+                longArrayOf(totalUplink, totalDownlink)
+            } catch (_: Throwable) { null }
         }
+
+        @Synchronized
+        fun queryTrafficStats(): LongArray =
+            readTrafficStats() ?: longArrayOf(totalUplink, totalDownlink)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -80,6 +90,7 @@ class XrayProxyService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
+                liveTraffic.stop()
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 val token: Long
                 synchronized(lifecycleLock) {
@@ -148,9 +159,11 @@ class XrayProxyService : Service() {
             isRunning = true
             runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
             isServiceRunning = true
-            activeController = controller
-            totalUplink = 0L
-            totalDownlink = 0L
+            synchronized(Companion) {
+                activeController = controller
+                totalUplink = 0L
+                totalDownlink = 0L
+            }
             finishReconnect(expectedGeneration)
             android.util.Log.d(TAG, "Xray proxy started (127.0.0.1:4444)")
         } catch (t: Throwable) {
@@ -170,6 +183,7 @@ class XrayProxyService : Service() {
             generation++; token = generation
             activeConnectIntent = activeConnectIntent?.let { Intent(it) }
         }
+        liveTraffic.stop()
         runCatching { showNotification(token) }
         commandExecutor.execute {
             teardown(false)
@@ -186,6 +200,7 @@ class XrayProxyService : Service() {
             intent.getLongExtra(EXTRA_GENERATION, Long.MIN_VALUE) == generation
 
     private fun invalidateConnectionLocked() {
+        liveTraffic.stop()
         generation++
         reconnectInProgress = false
         isReconnecting = false
@@ -193,9 +208,10 @@ class XrayProxyService : Service() {
     }
 
     private fun teardown(stopService: Boolean) {
+        liveTraffic.stop()
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
-        isRunning = false; isServiceRunning = false; activeController = null
-        totalUplink = 0L; totalDownlink = 0L
+        isRunning = false; isServiceRunning = false
+        synchronized(Companion) { activeController = null; totalUplink = 0L; totalDownlink = 0L }
         runCatching { coreController?.stopLoop() }
         coreController = null
         if (stopService) {
@@ -240,7 +256,7 @@ class XrayProxyService : Service() {
         val reconnectPendingIntent = PendingIntent.getService(
             this, token.toInt() + 1, reconnectIntent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🔌 Xray Proxy (127.0.0.1:4444)")
             .setContentText("Local proxy running • Reconnect or disconnect")
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -249,8 +265,13 @@ class XrayProxyService : Service() {
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
-            .build()
-        startForeground(NOTIFICATION_ID, notification)
+            .setOnlyAlertOnce(true)
+        startForeground(NOTIFICATION_ID, builder.build())
+        liveTraffic.start(
+            NOTIFICATION_ID, builder, "Local proxy running • Reconnect or disconnect",
+            connected = { token == generation && isRunning && !isReconnecting },
+            counters = { readTrafficStats() }
+        )
     }
 
     private fun createNotificationChannel() {

@@ -83,7 +83,7 @@ class DnsVpnService : VpnService() {
         return START_STICKY
     }
 
-    private fun showNotification(primaryDns: String, token: Long) {
+    private fun showNotification(primaryDns: String, token: Long, connected: Boolean = false) {
         // Create notification for foreground service
         createNotificationChannel()
 
@@ -122,7 +122,8 @@ class DnsVpnService : VpnService() {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("DNS VPN")
-            .setContentText("DNS: $primaryDns • Reconnect or disconnect")
+            .setContentText(if (connected) "DNS: $primaryDns • Speed unavailable (DNS-only)"
+                else "DNS: $primaryDns • Reconnect or disconnect")
             .setSmallIcon(R.mipmap.ic_launcher) // لوگو اپ
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true) // Cannot be dismissed
@@ -164,6 +165,9 @@ class DnsVpnService : VpnService() {
             
             if (vpnInterface != null) {
                 isRunning = true
+                // This service installs no default route. Device/UID totals would
+                // count unrelated bypass traffic, not a measured VPN throughput.
+                showNotification(primaryDns, token, connected = true)
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, true) }
                 instance = this // ثبت نمونه‌ی فعال برای پینگ protected
                 

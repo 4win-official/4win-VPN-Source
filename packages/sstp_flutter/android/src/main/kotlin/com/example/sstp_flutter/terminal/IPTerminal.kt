@@ -30,13 +30,16 @@ internal class IPTerminal(private val bridge: ClientBridge) {
     private val isCustomDNSServerUsed = getBooleanPrefValue(OscPrefKey.DNS_DO_USE_CUSTOM_SERVER, bridge.prefs)
     private val isCustomRoutesAdded = getBooleanPrefValue(OscPrefKey.ROUTE_DO_ADD_CUSTOM_ROUTES, bridge.prefs)
 
-    private var totalDownload = 0;
-    private var totalUpload = 0;
+    private var totalDownload = 0L
+    private var totalUpload = 0L
+    private val trafficLock = Any()
 
     @SuppressLint("NewApi")
     internal suspend fun initialize() {
-        totalDownload = 0;
-        totalUpload = 0;
+        synchronized(trafficLock) {
+            totalDownload = 0L
+            totalUpload = 0L
+        }
         if (bridge.PPP_IPv4_ENABLED) {
             if (bridge.currentIPv4.isSame(ByteArray(4))) {
                 bridge.controlMailbox.send(ControlMessage(Where.IPv4, Result.ERR_INVALID_ADDRESS))
@@ -151,60 +154,43 @@ internal class IPTerminal(private val bridge: ClientBridge) {
     }
 
     internal suspend fun writePacket(start: Int, size: Int, buffer: ByteBuffer) {
-        val startTimeMillis = System.currentTimeMillis()
-        // nothing will be written until initialized
-        // the position won't be changed
-        outputStream?.write(buffer.array(), start, size)
-        val endTimeMillis = System.currentTimeMillis()
-        val elapsedTimeMillis = endTimeMillis - startTimeMillis
-
-        // Calculate and log download speed based on the packet size and elapsed time
-        if (elapsedTimeMillis > 0) {
-            val downloadSpeedKb = calculateSpeedKb(size, elapsedTimeMillis)
-            logDownloadSpeed(downloadSpeedKb, size)
+        if (size <= 0) return
+        val output = outputStream ?: return
+        output.write(buffer.array(), start, size)
+        val total = synchronized(trafficLock) {
+            totalDownload += size.toLong()
+            totalDownload
         }
+        FlutterCaller().DownloadSpeed((size.toLong() * 8L).toInt(), (total * 8L).toInt())
+        val snapshot = trafficSnapshot()
+        bridge.service.recordTraffic(bridge, snapshot.first, snapshot.second)
     }
 
     internal suspend fun readPacket(buffer: ByteBuffer) {
-        val startTimeMillis = System.currentTimeMillis()
         buffer.clear()
         val bytesRead = inputStream?.read(buffer.array(), 0, bridge.PPP_MTU) ?: 0
+        val total = if (bytesRead > 0) synchronized(trafficLock) {
+            totalUpload += bytesRead.toLong()
+            totalUpload
+        } else 0L
         buffer.position(bytesRead)
         buffer.flip()
-
-        val endTimeMillis = System.currentTimeMillis()
-        val elapsedTimeMillis = endTimeMillis - startTimeMillis
-
-        if (elapsedTimeMillis > 0) {
-            val uploadSpeedKb = calculateSpeedKb(bytesRead, elapsedTimeMillis)
-            logUploadSpeed(uploadSpeedKb, bytesRead)
+        if (bytesRead > 0) {
+            FlutterCaller().UploadSpeed((bytesRead.toLong() * 8L).toInt(), (total * 8L).toInt())
         }
+        val snapshot = trafficSnapshot()
+        bridge.service.recordTraffic(bridge, snapshot.first, snapshot.second)
     }
-
-    private fun calculateSpeedKb(bytes: Int, elapsedTimeMillis: Long): Double {
-        val bitsInByte = 8
-        val bytes = bytes.toDouble() // Convert bytes to double for calculations
-        val bits = bytes * bitsInByte
-        val speedKbps = bits / (elapsedTimeMillis.toDouble() / 1000) / 1_000
-        return speedKbps
-    }
-
-    private suspend fun logDownloadSpeed(downloadSpeedKb: Double, bytes: Int) {
-        val roundedDownloadSpeed = String.format("%.2f", downloadSpeedKb)
-        totalDownload += bytes
-        FlutterCaller().DownloadSpeed(bytes * 8, totalDownload * 8)
-    }
-
-    private suspend fun logUploadSpeed(uploadSpeedKb: Double, bytes: Int) {
-        val roundedUploadSpeed = String.format("%.2f", uploadSpeedKb)
-        totalUpload += bytes
-        FlutterCaller().UploadSpeed(bytes * 8, totalUpload * 8)
-    }
-
 
     internal fun close() {
-        totalDownload = 0;
-        totalUpload = 0;
+        synchronized(trafficLock) {
+            totalDownload = 0L
+            totalUpload = 0L
+        }
         fd?.close()
+    }
+
+    private fun trafficSnapshot(): Pair<Long, Long> = synchronized(trafficLock) {
+        Pair(totalUpload, totalDownload)
     }
 }
