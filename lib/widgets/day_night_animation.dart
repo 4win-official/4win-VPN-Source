@@ -37,7 +37,9 @@ class _DayNightAnimationState extends State<DayNightAnimation>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final headerHeight = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    // The extended Scaffold body already includes the complete app bar in its
+    // top padding. Adding kToolbarHeight again pushes the sun into the controls.
+    final headerHeight = max(MediaQuery.paddingOf(context).top, kToolbarHeight);
     return IgnorePointer(
       child: ExcludeSemantics(
         child: AnimatedBuilder(
@@ -68,6 +70,27 @@ class DayNightPainter extends CustomPainter {
   final bool isDark;
   final double headerHeight;
 
+  // Includes the visible corona, not the very faint atmospheric glow. Keep
+  // the whole sun in the upper-right pocket, directly below the app bar.
+  @visibleForTesting
+  Rect sunBounds(Size size) {
+    if (size.isEmpty) return Rect.zero;
+    final radius = min(
+      (size.width * 0.072).clamp(18.0, 32.0),
+      min(size.width * 0.14, size.height * 0.055),
+    );
+    final top = min(headerHeight + 8, size.height);
+    var extent = min(radius * 1.5, (size.height - top) / 2);
+    // On narrow portrait screens the central controls start much higher.
+    // Fit the full corona into the upper band instead of sliding it down.
+    if (size.height > size.width) {
+      extent = min(extent, max(0.0, (size.height * 0.22 - top) / 2));
+    }
+    if (extent <= 0) return Rect.zero;
+    final right = max(extent * 2, size.width - min(24.0, size.width * 0.06));
+    return Rect.fromLTWH(right - extent * 2, top, extent * 2, extent * 2);
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
@@ -87,8 +110,8 @@ class DayNightPainter extends CustomPainter {
         ).createShader(bounds),
     );
 
-    // Leave room for the full sunburst below the status bar and toolbar,
-    // including on notched phones. Scale down gracefully in compact layouts.
+    // Keep the moon's existing design; the smaller sun has its own higher anchor
+    // so it does not descend into the protocol selector / power-button zone.
     final radius = min(
       (size.width * 0.085).clamp(22.0, 46.0),
       min(size.width, size.height) * 0.14,
@@ -96,24 +119,18 @@ class DayNightPainter extends CustomPainter {
     final clearance = radius * (isDark ? 1.3 : 2.15);
     final center = Offset(
       min(size.width * 0.80, size.width - clearance),
-      min(
-        headerHeight + clearance + 12,
-        size.height - clearance,
-      ),
+      min(headerHeight + clearance + 12, size.height - clearance),
     );
     final breath = sin(progress * pi * 2);
-    _halo(
-      canvas,
-      center,
-      radius * (isDark ? 4.8 : 5.5),
-      isDark ? const Color(0xFF7C9DFF) : const Color(0xFFFFC55C),
-      isDark ? 0.14 : 0.22,
-    );
     if (isDark) {
+      _halo(canvas, center, radius * 4.8, const Color(0xFF7C9DFF), 0.14);
       _paintStars(canvas, size, center, radius);
       _paintMoon(canvas, center, radius, breath);
     } else {
-      _paintSun(canvas, center, radius, breath);
+      final sun = sunBounds(size);
+      if (!sun.isEmpty) {
+        _paintSun(canvas, sun.center, sun.width / 3, breath);
+      }
     }
     canvas.restore();
   }
@@ -140,67 +157,40 @@ class DayNightPainter extends CustomPainter {
   }
 
   void _paintSun(Canvas canvas, Offset center, double radius, double breath) {
-    final r = radius * (1 + breath * 0.025);
-    _halo(canvas, center, r * 1.65, const Color(0xFFFFD16A), 0.45);
-    canvas.save();
-    canvas.translate(center.dx, center.dy);
-    // Rounded, softly graded rays with generous space around the sun's core.
-    canvas.rotate(progress * pi * 2);
-    for (var i = 0; i < 12; i++) {
-      final angle = i * pi / 6;
-      final direction = Offset(cos(angle), sin(angle));
-      final start = direction * (r * 1.36);
-      final end = direction * (r * (i.isEven ? 1.95 : 1.73));
-      canvas.drawLine(
-        start,
-        end,
-        Paint()
-          ..shader = LinearGradient(
-            colors: const [Color(0xFFF7B744), Color(0xFFFFDC8A)],
-          ).createShader(Rect.fromPoints(start, end).inflate(1))
-          ..strokeWidth = r * 0.105
-          ..strokeCap = StrokeCap.round,
-      );
-    }
-    canvas.restore();
-
-    final disk = Rect.fromCircle(center: center, radius: r);
-    canvas.drawCircle(
-      center.translate(0, r * 0.10),
-      r,
-      Paint()
-        ..color = const Color(0xFFEFA133).withValues(alpha: 0.18)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.24),
+    // A luminous solar disc rather than a rotating icon: warm limb darkening,
+    // a fine corona and diffuse sunlight, without spokes or a glossy highlight.
+    _halo(canvas, center, radius * 4, const Color(0xFFFFCD72), 0.14);
+    _halo(
+      canvas,
+      center,
+      radius * (1.48 + breath * 0.02),
+      const Color(0xFFFFC04F),
+      0.42 + breath * 0.025,
     );
+    final disk = Rect.fromCircle(center: center, radius: radius);
     canvas.drawCircle(
       center,
-      r,
+      radius,
       Paint()
         ..shader = const RadialGradient(
-          center: Alignment(-0.38, -0.42),
-          radius: 1.1,
-          colors: [Color(0xFFFFF8CF), Color(0xFFFFDA70), Color(0xFFF5A632)],
-          stops: [0, 0.52, 1],
+          radius: 0.52,
+          colors: [
+            Color(0xFFFFFCE3),
+            Color(0xFFFFEDAB),
+            Color(0xFFFFD16A),
+            Color(0xFFF6B74B),
+          ],
+          stops: [0, 0.55, 0.88, 1],
         ).createShader(disk),
     );
     canvas.drawCircle(
       center,
-      r - 0.7,
+      radius,
       Paint()
-        ..color = const Color(0xFFFFF4C5).withValues(alpha: 0.7)
+        ..color = const Color(0xFFFFE8A0).withValues(alpha: 0.5)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2,
-    );
-    canvas.drawArc(
-      disk.deflate(r * 0.19),
-      pi * 1.08,
-      pi * 0.42,
-      false,
-      Paint()
-        ..color = Colors.white.withValues(alpha: 0.52)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = r * 0.07
-        ..strokeCap = StrokeCap.round,
+        ..strokeWidth = 0.8
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.8),
     );
   }
 
@@ -261,28 +251,61 @@ class DayNightPainter extends CustomPainter {
   }
 
   void _paintStars(Canvas canvas, Size size, Offset moon, double radius) {
-    final random = Random(42);
-    for (var i = 0; i < 42; i++) {
+    // Cache the seeded sky once: no bitmap, no frame-to-frame random jumps and
+    // no decorative cross-shaped stars. Most points are faint and subpixel.
+    final count = (size.width * size.height / 3000).round().clamp(60, 180);
+    final time = progress * pi * 2;
+    final paint = Paint();
+    for (final star in _stars.take(count)) {
       final point = Offset(
-        size.width * (0.05 + random.nextDouble() * 0.90),
-        size.height * (0.07 + random.nextDouble() * 0.63),
+        size.width * star.position.dx,
+        size.height * star.position.dy,
       );
-      final r = 0.6 + random.nextDouble() * 0.9;
       if ((point - moon).distance < radius * 1.7) continue;
-      final shimmer = sin(progress * pi * 2 + i * 1.7);
-      final paint = Paint()
-        ..color = const Color(
-          0xFFDFEAFF,
-        ).withValues(alpha: 0.28 + (shimmer + 1) * 0.20);
-      canvas.drawCircle(point, r, paint);
-      if (i % 9 == 0) {
-        paint
-          ..strokeWidth = 0.8
-          ..strokeCap = StrokeCap.round;
-        canvas.drawLine(point.translate(-3, 0), point.translate(3, 0), paint);
-        canvas.drawLine(point.translate(0, -3), point.translate(0, 3), paint);
+
+      // Independent overlapping rhythms mimic atmospheric scintillation.
+      // Integer harmonics make the 24-second loop continuous at its seam;
+      // stars never all blink off, travel, or pulsate in sync.
+      final shimmer =
+          sin(time * star.frequency + star.phase) * 0.6 +
+          sin(time * (star.frequency + 3) + star.phase * 2.3) * 0.3 +
+          sin(time * (star.frequency + 7) + star.phase * 0.7) * 0.1;
+      final horizon = 1 - pow(star.position.dy, 3) * 0.75;
+      final alpha = (star.brightness + shimmer * star.twinkle) * horizon;
+      if (star.radius > 0.95) {
+        _halo(canvas, point, star.radius * 3.5, star.color, alpha * 0.16);
       }
+      paint.color = star.color.withValues(alpha: alpha);
+      canvas.drawCircle(point, star.radius * (1 + shimmer * 0.06), paint);
     }
+  }
+
+  static final List<_SkyStar> _stars = _createStars();
+
+  static List<_SkyStar> _createStars() {
+    final random = Random(42);
+    return List.generate(180, (_) {
+      final position = Offset(
+        0.025 + random.nextDouble() * 0.95,
+        0.035 + random.nextDouble() * 0.90,
+      );
+      // A magnitude-like distribution: many dim stars, a few bright ones.
+      final magnitude = pow(random.nextDouble(), 3).toDouble();
+      return _SkyStar(
+        position: position,
+        radius: 0.35 + magnitude * 0.95,
+        brightness: 0.22 + magnitude * 0.6,
+        twinkle: 0.05 + random.nextDouble() * 0.13,
+        phase: random.nextDouble() * pi * 2,
+        frequency: 3 + random.nextInt(6),
+        color: const [
+          Color(0xFFE4EDFF),
+          Color(0xFFFFE9CE),
+          Color(0xFFF4F6FF),
+          Color(0xFFCADCFF),
+        ][random.nextInt(4)],
+      );
+    }, growable: false);
   }
 
   @override
@@ -290,4 +313,24 @@ class DayNightPainter extends CustomPainter {
       oldDelegate.progress != progress ||
       oldDelegate.isDark != isDark ||
       oldDelegate.headerHeight != headerHeight;
+}
+
+class _SkyStar {
+  const _SkyStar({
+    required this.position,
+    required this.radius,
+    required this.brightness,
+    required this.twinkle,
+    required this.phase,
+    required this.frequency,
+    required this.color,
+  });
+
+  final Offset position;
+  final double radius;
+  final double brightness;
+  final double twinkle;
+  final double phase;
+  final int frequency;
+  final Color color;
 }
