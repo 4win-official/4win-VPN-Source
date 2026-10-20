@@ -223,8 +223,8 @@ extension _SstpProviderLogic on VpnProvider {
     _sstpTestedCount = 0;
     _sstpTestTotal = targets.length;
     _sstpTestError = null;
-    _errorMessage = null;
     for (final server in targets) {
+      _sstpTestingServers.add(server.fullAddress);
       server.ping = null;
     }
     notifyListeners();
@@ -256,14 +256,22 @@ extension _SstpProviderLogic on VpnProvider {
         _selectedServer = sorted.isEmpty ? null : sorted.first;
       }
       if (sorted.isEmpty && _selectedProtocol == 'sstp') {
-        _errorMessage =
+        const message =
             'No reachable SSTP servers in this target. Refresh or try another group.';
+        _errorMessage = message;
+        _sstpTestError = message;
       }
       return sorted;
     } catch (_) {
+      for (final server in targets) {
+        server.ping = -1;
+      }
       _sstpTestError = 'Could not test SSTP servers. Please try again.';
       rethrow;
     } finally {
+      for (final server in targets) {
+        _sstpTestingServers.remove(server.fullAddress);
+      }
       _sstpGroupTesting = false;
       if (!_mixDisposed) notifyListeners();
     }
@@ -285,7 +293,15 @@ extension _SstpProviderLogic on VpnProvider {
     server.ping = null;
     if (!_mixDisposed) notifyListeners();
     try {
-      final reachable = await _serverService.testServersInParallel([server]);
+      final reachable = await _serverService.testServersInParallel(
+        [server],
+        onProgress: (tested, total) {
+          if (_mixDisposed) return;
+          _sstpTestedCount = tested;
+          _sstpTestTotal = total;
+          notifyListeners();
+        },
+      );
       server.ping = reachable.isEmpty ? -1 : reachable.first.ping;
       if (server.ping == -1) {
         _sstpTestError = 'SSTP server ${server.fullAddress} is unreachable.';
@@ -310,6 +326,10 @@ extension _SstpProviderLogic on VpnProvider {
     _sstpTestedCount = 0;
     _sstpTestTotal = group.servers.length;
     _sstpTestError = null;
+    for (final server in group.servers) {
+      _sstpTestingServers.add(server.fullAddress);
+      server.ping = null;
+    }
     if (!_mixDisposed) notifyListeners();
     try {
       final reachable = await _serverService.testServersInParallel(
@@ -339,6 +359,9 @@ extension _SstpProviderLogic on VpnProvider {
       _sstpTestError = 'Could not test SSTP group. Please try again.';
       rethrow;
     } finally {
+      for (final server in group.servers) {
+        _sstpTestingServers.remove(server.fullAddress);
+      }
       _sstpGroupTesting = false;
       if (!_mixDisposed) notifyListeners();
     }

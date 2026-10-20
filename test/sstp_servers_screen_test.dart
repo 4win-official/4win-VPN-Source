@@ -64,6 +64,9 @@ class FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   int get sstpTestTotal => 0;
 
   @override
+  String? get sstpTestError => null;
+
+  @override
   Future<void> loadServers({bool forceRefresh = false}) async {
     loadCalls++;
     if (forceRefresh) forcedLoadCalls++;
@@ -213,6 +216,40 @@ void main() {
     expect(provider.selected, same(target));
     expect(provider.selectedGroup, isNull);
     expect(find.text('Manual server selected'), findsOneWidget);
+  });
+
+  testWidgets('server rows distinguish untested and unreachable results', (
+    tester,
+  ) async {
+    final untested = server('untested.example', 443);
+    final unreachable = server('unreachable.example', 443)..ping = -1;
+    final provider = FakeVpnProvider(
+      groups: [
+        group('custom', 'Custom', [untested, unreachable]),
+      ],
+    );
+    await pumpScreen(tester, provider);
+    await tester.tap(find.byTooltip('Expand'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Untested'), findsOneWidget);
+    expect(find.text('Unreachable'), findsOneWidget);
+    expect(find.text('Failed'), findsNothing);
+  });
+
+  testWidgets('zero latency is a positive TCP connect result', (tester) async {
+    final zero = server('zero.example', 443)..ping = 0;
+    final provider = FakeVpnProvider(
+      groups: [
+        group('custom', 'Custom', [zero]),
+      ],
+    );
+    await pumpScreen(tester, provider);
+    await tester.tap(find.byTooltip('Expand'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('0 ms TCP connect'), findsOneWidget);
+    expect(find.byTooltip('Test TCP latency'), findsOneWidget);
   });
 
   testWidgets('custom group deletion requires confirmation', (tester) async {

@@ -8,11 +8,15 @@ import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/services/server_service.dart';
 
 class FakeServerService extends ServerService {
-  FakeServerService(this.servers, {Map<String, int?>? results})
-    : results = results ?? {};
+  FakeServerService(
+    this.servers, {
+    Map<String, int?>? results,
+    this.throwOnTest = false,
+  }) : results = results ?? {};
 
   final List<VpnServer> servers;
   final Map<String, int?> results;
+  bool throwOnTest;
   final List<List<VpnServer>> tested = [];
   Completer<List<VpnServer>>? pending;
 
@@ -26,6 +30,7 @@ class FakeServerService extends ServerService {
     Function(int tested, int total)? onProgress,
   }) async {
     tested.add(List<VpnServer>.of(targets));
+    if (throwOnTest) throw StateError('test failed');
     final wait = pending;
     if (wait != null) return wait.future;
     final reachable = <VpnServer>[];
@@ -155,6 +160,80 @@ void main() {
       7,
     );
   });
+
+  test(
+    'non-selected group marks every target while its test is pending',
+    () async {
+      await provider.addSstpGroup('Custom', 'custom.example:443');
+      final custom = provider.sstpGroups.firstWhere((g) => g.name == 'Custom');
+      final target = custom.servers.single..ping = 23;
+      final pending = Completer<List<VpnServer>>();
+      fake.pending = pending;
+      final operation = provider.testSstpGroup(custom.id);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(provider.isSstpServerTesting(target), isTrue);
+      expect(target.ping, isNull);
+      expect(provider.sstpGroupTesting, isTrue);
+      pending.complete(<VpnServer>[]);
+      await operation;
+      expect(provider.isSstpServerTesting(target), isFalse);
+      expect(target.ping, -1);
+    },
+  );
+
+  test(
+    'test-all marks every target unreachable when the probe throws',
+    () async {
+      fake.throwOnTest = true;
+      await expectLater(provider.testAllServers(), throwsStateError);
+      expect(
+        provider.servers,
+        everyElement(predicate<VpnServer>((s) => s.ping == -1)),
+      );
+      expect(provider.sstpTestError, contains('Could not test SSTP servers'));
+    },
+  );
+
+  test(
+    'reports testing progress and marks a failed probe unreachable',
+    () async {
+      final target = provider.servers.firstWhere(
+        (s) => s.address == 'down.example',
+      );
+      final pending = Completer<List<VpnServer>>();
+      fake.pending = pending;
+      final operation = provider.testSstpServer('default', target);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(provider.sstpGroupTesting, isTrue);
+      expect(provider.isSstpServerTesting(target), isTrue);
+      expect(provider.sstpTestedCount, 0);
+      expect(provider.sstpTestTotal, 1);
+      expect(target.ping, isNull);
+
+      pending.complete(<VpnServer>[]);
+      await operation;
+      expect(provider.isSstpServerTesting(target), isFalse);
+      expect(provider.sstpTestedCount, 1);
+      expect(target.ping, -1);
+    },
+  );
+
+  test(
+    'probe failure records a test error and keeps the server unreachable',
+    () async {
+      fake.throwOnTest = true;
+      final target = provider.servers.first;
+
+      await expectLater(
+        provider.testSstpServer('default', target),
+        throwsStateError,
+      );
+      expect(target.ping, -1);
+      expect(provider.sstpTestError, contains('Could not test SSTP server'));
+    },
+  );
 
   test(
     'manual server selection survives a failed connect and probes only itself',

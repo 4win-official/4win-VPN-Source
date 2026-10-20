@@ -306,12 +306,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   // Xray traffic polling (proxy uplink/downlink from the core)
   Timer? _xrayTrafficTimer;
 
-  /// Auto-clear any error message 10 seconds after it appears, so stale errors
-  /// never linger on screen (even after a successful reconnect). Called on
-  /// every notifyListeners via the override below.
+  /// Transient messages expire, but SSTP failures stay visible until an
+  /// explicit retry, dismissal, target change, or successful connection.
+  /// Called on every notifyListeners via the override below.
   void _syncErrorAutoClear() {
     final hasError = _errorMessage != null && _errorMessage!.isNotEmpty;
-    if (((_selectedProtocol == 'slowdns' || _selectedProtocol == 'psiphon') &&
+    if ((_selectedProtocol == 'sstp' && hasError) ||
+        ((_selectedProtocol == 'slowdns' || _selectedProtocol == 'psiphon') &&
             _status == VpnConnectionStatus.error) ||
         (_selectedProtocol == 'psiphon' &&
             _status == VpnConnectionStatus.connecting)) {
@@ -439,14 +440,27 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           status != VpnConnectionStatus.disconnected) {
         return;
       }
+      final previousStatus = _status;
       _status = status;
 
       if (status == VpnConnectionStatus.connected) {
+        _errorMessage = null;
         _connectedServer = _vpnService.connectedServer;
         _startDurationTimer();
         _startPingTimer();
         _updateRealDataUsage();
       } else if (status == VpnConnectionStatus.disconnected) {
+        // The plugin emits disconnected BEFORE error for a failed handshake.
+        // Keep a terminal failure instead of rejecting the following error
+        // as a late callback for an already-disconnected session.
+        if (previousStatus == VpnConnectionStatus.connecting ||
+            previousStatus == VpnConnectionStatus.connected ||
+            previousStatus == VpnConnectionStatus.error) {
+          _status = VpnConnectionStatus.error;
+          _errorMessage ??= previousStatus == VpnConnectionStatus.connected
+              ? 'SSTP connection lost. Select another server or retry.'
+              : 'SSTP connection failed. Select another server or retry.';
+        }
         _connectedServer = null;
         _stopDurationTimer();
         _stopPingTimer();
@@ -929,6 +943,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
     final revision = ++_vpnStateRevision;
     final sstpToken = _selectedProtocol == 'sstp' ? ++_sstpConnectGen : null;
+    if (_selectedProtocol == 'sstp') _errorMessage = null;
     // ⚡ CRITICAL: Set to connecting immediately so user sees feedback
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
@@ -3198,8 +3213,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// Keep persisted SSTP targets when returning from the background.
   void resetState() {
     // Returning from Settings must not erase the only explanation for a
-    // failed Psiphon connection (including a retained kill-switch TUN).
-    if (_selectedProtocol == 'psiphon' && _status == VpnConnectionStatus.error) {
+    // failed connection (including Psiphon's retained kill-switch TUN).
+    if ((_selectedProtocol == 'psiphon' || _selectedProtocol == 'sstp') &&
+        _status == VpnConnectionStatus.error) {
       return;
     }
     if (!isConnected && !isConnecting && !_sstpGroupTesting) {

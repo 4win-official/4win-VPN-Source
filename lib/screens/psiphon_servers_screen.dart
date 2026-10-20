@@ -22,6 +22,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
   PsiphonServerList? _list;
   final _searchController = TextEditingController();
   final Map<String, int?> _latencies = {};
+  final Map<String, String> _probeErrors = {};
   final Set<String> _testing = {};
   final Map<String, int> _probeRuns = {};
   int _nextProbeRun = 0;
@@ -169,11 +170,30 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
     final generation = _generation;
     final run = ++_nextProbeRun;
     _probeRuns[server.id] = run;
-    setState(() => _testing.add(server.id));
+    setState(() {
+      _testing.add(server.id);
+      _latencies.remove(server.id);
+      _probeErrors.remove(server.id);
+    });
     try {
       final latency = await _service.testServerLatency(server);
       if (mounted && generation == _generation) {
-        setState(() => _latencies[server.id] = latency);
+        setState(() {
+          if (latency == null) {
+            _latencies.remove(server.id);
+            _probeErrors[server.id] = 'TCP connection timed out or failed';
+          } else {
+            _latencies[server.id] = latency;
+            _probeErrors.remove(server.id);
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted && generation == _generation) {
+        setState(() {
+          _latencies.remove(server.id);
+          _probeErrors[server.id] = 'TCP connection test failed';
+        });
       }
     } finally {
       if (mounted && _probeRuns[server.id] == run) {
@@ -200,11 +220,32 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
           batch.map((s) async {
             final run = ++_nextProbeRun;
             _probeRuns[s.id] = run;
-            if (mounted) setState(() => _testing.add(s.id));
+            if (mounted) {
+              setState(() {
+                _testing.add(s.id);
+                _latencies.remove(s.id);
+                _probeErrors.remove(s.id);
+              });
+            }
             try {
               final latency = await _service.testServerLatency(s);
               if (mounted && generation == _generation) {
-                setState(() => _latencies[s.id] = latency);
+                setState(() {
+                  if (latency == null) {
+                    _latencies.remove(s.id);
+                    _probeErrors[s.id] = 'TCP connection timed out or failed';
+                  } else {
+                    _latencies[s.id] = latency;
+                    _probeErrors.remove(s.id);
+                  }
+                });
+              }
+            } catch (_) {
+              if (mounted && generation == _generation) {
+                setState(() {
+                  _latencies.remove(s.id);
+                  _probeErrors[s.id] = 'TCP connection test failed';
+                });
               }
             } finally {
               if (mounted && _probeRuns[s.id] == run) {
@@ -386,12 +427,19 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
 
   Widget _serverTile(PsiphonServer server) {
     final latency = _latencies[server.id];
+    final probeError = _probeErrors[server.id];
     final testing = _testing.contains(server.id);
     return Card(
       child: ListTile(
         title: Text(server.ipAddress),
         subtitle: Text(
-          '${server.region} · ${server.port == null ? 'No TCP port; not testable' : 'port ${server.port}'}${latency == null ? '' : ' · $latency ms TCP'}',
+          '${server.region} · ${server.port == null ? 'No TCP port; not testable' : 'port ${server.port}'}${testing
+              ? ' · Testing TCP reachability…'
+              : latency != null
+              ? ' · $latency ms TCP connect'
+              : probeError == null
+              ? ''
+              : ' · $probeError'}',
         ),
         trailing: Wrap(
           spacing: 2,

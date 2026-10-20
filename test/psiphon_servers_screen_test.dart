@@ -90,6 +90,14 @@ class ControlledPsiphonService extends PsiphonService {
   }
 }
 
+class FailedPsiphonService extends FakePsiphonService {
+  @override
+  Future<int?> testServerLatency(PsiphonServer server) async {
+    pingCalls++;
+    return null;
+  }
+}
+
 void main() {
   testWidgets('shows metadata and manual signed-list refresh', (tester) async {
     final service = FakePsiphonService();
@@ -129,6 +137,44 @@ void main() {
     );
   });
 
+  testWidgets('shows progress while testing and an explicit failure result', (
+    tester,
+  ) async {
+    final service = ControlledPsiphonService();
+    await tester.pumpWidget(
+      MaterialApp(home: PsiphonServersScreen(service: service)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Test TCP latency').first);
+    await tester.pump();
+    expect(find.textContaining('Testing TCP reachability'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    service.pending.single.complete(null);
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('TCP connection timed out or failed'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('shows a failed probe instead of silently clearing the result', (
+    tester,
+  ) async {
+    final service = FailedPsiphonService();
+    await tester.pumpWidget(
+      MaterialApp(home: PsiphonServersScreen(service: service)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Test TCP latency'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('TCP connection timed out or failed'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('rapid test-all taps never start more than four probes', (
     tester,
   ) async {
@@ -155,6 +201,63 @@ void main() {
     expect(service.maximum, 4);
     expect(service.active, 0);
   });
+
+  testWidgets(
+    'zero latency is valid and retest replaces stale success with failure',
+    (tester) async {
+      final service = ControlledPsiphonService();
+      await tester.pumpWidget(
+        MaterialApp(home: PsiphonServersScreen(service: service)),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Test TCP latency').first);
+      await tester.pump();
+      service.pending.single.complete(0);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('0 ms TCP connect'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Test TCP latency').first);
+      await tester.pump();
+      expect(find.textContaining('0 ms TCP connect'), findsNothing);
+      expect(find.textContaining('Testing TCP reachability'), findsOneWidget);
+      service.pending.last.completeError(StateError('probe unavailable'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('TCP connection test failed'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'test all continues after a probe exception and shows failed rows',
+    (tester) async {
+      final service = ControlledPsiphonService();
+      await tester.pumpWidget(
+        MaterialApp(home: PsiphonServersScreen(service: service)),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Test all (max 4 at a time)'));
+      await tester.pump();
+      service.pending.first.completeError(StateError('probe failed'));
+      for (final probe in service.pending.skip(1).toList()) {
+        probe.complete(null);
+      }
+      await tester.pump();
+      expect(service.pending, hasLength(8));
+      for (final probe in service.pending.skip(4)) {
+        probe.complete(0);
+      }
+      await tester.pumpAndSettle();
+      expect(find.textContaining('TCP connection test failed'), findsOneWidget);
+      expect(
+        find.textContaining('TCP connection timed out or failed'),
+        findsWidgets,
+      );
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(service.active, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('refresh cancels the next probe batch and clears old spinners', (
     tester,

@@ -87,10 +87,11 @@ extension _VpnStateSync on VpnProvider {
       // kill-switch service still owns the session and must not be torn down.
       if (state['running'] == false && state['reconnecting'] == false) {
         if (status == VpnConnectionStatus.disconnected) return;
-        // A failed Psiphon startup normally stops its native service. That
+        // A failed SSTP/Psiphon startup normally stops its native service. That
         // must not erase the persisted cause on resume. An explicit native
         // onDisconnected event still follows the manual stop path above.
-        if (protocol == 'psiphon' && status == VpnConnectionStatus.error) {
+        if ((protocol == 'psiphon' || protocol == 'sstp') &&
+            status == VpnConnectionStatus.error) {
           return;
         }
         await disconnect();

@@ -171,6 +171,19 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
             onRefresh: () => _run(() => p.loadServers(forceRefresh: true)),
             child: CustomScrollView(
               slivers: [
+                if (p.sstpTestError != null)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                      child: Text(
+                        p.sstpTestError!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.redAccent,
+                        ),
+                      ),
+                    ),
+                  ),
                 SliverPadding(
                   padding: const EdgeInsets.all(12),
                   sliver: SliverMainAxisGroup(
@@ -212,7 +225,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         p.sstpRefreshing ||
         p.isConnected ||
         p.isConnecting;
-    final testing = p.sstpGroupTesting && selected;
+    final testing = g.servers.any(p.isSstpServerTesting);
     final progress = testing ? '${p.sstpTestedCount}/${p.sstpTestTotal}' : null;
     return AnimatedServerGroup(
       key: ValueKey('sstp-group-${g.id}'),
@@ -351,18 +364,22 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
       ),
       subtitle: Text(
-        ping == null
-            ? 'Not tested'
+        testing
+            ? 'Testing…'
+            : ping == null
+            ? 'Untested'
             : ping < 0
-            ? 'Failed'
-            : '$ping ms',
-        style: TextStyle(color: ping != null && ping >= 0 ? accent : null),
+            ? 'Unreachable'
+            : '$ping ms TCP connect',
+        style: TextStyle(
+          color: testing || (ping != null && ping >= 0) ? accent : null,
+        ),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            tooltip: 'Test latency',
+            tooltip: 'Test TCP latency',
             onPressed:
                 testing ||
                     p.sstpGroupTesting ||
