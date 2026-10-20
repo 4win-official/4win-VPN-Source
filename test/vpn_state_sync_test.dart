@@ -169,6 +169,37 @@ void main() {
   });
 
   test(
+    'local metrics polling restores totals without owning recovery',
+    () async {
+      final provider = await xrayProvider();
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      Map<String, dynamic> snapshot = {
+        'running': true,
+        'connected': true,
+        'reconnecting': false,
+        'sessionId': 'native-local',
+        'elapsedMillis': 11000,
+        'uplink': 1024,
+        'downlink': 2048,
+      };
+      messenger.setMockMethodCallHandler(stateChannel, (_) async => snapshot);
+      await provider.connect();
+      await Future<void>.delayed(Duration.zero);
+      expect(provider.connectionDuration.inSeconds, 11);
+      expect(provider.dataUsage, '↓ 2.0 KB  ↑ 1.0 KB');
+      xrayCalls.clear();
+      // A transient inactive metrics read must not interrupt existing recovery.
+      snapshot = {'running': false, 'connected': false, 'reconnecting': false};
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
+      expect(provider.status, VpnConnectionStatus.connected);
+      expect(provider.dataUsage, '↓ 2.0 KB  ↑ 1.0 KB');
+      expect(xrayCalls, isNot(contains('disconnectXray')));
+      provider.dispose();
+    },
+  );
+
+  test(
     'resume reconciles stopped state but preserves reconnecting gap',
     () async {
       final provider = await mixProvider();

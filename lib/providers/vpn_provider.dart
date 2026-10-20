@@ -48,6 +48,12 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   late final Future<void> _startupLoaded;
   bool _nativeSessionRestored = false;
   Timer? _nativeStateTimer;
+  Timer? _nativeRestoreTimer;
+  int _nativeStateRead = 0;
+  String? _nativeMetricsSessionId;
+  Duration? _nativeElapsed;
+  final Stopwatch _nativeElapsedClock = Stopwatch();
+  bool _nativeTrafficAuthoritative = false;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -62,6 +68,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     await _startupLoaded;
     await _refreshNativeVpnState();
   }
+
   final MixStrategyStore _mixStore = MixStrategyStore();
   List<MixStrategy> _mixStrategies = [];
   String? _selectedMixStrategyId;
@@ -293,6 +300,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   int _totalUploadBytes = 0;
   int _lastDownloadBytes = 0;
   int _lastUploadBytes = 0;
+  Timer? _realDataUsageTimer;
 
   // Direct DNS traffic baseline (TrafficStats - device-wide counters)
   int _dnsBaselineRxBytes = -1;
@@ -430,6 +438,25 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       await loadOpenVpnConfigs();
     } catch (_) {}
     await _refreshNativeVpnState();
+    if (_selectedProtocol == 'psiphon' &&
+        _status == VpnConnectionStatus.disconnected &&
+        !_mixDisposed) {
+      // Its service runs in another process. A newly created UI process may
+      // query before the first two-second status heartbeat reaches its cache.
+      final revision = _vpnStateRevision;
+      var attempts = 0;
+      _nativeRestoreTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+        if (_mixDisposed ||
+            revision != _vpnStateRevision ||
+            _selectedProtocol != 'psiphon' ||
+            _status != VpnConnectionStatus.disconnected) {
+          timer.cancel();
+          return;
+        }
+        if (++attempts >= 3) timer.cancel();
+        unawaited(_refreshNativeVpnState());
+      });
+    }
   }
 
   void _init() {
@@ -534,12 +561,22 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
   void _startDurationTimer() {
     _stopDurationTimer();
+    _ensureNativeStatePolling();
+    if (!_nativeSessionRestored) {
+      unawaited(_refreshNativeVpnState(metricsOnly: true));
+    }
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_nativeElapsed != null) {
+        _connectionDuration = _nativeElapsed! + _nativeElapsedClock.elapsed;
+        notifyListeners();
+        return;
+      }
       // برای direct_dns و slowdns سرویس SSTP فعال نیست و getConnectionDuration
       // مقدار null برمی‌گرداند؛ پس مدت‌زمان را خودمان به‌صورت دستی می‌شماریم.
       if (_selectedProtocol == 'direct_dns' ||
           _selectedProtocol == 'slowdns' ||
           _selectedProtocol == 'xray' ||
+          _selectedProtocol == 'proxy' ||
           _selectedProtocol == 'warp' ||
           _selectedProtocol == 'openvpn' ||
           _selectedProtocol == 'psiphon' ||
@@ -563,13 +600,17 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
   // Real data usage from VPN service (cumulative)
   void _updateRealDataUsage() {
+    _realDataUsageTimer?.cancel();
     // reset baseline در شروع هر اتصال جدید
     _dnsBaselineRxBytes = -1;
     _dnsBaselineTxBytes = -1;
 
-    Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!isConnected) {
+    _realDataUsageTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!isConnected || _mixDisposed) {
         timer.cancel();
+        return;
+      }
+      if (_nativeTrafficAuthoritative || _nativeMetricsSessionId != null) {
         return;
       }
 
@@ -602,8 +643,16 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   // از TrafficStats دستگاه استفاده می‌کنیم: مقدار اولیه را به عنوان baseline
   // ذخیره و سپس اختلاف نسبت به baseline را به عنوان ترافیک مصرفی محاسبه می‌کنیم
   Future<void> _updateDnsTraffic() async {
+    final revision = _vpnStateRevision;
     try {
       final stats = await DnsVpnConnection.getStats();
+      if (_mixDisposed ||
+          !isConnected ||
+          _selectedProtocol != 'direct_dns' ||
+          revision != _vpnStateRevision ||
+          _nativeMetricsSessionId != null) {
+        return;
+      }
       final rx = stats['rxBytes'] ?? 0;
       final tx = stats['txBytes'] ?? 0;
 
@@ -637,8 +686,6 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   // (same source v2rayNG uses) and feed the shared data-usage counters.
   void _startXrayTraffic() {
     _stopXrayTraffic();
-    _totalDownloadBytes = 0;
-    _totalUploadBytes = 0;
     _xrayTrafficTimer = Timer.periodic(const Duration(seconds: 1), (
       timer,
     ) async {
@@ -650,8 +697,18 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         timer.cancel();
         return;
       }
+      if (_nativeTrafficAuthoritative) return;
+      final revision = _vpnStateRevision;
+      final protocol = _selectedProtocol;
       try {
         final stats = await XrayConnection.queryStats();
+        if (_mixDisposed ||
+            !isConnected ||
+            revision != _vpnStateRevision ||
+            protocol != _selectedProtocol ||
+            _nativeTrafficAuthoritative) {
+          return;
+        }
         _totalUploadBytes = stats['uplink'] ?? 0;
         _totalDownloadBytes = stats['downlink'] ?? 0;
         notifyListeners();
@@ -1327,8 +1384,6 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// (same pattern as [_startXrayTraffic]).
   void _startPsiphonTraffic() {
     _stopPsiphonTraffic();
-    _totalDownloadBytes = 0;
-    _totalUploadBytes = 0;
     _psiphonTrafficTimer = Timer.periodic(const Duration(seconds: 2), (
       timer,
     ) async {
@@ -1336,8 +1391,17 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         timer.cancel();
         return;
       }
+      if (_nativeTrafficAuthoritative) return;
+      final revision = _vpnStateRevision;
       try {
         final stats = await _psiphonService.queryStats();
+        if (_mixDisposed ||
+            !isConnected ||
+            revision != _vpnStateRevision ||
+            _selectedProtocol != 'psiphon' ||
+            _nativeTrafficAuthoritative) {
+          return;
+        }
         _totalUploadBytes = stats['uplink'] ?? 0;
         _totalDownloadBytes = stats['downlink'] ?? 0;
         notifyListeners();
@@ -1560,7 +1624,15 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     };
 
     // Live traffic counters (persist across retries).
+    final byteCountRevision = _vpnStateRevision;
     OpenVpnConnection.onByteCount = (int bytesIn, int bytesOut) {
+      if (_mixDisposed ||
+          _selectedProtocol != 'openvpn' ||
+          byteCountRevision != _vpnStateRevision ||
+          (!isConnected && !isConnecting) ||
+          _nativeTrafficAuthoritative) {
+        return;
+      }
       _totalDownloadBytes = bytesIn;
       _totalUploadBytes = bytesOut;
       notifyListeners();
@@ -3044,6 +3116,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
     final mixWasConnecting = _selectedProtocol == 'mix' && isConnecting;
     _vpnStateRevision++;
+    _clearNativeSessionMetrics();
+    _realDataUsageTimer?.cancel();
+    _nativeRestoreTimer?.cancel();
     _nativeSessionRestored = false;
     _nativeStateTimer?.cancel();
     _nativeStateTimer = null;
@@ -3478,6 +3553,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   void dispose() {
     _mixDisposed = true;
     _vpnStateRevision++;
+    _realDataUsageTimer?.cancel();
+    _nativeElapsedClock.stop();
+    _nativeRestoreTimer?.cancel();
     _nativeStateTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _vpnStateChannel.setMethodCallHandler(null);

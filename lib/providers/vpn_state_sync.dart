@@ -6,24 +6,73 @@ extension _VpnStateSync on VpnProvider {
       (protocol == 'xray' &&
           const {'xray', 'proxy', 'warp', 'mix'}.contains(_selectedProtocol));
 
+  void _ensureNativeStatePolling() {
+    // Read-only for both locally started and restored sessions. Native services
+    // keep ownership of reconnects, counters and the monotonic session clock.
+    _nativeStateTimer ??= Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_refreshNativeVpnState(metricsOnly: !_nativeSessionRestored));
+    });
+  }
+
+  void _clearNativeSessionMetrics() {
+    _nativeMetricsSessionId = null;
+    _nativeElapsed = null;
+    _nativeElapsedClock.stop();
+    _nativeElapsedClock.reset();
+    _nativeTrafficAuthoritative = false;
+  }
+
+  void _applyNativeSessionMetrics(Map<String, dynamic> state) {
+    final id = state['sessionId'];
+    if (id is! String || id.isEmpty) return;
+    if (id != _nativeMetricsSessionId) {
+      _clearNativeSessionMetrics();
+      _nativeMetricsSessionId = id;
+      _connectionDuration = Duration.zero;
+      _totalDownloadBytes = 0;
+      _totalUploadBytes = 0;
+      _lastDownloadBytes = 0;
+      _lastUploadBytes = 0;
+    }
+    final elapsed = state['elapsedMillis'];
+    if (elapsed is num && elapsed.isFinite && elapsed >= 0) {
+      _nativeElapsed = Duration(milliseconds: elapsed.toInt());
+      _connectionDuration = _nativeElapsed!;
+      _nativeElapsedClock.reset();
+      _nativeElapsedClock.start();
+    }
+    final up = state['uplink'];
+    final down = state['downlink'];
+    if (up is num &&
+        down is num &&
+        up.isFinite &&
+        down.isFinite &&
+        up >= 0 &&
+        down >= 0) {
+      _nativeTrafficAuthoritative = true;
+      _totalUploadBytes = up.toInt();
+      _totalDownloadBytes = down.toInt();
+    }
+    // Missing counters are unknown, not zero. Keep the last valid measurement
+    // for this session; never substitute whole-device traffic for VPN traffic.
+  }
+
   Future<void> _onNativeVpnState(MethodCall call) async {
     if (_mixDisposed || call.method != 'onDisconnected') return;
     final arguments = call.arguments;
     if (arguments is! Map || arguments['protocol'] is! String) return;
     if (!_matchesNativeProtocol(arguments['protocol'] as String)) return;
     if (_status == VpnConnectionStatus.disconnected) {
-      // Invalidate a pending startup snapshot too: a notification stop can
-      // arrive before the recreated UI has adopted the running service.
       _vpnStateRevision++;
+      _clearNativeSessionMetrics();
       return;
     }
     if (_status == VpnConnectionStatus.disconnecting) return;
-    // Use the manual stop path too: updating the label alone leaves Dart
-    // retry loops and OpenVPN's health recovery able to restart the tunnel.
+    // Also cancel retry loops: merely changing the label could restart a VPN.
     await disconnect();
   }
 
-  Future<void> _refreshNativeVpnState() async {
+  Future<void> _refreshNativeVpnState({bool metricsOnly = false}) async {
     if (_mixDisposed ||
         _status == VpnConnectionStatus.disconnecting ||
         (_status == VpnConnectionStatus.connecting &&
@@ -33,25 +82,26 @@ extension _VpnStateSync on VpnProvider {
     final protocol = _selectedProtocol;
     final revision = _vpnStateRevision;
     final status = _status;
+    final read = ++_nativeStateRead;
     try {
       final state = await VpnProvider._vpnStateChannel
           .invokeMapMethod<String, dynamic>('getState', {'protocol': protocol});
       if (_mixDisposed ||
           revision != _vpnStateRevision ||
+          read != _nativeStateRead ||
           protocol != _selectedProtocol ||
           status != _status ||
           state == null) {
         return;
       }
-      // A fresh Dart provider starts disconnected even when Android still
-      // owns a tunnel. Adopt only an explicit native snapshot, never a saved
-      // UI flag; a running kill-switch/connecting service is not connected.
-      if (status == VpnConnectionStatus.disconnected ||
-          _nativeSessionRestored) {
-        final connected = state['connected'] == true;
-        final active =
-            state['running'] == true || state['reconnecting'] == true;
-        if (active && state['connected'] is bool) {
+      final connected = state['connected'] == true;
+      final active = state['running'] == true || state['reconnecting'] == true;
+      if (active && state['connected'] is bool) {
+        _applyNativeSessionMetrics(state);
+        // A fresh provider may adopt an explicitly live native session. Local
+        // connect/recovery flows retain their own state transitions.
+        if (status == VpnConnectionStatus.disconnected ||
+            _nativeSessionRestored) {
           final next = connected
               ? VpnConnectionStatus.connected
               : VpnConnectionStatus.connecting;
@@ -71,25 +121,20 @@ extension _VpnStateSync on VpnProvider {
               _stopXrayTraffic();
               _stopPsiphonTraffic();
             }
-            // Do NOT attach recovery monitors: those can start/reconnect a
-            // VPN. Native services retain ownership; this timer only reads.
-            _nativeStateTimer ??= Timer.periodic(const Duration(seconds: 2), (
-              _,
-            ) {
-              unawaited(_refreshNativeVpnState());
-            });
-            notifyListeners();
           }
-          return;
+          // Never attach recovery monitors when restoring a service.
+          _ensureNativeStatePolling();
         }
+        notifyListeners();
+        return;
       }
-      // Missing/failed status reads are not proof of a stop. A reconnect or
-      // kill-switch service still owns the session and must not be torn down.
+      // A missing/failed read is not proof of a stop. A running blackhole or
+      // reconnecting service must not be torn down.
+      // Local connection/recovery paths already own state transitions. A
+      // metrics timer must not stop a just-connected service on a stale read.
+      if (metricsOnly) return;
       if (state['running'] == false && state['reconnecting'] == false) {
         if (status == VpnConnectionStatus.disconnected) return;
-        // A failed SSTP/Psiphon startup normally stops its native service. That
-        // must not erase the persisted cause on resume. An explicit native
-        // onDisconnected event still follows the manual stop path above.
         if ((protocol == 'psiphon' || protocol == 'sstp') &&
             status == VpnConnectionStatus.error) {
           return;

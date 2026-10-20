@@ -23,6 +23,8 @@ object PsiphonStatusStore {
     @Volatile private var reconnecting = false
     @Volatile private var uplink = 0L
     @Volatile private var downlink = 0L
+    @Volatile private var sessionId: String? = null
+    @Volatile private var startedAtElapsed = 0L
     @Volatile private var statusText = ""
     @Volatile private var region = ""
     // Exit regions last reported available by the Psiphon core (server list
@@ -43,6 +45,8 @@ object PsiphonStatusStore {
     @JvmStatic fun isReconnecting(): Boolean = reconnecting && !isStale()
 
     @JvmStatic fun queryTrafficStats(): LongArray = longArrayOf(uplink, downlink)
+    @JvmStatic fun sessionId(): String? = sessionId
+    @JvmStatic fun sessionStartedAtElapsed(): Long = startedAtElapsed
 
     @JvmStatic fun statusText(): String = statusText
 
@@ -65,6 +69,8 @@ object PsiphonStatusStore {
         reconnecting = false
         uplink = 0L
         downlink = 0L
+        sessionId = null
+        startedAtElapsed = 0L
         statusText = ""
         region = ""
         egressRegions = emptyList()
@@ -86,6 +92,8 @@ object PsiphonStatusStore {
             reconnecting = intent.getBooleanExtra(PsiphonVpnService.EXTRA_RECONNECTING, false)
             uplink = intent.getLongExtra(PsiphonVpnService.EXTRA_UPLINK, uplink)
             downlink = intent.getLongExtra(PsiphonVpnService.EXTRA_DOWNLINK, downlink)
+            sessionId = intent.getStringExtra(PsiphonVpnService.EXTRA_SESSION_ID)
+            startedAtElapsed = intent.getLongExtra(PsiphonVpnService.EXTRA_STARTED_AT_ELAPSED, startedAtElapsed)
             intent.getStringExtra(PsiphonVpnService.EXTRA_STATUS_TEXT)?.let { statusText = it }
             intent.getStringExtra(PsiphonVpnService.EXTRA_REGION)?.let { region = it }
             intent.getStringArrayListExtra(PsiphonVpnService.EXTRA_EGRESS_REGIONS)?.let {

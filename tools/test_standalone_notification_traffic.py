@@ -64,8 +64,16 @@ class StandaloneNotificationTrafficTest(unittest.TestCase):
         self.assertIn('synchronized(s.lock)', source)
         self.assertNotIn('TrafficStats.get', source)
 
+    def test_psiphon_accumulates_native_deltas_and_requires_bridge_connectivity(self):
+        source = (APP / 'PsiphonVpnService.kt').read_text()
+        self.assertIn('onBytesTransferred(sent: Long, received: Long)', source)
+        self.assertIn('totalUplink += sent', source)
+        self.assertIn('totalDownlink += received', source)
+        self.assertIn('connected = { tunnelRunning && isTunnelConnected }', source)
+        self.assertNotIn('TrafficStats.get', source)
+
     def test_services_do_not_access_context_before_android_attaches_it(self):
-        for name in ('XrayVpnService.kt',
+        for name in ('PsiphonVpnService.kt', 'XrayVpnService.kt',
                      'XrayProxyService.kt', 'slowdns/SlowDnsVpnService.kt'):
             self.assertIn('liveTraffic by lazy { LiveTrafficNotification(this) }',
                           (APP / name).read_text(), name)

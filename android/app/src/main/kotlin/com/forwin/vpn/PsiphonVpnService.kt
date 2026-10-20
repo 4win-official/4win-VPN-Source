@@ -60,6 +60,7 @@ class PsiphonVpnService : VpnService() {
     @Volatile private var psiphonCoreConnected = false
     @Volatile private var bridgeConfirmed = false
     @Volatile private var activeSession: String? = null
+    @Volatile private var sessionStartedAtElapsed = 0L
     @Volatile private var bridgeRequested = false
     @Volatile private var lastBridgeHeartbeatMs = 0L
     private var activeConnectIntent: Intent? = null
@@ -71,6 +72,12 @@ class PsiphonVpnService : VpnService() {
     @Volatile private var heartbeatRunning = false
     private var heartbeatThread: Thread? = null
 
+    // Accumulate Psiphon byte-transfer deltas into session counters. Sample only while
+    // the device bridge is confirmed connected; never infer rates from UID or
+    // device-wide TrafficStats (which would include unrelated traffic).
+    private val trafficLock = Any()
+    private val liveTraffic by lazy { LiveTrafficNotification(this) }
+    private var notificationBuilder: NotificationCompat.Builder? = null
     // Log lines buffered since the last status broadcast (also mirrored to
     // logcat immediately). Drained into every ACTION_STATUS broadcast.
     private val pendingLogs = ArrayList<String>()
@@ -91,6 +98,8 @@ class PsiphonVpnService : VpnService() {
         const val EXTRA_KILLSWITCH = "killswitch"
         const val EXTRA_UPLINK = "uplink"
         const val EXTRA_DOWNLINK = "downlink"
+        const val EXTRA_SESSION_ID = "session_id"
+        const val EXTRA_STARTED_AT_ELAPSED = "started_at_elapsed"
         const val EXTRA_STATUS_TEXT = "status_text"
         const val EXTRA_REGION = "region"
         const val EXTRA_LOG_LINES = "log_lines"
@@ -133,6 +142,7 @@ class PsiphonVpnService : VpnService() {
     /** Recomputes the externally-visible isTunnelConnected flag. */
     private fun updateConnectedState() {
         isTunnelConnected = psiphonCoreConnected && bridgeConfirmed
+        if (!isTunnelConnected) liveTraffic.stop()
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, isTunnelConnected) }
     }
 
@@ -172,6 +182,8 @@ class PsiphonVpnService : VpnService() {
                 putExtra(EXTRA_KILLSWITCH, killSwitchActive)
                 putExtra(EXTRA_UPLINK, totalUplink)
                 putExtra(EXTRA_DOWNLINK, totalDownlink)
+                putExtra(EXTRA_SESSION_ID, activeSession)
+                putExtra(EXTRA_STARTED_AT_ELAPSED, sessionStartedAtElapsed)
                 putExtra(EXTRA_STATUS_TEXT, lastStatusText)
                 putExtra(EXTRA_REGION, currentRegion)
                 putStringArrayListExtra(EXTRA_EGRESS_REGIONS, ArrayList(egressRegions))
@@ -288,6 +300,7 @@ class PsiphonVpnService : VpnService() {
             }
         }
         commands.shutdown()
+        liveTraffic.stop()
         try {
             stopHeartbeat()
         } catch (_: Throwable) {}
@@ -403,14 +416,18 @@ class PsiphonVpnService : VpnService() {
             isServiceRunning = true
             activeSession = connectionGeneration ?: UUID.randomUUID().toString()
             connectionGeneration = activeSession
+            sessionStartedAtElapsed = SystemClock.elapsedRealtime()
             bridgeRequested = false
             psiphonCoreConnected = false
             bridgeConfirmed = false
             updateConnectedState()
             psiphonSocksPort = 0
             egressRegions = emptyList()
-            totalUplink = 0
-            totalDownlink = 0
+            synchronized(trafficLock) {
+                totalUplink = 0
+                totalDownlink = 0
+            }
+            liveTraffic.stop()
             lastStatusText = "Connecting to Psiphon..."
             plog("starting (region=${if (region.isBlank()) "auto" else region})")
             sendStatus()
@@ -466,12 +483,14 @@ class PsiphonVpnService : VpnService() {
             plog("startup failed: ${t.message ?: "unknown error"}")
             Log.e(TAG, "Psiphon startup failed", t)
             activeSession = null
+            sessionStartedAtElapsed = 0L
             bridgeRequested = false
             reconnecting = false
             reconnectInFlight.set(false)
             tunnelRunning = false
             psiphonCoreConnected = false
             bridgeConfirmed = false
+            liveTraffic.stop()
             updateConnectedState()
             try {
                 stopBridgeProcess()
@@ -528,6 +547,7 @@ class PsiphonVpnService : VpnService() {
             killSwitchActive = keepBlackhole
             psiphonCoreConnected = false
             bridgeConfirmed = false
+            liveTraffic.stop()
             updateConnectedState()
             try {
                 stopBridgeProcess()
@@ -634,6 +654,7 @@ class PsiphonVpnService : VpnService() {
         killSwitchActive = true
         psiphonCoreConnected = false
         bridgeConfirmed = false
+        liveTraffic.stop()
         updateConnectedState()
         try {
             stopBridgeProcess()
@@ -747,8 +768,10 @@ class PsiphonVpnService : VpnService() {
             override fun onBytesTransferred(sent: Long, received: Long) {
                 try {
                     if (activeSession != session) return
-                    totalUplink += sent
-                    totalDownlink += received
+                    synchronized(trafficLock) {
+                        totalUplink += sent.coerceAtLeast(0L)
+                        totalDownlink += received.coerceAtLeast(0L)
+                    }
                 } catch (_: Throwable) {}
             }
             override fun onAvailableEgressRegions(regions: MutableList<String>?) {
@@ -878,7 +901,15 @@ class PsiphonVpnService : VpnService() {
         }
     }
 
+    private fun startTrafficNotification() {
+        val builder = notificationBuilder ?: return
+        liveTraffic.start(NOTIFICATION_ID, builder, lastStatusText,
+            connected = { tunnelRunning && isTunnelConnected },
+            counters = { synchronized(trafficLock) { longArrayOf(totalUplink, totalDownlink) } })
+    }
+
     private fun showNotification(status: String, foreground: Boolean) {
+        liveTraffic.stop()
         val launch = try {
             packageManager.getLaunchIntentForPackage(packageName)
         } catch (_: Throwable) {
@@ -911,9 +942,11 @@ class PsiphonVpnService : VpnService() {
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPending)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(foreground)
-            .build()
-        if (foreground) startForeground(NOTIFICATION_ID, notification)
-        else getSystemService(Context.NOTIFICATION_SERVICE)?.let { (it as NotificationManager).notify(NOTIFICATION_ID, notification) }
+        notificationBuilder = notification
+        val built = notification.build()
+        if (foreground) startForeground(NOTIFICATION_ID, built)
+        else getSystemService(Context.NOTIFICATION_SERVICE)?.let { (it as NotificationManager).notify(NOTIFICATION_ID, built) }
+        if (foreground && isTunnelConnected) startTrafficNotification()
     }
 
     private fun createNotificationChannel() {

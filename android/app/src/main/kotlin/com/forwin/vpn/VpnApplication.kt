@@ -25,6 +25,19 @@ import com.example.sstp_flutter.VpnConnectionObserver
  * handlers read synchronously.
  */
 class VpnApplication : Application(), VpnConnectionObserver {
+    private fun protocolFor(source: Context): String? = when (source.javaClass.simpleName) {
+        "DnsVpnService" -> "direct_dns"
+        "SlowDnsVpnService" -> "slowdns"
+        // WARP, Proxy and Xray-based Mix share these same native transports.
+        // Key metadata by the owning service, never the UI's selected alias.
+        "XrayVpnService" -> "xray"
+        "XrayProxyService" -> "proxy"
+        "MixCoordinatorService" -> "mix"
+        "OpenVPNService" -> "openvpn"
+        "PsiphonVpnService" -> "psiphon"
+        else -> null
+    }
+
     private val connectedRefresh by lazy {
         val handler = Handler(Looper.getMainLooper())
         PsiphonConnectedRefresh(
@@ -38,11 +51,18 @@ class VpnApplication : Application(), VpnConnectionObserver {
     }
 
     override fun onVpnConnectionStarting(source: Context) {
-        // Startup cancels an old timer; it does not fetch before the VPN is connected.
+        // A native start/reconnect is a new session, but recreating an Activity
+        // never calls this hook. End immediately so a fast disconnect/connect
+        // cannot accidentally inherit the previous session's elapsed time.
+        protocolFor(source)?.let { NativeSessionMetrics.end(it) }
         connectedRefresh.starting(source)
     }
 
     override fun onVpnConnectionStateChanged(source: Context, connected: Boolean) {
+        protocolFor(source)?.let { protocol ->
+            if (connected) NativeSessionMetrics.begin(protocol)
+            else NativeSessionMetrics.end(protocol)
+        }
         connectedRefresh.stateChanged(source, connected)
     }
 
@@ -57,8 +77,14 @@ class VpnApplication : Application(), VpnConnectionObserver {
                 if (intent == null) return
                 try {
                     when (intent.action) {
-                        PsiphonVpnService.ACTION_STATUS ->
+                        PsiphonVpnService.ACTION_STATUS -> {
                             PsiphonStatusStore.onStatusBroadcast(intent)
+                            val id = PsiphonStatusStore.sessionId()
+                            val started = PsiphonStatusStore.sessionStartedAtElapsed()
+                            if (PsiphonStatusStore.isRunning() && !id.isNullOrBlank() && started > 0L)
+                                NativeSessionMetrics.adopt("psiphon", id, started)
+                            else if (!PsiphonStatusStore.isRunning()) NativeSessionMetrics.end("psiphon", id)
+                        }
                         PsiphonVpnService.ACTION_LOG -> {
                             val lines = intent.getStringArrayListExtra(
                                 PsiphonVpnService.EXTRA_LOG_LINES

@@ -88,8 +88,12 @@ class SstpVpnService : VpnService() {
     @Volatile private var activeTrafficOwner: Any? = null
     private var trafficUploadBytes = 0L
     private var trafficDownloadBytes = 0L
+    private val nativeSessionLock = Any()
+    private var nativeSessionId: String? = null
+    private var nativeConnectedAtElapsedRealtime: Long? = null
 
     companion object {
+        @Volatile private var liveInstance: SstpVpnService? = null
         @Volatile var isReconnecting: Boolean = false
             private set
 
@@ -97,11 +101,16 @@ class SstpVpnService : VpnService() {
         fun state(context: android.content.Context): Map<String, Any> {
             val prefs = PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
             val running = prefs.getBoolean(OscPrefKey.ROOT_STATE.name, false)
-            return mapOf(
-                "running" to running,
-                "reconnecting" to (running && isReconnecting),
-                "connected" to running
-            )
+            val service = liveInstance
+            return if (service != null) {
+                service.snapshotState(running)
+            } else {
+                mapOf(
+                    "running" to running,
+                    "reconnecting" to (running && isReconnecting),
+                    "connected" to running
+                )
+            }
         }
     }
 
@@ -119,6 +128,7 @@ class SstpVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        liveInstance = this
         notificationManager = NotificationManagerCompat.from(this)
 
         prefs = PreferenceManager.getDefaultSharedPreferences(this)
@@ -178,6 +188,7 @@ class SstpVpnService : VpnService() {
                 controlClient?.kill(false, null)
                 activeSessionPrefs = SessionPreferences(prefs.all.toMap())
 
+                resetNativeSession()
                 resetTraffic()
                 beForegrounded()
                 resetReconnectionLife(activeSessionPrefs ?: prefs)
@@ -208,6 +219,7 @@ class SstpVpnService : VpnService() {
                     controlClient?.shutdownForReconnect()
                     if (generation != sessionGeneration || !getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)) return@launch
                     controlClient = null
+                    resetNativeSession()
                     resetTraffic()
                     beForegrounded()
                     initializeClient(activeSessionPrefs ?: return@launch)
@@ -259,6 +271,7 @@ class SstpVpnService : VpnService() {
     }
 
     private fun initializeClient(sessionPrefs: SharedPreferences = activeSessionPrefs ?: SessionPreferences(prefs.all.toMap())) {
+        beginNativeSession()
         detachHomeStatusListener()
         activeSessionPrefs = sessionPrefs as? SessionPreferences ?: activeSessionPrefs
         val observedPrefs = sessionPrefs
@@ -273,8 +286,9 @@ class SstpVpnService : VpnService() {
                 sessionGeneration == generation &&
                 activeSessionPrefs === observedPrefs
             ) {
-                VpnConnectionObserver.notifyState(this,
-                    observedPrefs.getString(OscPrefKey.HOME_STATUS.name, "")?.isNotEmpty() == true)
+                val connected = observedPrefs.getString(OscPrefKey.HOME_STATUS.name, "")?.isNotEmpty() == true
+                if (connected) markNativeConnected()
+                VpnConnectionObserver.notifyState(this, connected)
             }
         }
         homeStatusListener = registeredHomeStatusListener
@@ -288,6 +302,49 @@ class SstpVpnService : VpnService() {
         controlClient = ControlClient(bridge).also {
             it.launchJobMain()
         }
+    }
+
+    private fun beginNativeSession() {
+        synchronized(nativeSessionLock) {
+            nativeSessionId = UUID.randomUUID().toString()
+            nativeConnectedAtElapsedRealtime = null
+        }
+    }
+
+    private fun resetNativeSession() {
+        synchronized(nativeSessionLock) {
+            nativeSessionId = null
+            nativeConnectedAtElapsedRealtime = null
+        }
+    }
+
+    private fun markNativeConnected() {
+        synchronized(nativeSessionLock) {
+            if (nativeSessionId != null && nativeConnectedAtElapsedRealtime == null) {
+                nativeConnectedAtElapsedRealtime = SystemClock.elapsedRealtime()
+            }
+        }
+    }
+
+    private fun snapshotState(running: Boolean): Map<String, Any> {
+        val state = linkedMapOf<String, Any>(
+            "running" to running,
+            "reconnecting" to (running && isReconnecting),
+            "connected" to running
+        )
+        synchronized(nativeSessionLock) {
+            nativeSessionId?.let { id ->
+                state["sessionId"] = id
+                nativeConnectedAtElapsedRealtime?.let { started ->
+                    state["elapsedMillis"] = (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
+                    synchronized(trafficLock) {
+                        state["uplink"] = trafficUploadBytes
+                        state["downlink"] = trafficDownloadBytes
+                    }
+                }
+            }
+        }
+        return state
     }
 
     private fun detachHomeStatusListener() {
@@ -463,6 +520,7 @@ class SstpVpnService : VpnService() {
     }
 
     internal fun close() {
+        resetNativeSession()
         resetTraffic()
         trafficNotificationVisible = false
         detachHomeStatusListener()
@@ -474,6 +532,7 @@ class SstpVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        resetNativeSession()
         resetTraffic()
         trafficNotificationVisible = false
         detachHomeStatusListener()
@@ -487,6 +546,7 @@ class SstpVpnService : VpnService() {
 
         scope.cancel()
 
+        if (liveInstance === this) liveInstance = null
         setRootState(false)
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
         super.onDestroy()

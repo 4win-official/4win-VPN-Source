@@ -1094,57 +1094,84 @@ class MainActivity: FlutterActivity() {
         var running = false
         var reconnecting = false
         var connected = false
+        var stats: LongArray? = null
+        var metricsOwner = protocol
+        var standaloneMetrics: Map<String, Any>? = null
         when (protocol) {
-            // Each standalone protocol can use either backend in VPN/proxy mode.
             "xray", "proxy", "warp" -> {
-                val xrayRunning = XrayVpnService.isServiceRunning
-                val proxyRunning = XrayProxyService.isServiceRunning
-                val xrayReconnecting = XrayVpnService.isReconnecting
-                val proxyReconnecting = XrayProxyService.isReconnecting
-                running = xrayRunning || proxyRunning
-                reconnecting = xrayReconnecting || proxyReconnecting
-                connected = (xrayRunning && !xrayReconnecting) ||
-                    (proxyRunning && !proxyReconnecting)
+                val xr = XrayVpnService.isServiceRunning
+                val pr = XrayProxyService.isServiceRunning
+                val xrr = XrayVpnService.isReconnecting
+                val prr = XrayProxyService.isReconnecting
+                running = xr || pr
+                reconnecting = xrr || prr
+                connected = (xr && !xrr) || (pr && !prr)
+                metricsOwner = if (pr || prr) "proxy" else "xray"
+                stats = if (pr) XrayProxyService.queryTrafficStats() else XrayVpnService.queryTrafficStats()
             }
             "mix" -> {
-                val mixRunning = MixCoordinatorService.isRunning
-                val xrayMixRunning = XrayVpnService.isMixModeRunning
-                val mixReconnecting = MixCoordinatorService.isReconnecting
-                val xrayMixReconnecting = XrayVpnService.isMixModeReconnecting
-                running = mixRunning || xrayMixRunning
-                reconnecting = mixReconnecting || xrayMixReconnecting
-                connected = (mixRunning && !mixReconnecting) ||
-                    (xrayMixRunning && !xrayMixReconnecting)
+                val mr = MixCoordinatorService.isRunning
+                val xr = XrayVpnService.isMixModeRunning
+                val mrr = MixCoordinatorService.isReconnecting
+                val xrr = XrayVpnService.isMixModeReconnecting
+                running = mr || xr
+                reconnecting = mrr || xrr
+                connected = (mr && !mrr) || (xr && !xrr)
+                // The coordinator owns the system TUN; Xray owns the Xray-mix TUN.
+                metricsOwner = if (mr || mrr) "mix" else "xray"
+                stats = if (mr) MixCoordinatorService.traffic() else XrayVpnService.queryTrafficStats()
             }
             "direct_dns" -> {
                 running = DnsVpnService.isServiceRunning
                 reconnecting = DnsVpnService.isReconnecting
                 connected = running && !reconnecting
+                // This DNS-only service has no VPN-only byte accounting.
             }
             "slowdns" -> {
                 val state = SlowDnsVpnService.status()
                 running = SlowDnsVpnService.isRunning()
                 reconnecting = state["reconnecting"] == true || SlowDnsVpnService.isReconnecting()
                 connected = state["connected"] == true
+                stats = SlowDnsVpnService.traffic()
             }
             "psiphon" -> {
                 running = PsiphonStatusStore.isRunning()
                 reconnecting = PsiphonStatusStore.isReconnecting()
                 connected = PsiphonStatusStore.isConnected()
+                stats = PsiphonStatusStore.queryTrafficStats()
             }
             "openvpn" -> {
                 running = VpnStatus.isVPNActive()
                 reconnecting = OpenVpnNotificationActions.isReconnecting()
                 connected = running && openvpnConnected && !reconnecting
+                stats = OpenVpnNotificationActions.queryTrafficStats()
             }
             "sstp" -> {
                 val state = SstpVpnService.state(applicationContext)
                 running = state["running"] == true
                 reconnecting = state["reconnecting"] == true
                 connected = state["connected"] == true
+                standaloneMetrics = state
             }
         }
-        return mapOf("running" to running, "reconnecting" to reconnecting, "connected" to connected)
+        stats?.let { NativeSessionMetrics.update(metricsOwner, it[0], it[1]) }
+        val snap = NativeSessionMetrics.snapshot(metricsOwner)
+        val out = hashMapOf<String, Any>(
+            "running" to running, "reconnecting" to reconnecting, "connected" to connected
+        )
+        snap?.let {
+            out["sessionId"] = it.sessionId
+            out["elapsedMillis"] = it.elapsedMillis
+            it.uplink?.let { up -> out["uplink"] = up }
+            it.downlink?.let { down -> out["downlink"] = down }
+        }
+        // The vendored standalone SSTP service owns its own session metadata.
+        standaloneMetrics?.let { state ->
+            for (key in listOf("sessionId", "elapsedMillis", "uplink", "downlink")) {
+                state[key]?.let { out[key] = it }
+            }
+        }
+        return out
     }
 
 }

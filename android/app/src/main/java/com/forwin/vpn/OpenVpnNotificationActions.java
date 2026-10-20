@@ -28,6 +28,8 @@ public final class OpenVpnNotificationActions {
         boolean reconnecting;
         boolean sawRestart;
         boolean connected;
+        long bytesIn;
+        long bytesOut;
         final TrafficRateSampler rateSampler = new TrafficRateSampler();
         String rateText;
         Session(Object profile, OpenVPNManagement management) {
@@ -177,9 +179,21 @@ public final class OpenVpnNotificationActions {
         synchronized (SESSIONS) {
             Session state = SESSIONS.get(service);
             if (state == null || !state.connected || bytesIn < 0L || bytesOut < 0L) return;
+            state.bytesIn = bytesIn;
+            state.bytesOut = bytesOut;
             state.rateText = state.rateSampler.sample(
                     bytesOut, bytesIn, SystemClock.elapsedRealtime());
         }
+    }
+
+    /** Last cumulative values delivered by the service ByteCountListener. */
+    public static long[] queryTrafficStats() {
+        synchronized (SESSIONS) {
+            for (Session state : SESSIONS.values()) {
+                if (state != null && state.connected) return new long[] { state.bytesOut, state.bytesIn };
+            }
+        }
+        return new long[] { 0L, 0L };
     }
 
     /** True while an accepted notification reconnect is in progress. */

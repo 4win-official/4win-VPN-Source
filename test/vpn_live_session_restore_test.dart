@@ -131,6 +131,154 @@ void main() {
     provider.dispose();
   });
 
+  for (final protocol in [
+    'psiphon',
+    'xray',
+    'proxy',
+    'warp',
+    'mix',
+    'sstp',
+    'openvpn',
+    'direct_dns',
+    'slowdns',
+  ]) {
+    test(
+      '$protocol restores native session time and cumulative bytes',
+      () async {
+        prefs(protocol);
+        snapshot = {
+          'running': true,
+          'reconnecting': false,
+          'connected': true,
+          'sessionId': 'existing-session',
+          'elapsedMillis': 11000,
+          'downlink': 2048,
+          'uplink': 1024,
+        };
+        final provider = await restore();
+        expect(provider.connectionDuration, const Duration(seconds: 11));
+        expect(provider.dataUsage, '↓ 2.0 KB  ↑ 1.0 KB');
+        provider.dispose();
+        // Recreating Flutter must query the service, not persist a UI baseline.
+        snapshot!['elapsedMillis'] = 75000;
+        snapshot!['downlink'] = 8192;
+        snapshot!['uplink'] = 4096;
+        final reopened = await restore();
+        expect(reopened.connectionDuration, const Duration(seconds: 75));
+        expect(reopened.dataUsage, '↓ 8.0 KB  ↑ 4.0 KB');
+        expectNoConnectionMutation();
+        reopened.dispose();
+      },
+    );
+  }
+
+  testWidgets(
+    'native polling updates bytes without legacy counters overwriting',
+    (tester) async {
+      snapshot = {
+        'running': true,
+        'reconnecting': false,
+        'connected': true,
+        'sessionId': 'same',
+        'elapsedMillis': 60000,
+        'downlink': 2048,
+        'uplink': 1024,
+      };
+      final provider = _RestoreTestProvider();
+      await tester.pump();
+      snapshot!['elapsedMillis'] = 65000;
+      snapshot!['downlink'] = 8192;
+      snapshot!['uplink'] = 4096;
+      await tester.pump(const Duration(seconds: 2));
+      expect(provider.connectionDuration.inSeconds, 65);
+      expect(provider.dataUsage, '↓ 8.0 KB  ↑ 4.0 KB');
+      expect(serviceCalls, isNot(contains('queryStats')));
+      // An incomplete measurement must not erase previously measured totals.
+      snapshot!.remove('uplink');
+      snapshot!.remove('downlink');
+      await tester.pump(const Duration(seconds: 2));
+      expect(provider.dataUsage, '↓ 8.0 KB  ↑ 4.0 KB');
+      expectNoConnectionMutation();
+      provider.dispose();
+    },
+  );
+
+  test(
+    'resume catches up elapsed time and real new session resets totals',
+    () async {
+      snapshot = {
+        'running': true,
+        'reconnecting': false,
+        'connected': true,
+        'sessionId': 'old',
+        'elapsedMillis': 120000,
+        'downlink': 8192,
+        'uplink': 4096,
+      };
+      final provider = await restore();
+      snapshot!['elapsedMillis'] = 240000;
+      provider.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      expect(provider.connectionDuration.inSeconds, 240);
+      expect(provider.dataUsage, '↓ 8.0 KB  ↑ 4.0 KB');
+      snapshot!['sessionId'] = 'new';
+      snapshot!['elapsedMillis'] = 1000;
+      snapshot!['downlink'] = 512;
+      snapshot!['uplink'] = 256;
+      await provider.refreshConnectionState();
+      expect(provider.connectionDuration.inSeconds, 1);
+      expect(provider.dataUsage, '↓ 512 B  ↑ 256 B');
+      snapshot = {'running': false, 'reconnecting': false, 'connected': false};
+      await provider.refreshConnectionState();
+      expect(provider.status, VpnConnectionStatus.disconnected);
+      expect(provider.connectionDuration, Duration.zero);
+      expect(provider.dataUsage, '↓ 0 B  ↑ 0 B');
+      snapshot = {
+        'running': true,
+        'reconnecting': false,
+        'connected': true,
+        'sessionId': 'third',
+        'elapsedMillis': 2000,
+        'downlink': 128,
+        'uplink': 64,
+      };
+      await provider.refreshConnectionState();
+      expect(provider.connectionDuration.inSeconds, 2);
+      expect(provider.dataUsage, '↓ 128 B  ↑ 64 B');
+      provider.dispose();
+    },
+  );
+
+  test(
+    'older concurrent snapshot cannot roll back live measurements',
+    () async {
+      snapshot = {
+        'running': true,
+        'reconnecting': false,
+        'connected': true,
+        'sessionId': 'same',
+        'elapsedMillis': 1000,
+        'downlink': 1024,
+        'uplink': 1024,
+      };
+      final provider = await restore();
+      final older = Completer<Map<String, dynamic>>();
+      var calls = 0;
+      messenger.setMockMethodCallHandler(stateChannel, (_) async {
+        if (calls++ == 0) return older.future;
+        return {...snapshot!, 'elapsedMillis': 5000, 'downlink': 8192};
+      });
+      final pending = provider.refreshConnectionState();
+      await Future<void>.delayed(Duration.zero);
+      await provider.refreshConnectionState();
+      older.complete(snapshot!);
+      await pending;
+      expect(provider.connectionDuration.inSeconds, 5);
+      expect(provider.dataUsage, '↓ 8.0 KB  ↑ 1.0 KB');
+      provider.dispose();
+    },
+  );
+
   test('resume can adopt a connection while UI was disconnected', () async {
     snapshot = {'running': false, 'reconnecting': false, 'connected': false};
     final provider = await restore();
@@ -141,6 +289,33 @@ void main() {
     expect(provider.status, VpnConnectionStatus.connected);
     expectNoConnectionMutation();
     provider.dispose();
+  });
+
+  testWidgets('late Psiphon heartbeat restores original session after reopen', (
+    tester,
+  ) async {
+    snapshot = {'running': false, 'reconnecting': false, 'connected': false};
+    final provider = _RestoreTestProvider();
+    await tester.pump();
+    expect(provider.status, VpnConnectionStatus.disconnected);
+    snapshot = {
+      'running': true,
+      'reconnecting': false,
+      'connected': true,
+      'sessionId': 'service-in-other-process',
+      'elapsedMillis': 125000,
+      'downlink': 8192,
+      'uplink': 4096,
+    };
+    await tester.pump(const Duration(seconds: 2));
+    expect(provider.status, VpnConnectionStatus.connected);
+    expect(provider.connectionDuration.inSeconds, 125);
+    expect(provider.dataUsage, '↓ 8.0 KB  ↑ 4.0 KB');
+    expectNoConnectionMutation();
+    provider.dispose();
+    final reads = stateCalls.length;
+    await tester.pump(const Duration(seconds: 10));
+    expect(stateCalls, hasLength(reads));
   });
 
   testWidgets(

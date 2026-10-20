@@ -408,6 +408,11 @@ class SlowDnsVpnService : VpnService() {
         fun disconnect() { instance?.let { stop(it.applicationContext) } }
         fun isRunning(): Boolean = instance?.session != null
         fun isReconnecting(): Boolean = instance?.reconnecting == true
+        @Synchronized fun traffic(): LongArray {
+            val owner = instance ?: return longArrayOf(0L, 0L)
+            val current = owner.session ?: return longArrayOf(0L, 0L)
+            return owner.trafficCounters(current) ?: longArrayOf(current.totalUplink, current.totalDownlink)
+        }
         fun status(): Map<String, Any> = state.toMap()
     }
 }
