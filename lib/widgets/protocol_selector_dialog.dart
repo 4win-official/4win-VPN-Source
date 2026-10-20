@@ -39,6 +39,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
     required VoidCallback onTap,
     required bool isDark,
     required String tooltip,
+    bool outlined = false,
     Color? color,
   }) {
     return Tooltip(
@@ -46,12 +47,31 @@ class ProtocolSelectorDialog extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(30),
-        child: Padding(
-          padding: const EdgeInsets.all(11),
-          child: Icon(
-            Icons.settings_outlined,
-            size: 22,
-            color: color ?? (isDark ? Colors.white54 : Colors.black54),
+        child: Ink(
+          key: outlined
+              ? const ValueKey('protocol-general-settings-ring')
+              : null,
+          decoration: outlined
+              ? BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.black.withValues(alpha: 0.035),
+                  border: Border.all(
+                    width: 1.25,
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.72)
+                        : const Color(0xFF465457).withValues(alpha: 0.72),
+                  ),
+                )
+              : null,
+          child: Padding(
+            padding: EdgeInsets.all(outlined ? 13 : 11),
+            child: Icon(
+              Icons.settings_outlined,
+              size: 22,
+              color: color ?? (isDark ? Colors.white54 : Colors.black54),
+            ),
           ),
         ),
       ),
@@ -241,6 +261,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                           context,
                           isDark: isDark,
                           tooltip: 'General settings (all protocols)',
+                          outlined: true,
                           color: isDark ? Colors.white : Colors.black87,
                           onTap: () => _openGlobalSettings(context),
                         ),
@@ -265,94 +286,104 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         radius: const Radius.circular(2),
                         child: SingleChildScrollView(
                           physics: const BouncingScrollPhysics(),
-                          child: Column(
-                            children: [
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'mix',
-                                title: 'Mix',
-                                subtitle: 'Ordered, real multi-hop strategies',
-                                icon: Icons.account_tree,
-                              ),
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'xray',
-                                title: 'Xray',
-                                subtitle: 'Real Xray core + TLS fragment',
-                                icon: Icons.rocket_launch,
+                          clipBehavior: Clip.hardEdge,
+                          // Ink paints on its nearest Material. Keep that
+                          // Material inside the scrolling/clipped subtree so
+                          // row backgrounds and labels share the same viewport.
+                          child: Material(
+                            key: const ValueKey('protocol-scroll-material'),
+                            type: MaterialType.transparency,
+                            child: Column(
+                              children: [
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'mix',
+                                  title: 'Mix',
+                                  subtitle:
+                                      'Ordered, real multi-hop strategies',
+                                  icon: Icons.account_tree,
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'xray',
+                                  title: 'Xray',
+                                  subtitle: 'Real Xray core + TLS fragment',
+                                  icon: Icons.rocket_launch,
 
-                                badge: 'Default',
-                              ),
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'psiphon',
-                                title: 'Psiphon',
-                                subtitle: 'Automatic server selection',
-                                icon: Icons.public,
-                              ),
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'warp',
-                                title: 'WARP',
-                                subtitle: 'Cloudflare WireGuard tunnel',
-                                icon: Icons.cloud_done,
-                              ),
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'openvpn',
-                                title: 'OpenVPN',
-                                subtitle: 'Custom config support',
-                                icon: Icons.shield,
-                              ),
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'sstp',
-                                title: 'SSTP',
-                                subtitle: 'Automatic server selection',
-                                icon: Icons.vpn_key,
-                              ),
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'direct_dns',
-                                title: 'DNS changer',
-                                subtitle: 'Connect via DNS servers',
-                                icon: Icons.dns,
-                              ),
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'proxy',
-                                title: 'Proxy',
-                                subtitle: 'SOCKS4 / SOCKS5 / HTTP proxy',
-                                icon: Icons.swap_horiz,
-                              ),
-                              _protocolTile(
-                                context,
-                                provider: vpnProvider,
-                                isDark: isDark,
-                                protocol: 'slowdns',
-                                title: 'Slow DNS',
-                                subtitle: 'DNS Tunneling for heavy censorship',
-                                icon: Icons.cloud_queue,
+                                  badge: 'Default',
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'psiphon',
+                                  title: 'Psiphon',
+                                  subtitle: 'Automatic server selection',
+                                  icon: Icons.public,
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'warp',
+                                  title: 'WARP',
+                                  subtitle: 'Cloudflare WireGuard tunnel',
+                                  icon: Icons.cloud_done,
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'openvpn',
+                                  title: 'OpenVPN',
+                                  subtitle: 'Custom config support',
+                                  icon: Icons.shield,
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'sstp',
+                                  title: 'SSTP',
+                                  subtitle: 'Automatic server selection',
+                                  icon: Icons.vpn_key,
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'direct_dns',
+                                  title: 'DNS changer',
+                                  subtitle: 'Connect via DNS servers',
+                                  icon: Icons.dns,
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'proxy',
+                                  title: 'Proxy',
+                                  subtitle: 'SOCKS4 / SOCKS5 / HTTP proxy',
+                                  icon: Icons.swap_horiz,
+                                ),
+                                _protocolTile(
+                                  context,
+                                  provider: vpnProvider,
+                                  isDark: isDark,
+                                  protocol: 'slowdns',
+                                  title: 'Slow DNS',
+                                  subtitle:
+                                      'DNS Tunneling for heavy censorship',
+                                  icon: Icons.cloud_queue,
 
-                                badge: 'Beta',
-                              ),
-                            ],
+                                  badge: 'Beta',
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
