@@ -41,7 +41,9 @@ class ThemeSelectionScreen extends StatelessWidget {
                 // ── Day / Night mode switch ──────────────────────────────
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 8),
+                    horizontal: 20,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.05)
@@ -90,8 +92,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                                   : 'Switch between light and dark',
                               style: TextStyle(
                                 fontSize: 13,
-                                color:
-                                    isDark ? Colors.white54 : Colors.black54,
+                                color: isDark ? Colors.white54 : Colors.black54,
                               ),
                             ),
                           ],
@@ -116,8 +117,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                   description: 'Use light/dark mode',
                   icon: Icons.brightness_auto,
                   color: Colors.grey,
-                  isSelected:
-                      themeProvider.selectedTheme == AppTheme.system,
+                  isSelected: themeProvider.selectedTheme == AppTheme.system,
                   onTap: () => themeProvider.setTheme(AppTheme.system),
                   // Gear -> dedicated default-theme settings (background picker).
                   onSettings: () => Navigator.push(
@@ -133,14 +133,12 @@ class ThemeSelectionScreen extends StatelessWidget {
                 // ── Liquid Glass (highlighted, new premium theme) ──────────
                 _ThemeCard(
                   title: 'Liquid Glass 🫧',
-                  description:
-                      'Modern frosted-glass look (Light + Dark)',
+                  description: 'Modern frosted-glass look (Light + Dark)',
                   icon: Icons.blur_on,
                   color: const Color(0xFF5B8CFF),
                   isSelected:
                       themeProvider.selectedTheme == AppTheme.liquidGlass,
-                  onTap: () =>
-                      themeProvider.setTheme(AppTheme.liquidGlass),
+                  onTap: () => themeProvider.setTheme(AppTheme.liquidGlass),
                 ),
 
                 const SizedBox(height: 16),
@@ -170,17 +168,6 @@ class ThemeSelectionScreen extends StatelessWidget {
 
                 const SizedBox(height: 16),
 
-                _ThemeCard(
-                  title: 'Crying',
-                  description: 'Little tears, soft comfort (Light + Dark)',
-                  icon: Icons.sentiment_dissatisfied_rounded,
-                  color: isDark
-                      ? const Color(0xFFB9AEFF)
-                      : const Color(0xFF7863B5),
-                  isSelected: themeProvider.selectedTheme == AppTheme.crying,
-                  onTap: () => themeProvider.setTheme(AppTheme.crying),
-                ),
-
                 const SizedBox(height: 24),
 
                 _ThemeCard(
@@ -204,10 +191,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                   isDark: isDark,
                 ),
                 const SizedBox(height: 12),
-                _SeasonalGroup(
-                  isDark: isDark,
-                  themeProvider: themeProvider,
-                ),
+                _SeasonalGroup(isDark: isDark, themeProvider: themeProvider),
 
                 const SizedBox(height: 24),
 
@@ -301,10 +285,7 @@ class _SeasonalGroup extends StatelessWidget {
   final bool isDark;
   final ThemeProvider themeProvider;
 
-  const _SeasonalGroup({
-    required this.isDark,
-    required this.themeProvider,
-  });
+  const _SeasonalGroup({required this.isDark, required this.themeProvider});
 
   @override
   Widget build(BuildContext context) {
@@ -315,9 +296,7 @@ class _SeasonalGroup extends StatelessWidget {
             ? Colors.white.withValues(alpha: 0.03)
             : Colors.black.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? Colors.white12 : Colors.black12,
-        ),
+        border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
       ),
       child: Column(
         children: [
@@ -425,11 +404,7 @@ class _ThemeCard extends StatelessWidget {
                   color: color.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(
-                  icon,
-                  color: color,
-                  size: 28,
-                ),
+                child: Icon(icon, color: color, size: 28),
               ),
 
               const SizedBox(width: 16),
@@ -482,12 +457,7 @@ class _ThemeCard extends StatelessWidget {
                 ),
 
               // چک مارک
-              if (isSelected)
-                Icon(
-                  Icons.check_circle,
-                  color: color,
-                  size: 28,
-                ),
+              if (isSelected) Icon(Icons.check_circle, color: color, size: 28),
             ],
           ),
         ),

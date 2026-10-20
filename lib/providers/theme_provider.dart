@@ -46,8 +46,13 @@ class ThemeProvider with ChangeNotifier {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     _isDarkMode = prefs.getBool(_darkModeKey) ?? false;
-    final themeIndex = prefs.getInt(_themeKey) ?? 0;
-    _selectedTheme = AppTheme.values[themeIndex];
+    final themeIndex = prefs.getInt(_themeKey) ?? AppTheme.system.index;
+    _selectedTheme = _themeFromPersistedIndex(themeIndex);
+    // Crying was removed from the picker; old saved values safely fall back to
+    // System Default and are rewritten so the migration is one-time.
+    if (themeIndex != _selectedTheme.index) {
+      await prefs.setInt(_themeKey, _selectedTheme.index);
+    }
     _customBgLightPath = prefs.getString(_customBgLightKey);
     _customBgDarkPath = prefs.getString(_customBgDarkKey);
     notifyListeners();
@@ -91,10 +96,19 @@ class ThemeProvider with ChangeNotifier {
   bool get isModeLocked =>
       _selectedTheme == AppTheme.snow || _selectedTheme == AppTheme.rain;
 
+  static AppTheme _themeFromPersistedIndex(int index) {
+    if (index < 0 || index >= AppTheme.values.length) {
+      return AppTheme.system;
+    }
+    final theme = AppTheme.values[index];
+    return theme == AppTheme.crying ? AppTheme.system : theme;
+  }
+
   Future<void> setTheme(AppTheme theme) async {
-    _selectedTheme = theme;
+    final normalizedTheme = theme == AppTheme.crying ? AppTheme.system : theme;
+    _selectedTheme = normalizedTheme;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_themeKey, theme.index);
+    await prefs.setInt(_themeKey, normalizedTheme.index);
 
     // تم برفی: دارک مود فعال
     if (theme == AppTheme.snow) {
@@ -133,7 +147,7 @@ class ThemeProvider with ChangeNotifier {
       case AppTheme.liquidGlass:
         return const Color(0xFF5B8CFF);
       case AppTheme.crying:
-        return _isDarkMode ? const Color(0xFFB9AEFF) : const Color(0xFF7863B5);
+        return const Color(0xFF4CAF50);
       case AppTheme.cat:
         return _isDarkMode ? const Color(0xFFAFD5C3) : const Color(0xFFAC6549);
       case AppTheme.pixel:
@@ -150,14 +164,10 @@ class ThemeProvider with ChangeNotifier {
     useMaterial3: true,
     scaffoldBackgroundColor: _selectedTheme == AppTheme.cat
         ? const Color(0xFFFFF8EE)
-        : _selectedTheme == AppTheme.crying
-        ? const Color(0xFFFFF6FB)
         : Colors.white,
     appBarTheme: AppBarTheme(
       backgroundColor: _selectedTheme == AppTheme.cat
           ? const Color(0xFFFFF8EE)
-          : _selectedTheme == AppTheme.crying
-          ? const Color(0xFFFFF6FB)
           : Colors.white,
       foregroundColor: Colors.black87,
       elevation: 0,
@@ -172,14 +182,10 @@ class ThemeProvider with ChangeNotifier {
     useMaterial3: true,
     scaffoldBackgroundColor: _selectedTheme == AppTheme.cat
         ? const Color(0xFF15252B)
-        : _selectedTheme == AppTheme.crying
-        ? const Color(0xFF17172F)
         : const Color(0xFF121212),
     appBarTheme: AppBarTheme(
       backgroundColor: _selectedTheme == AppTheme.cat
           ? const Color(0xFF15252B)
-          : _selectedTheme == AppTheme.crying
-          ? const Color(0xFF17172F)
           : const Color(0xFF1E1E1E),
       foregroundColor: Colors.white,
       elevation: 0,

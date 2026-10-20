@@ -15,7 +15,7 @@ void main() {
 
   for (final size in [const Size(320, 640), const Size(390, 844)]) {
     testWidgets(
-      'capsule opens selector without a duplicate protocol pill at $size',
+      'labeled capsule opens selector without a duplicate protocol pill at $size',
       (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
@@ -28,6 +28,14 @@ void main() {
         final entry = find.byTooltip('Select protocol');
         expect(entry, findsOneWidget);
         expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
+        expect(
+          tester
+              .widget<Text>(
+                find.byKey(const ValueKey('selected-protocol-label')),
+              )
+              .data,
+          'Xray',
+        );
         expect(tester.getSize(entry).width, greaterThanOrEqualTo(48));
         expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
         final capsule = tester.widget<Container>(

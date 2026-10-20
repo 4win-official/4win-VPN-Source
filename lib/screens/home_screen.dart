@@ -16,7 +16,6 @@ import '../widgets/rain_animation.dart';
 import '../widgets/rain_button_surface.dart';
 import '../widgets/autumn_animation.dart';
 import '../widgets/day_night_animation.dart';
-import '../widgets/crying_scene.dart';
 import '../widgets/cat_scene.dart';
 import '../widgets/heart_burst.dart';
 import '../widgets/protocol_selector_dialog.dart';
@@ -215,9 +214,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
     final isRainTheme = themeProvider.selectedTheme == AppTheme.rain;
     final isDayNightTheme = themeProvider.selectedTheme == AppTheme.summer;
-    final isCryingTheme = themeProvider.selectedTheme == AppTheme.crying;
     final isCatTheme = themeProvider.selectedTheme == AppTheme.cat;
-    final isMascotTheme = isCryingTheme || isCatTheme;
+    final isMascotTheme = isCatTheme;
     final isAutumnTheme = themeProvider.selectedTheme == AppTheme.autumn;
     final isLiquidGlassTheme =
         themeProvider.selectedTheme == AppTheme.liquidGlass;
@@ -243,10 +241,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       bgColor = isDark ? const Color(0xFF15252B) : const Color(0xFFFFF8EE);
       iconColor = isDark ? const Color(0xFFAFD5C3) : const Color(0xFFAC6549);
       textColor = isDark ? const Color(0xFFE3F1E9) : const Color(0xFF684735);
-    } else if (isCryingTheme) {
-      bgColor = isDark ? const Color(0xFF17172F) : const Color(0xFFFFF6FB);
-      iconColor = isDark ? const Color(0xFFC9BFFF) : const Color(0xFF7360A4);
-      textColor = isDark ? const Color(0xFFF1EBFF) : const Color(0xFF514371);
     } else if (isAutumnTheme) {
       bgColor = isDark
           ? const Color(0xFF20140B) // قهوه‌ای خیلی تیره
@@ -441,8 +435,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 if (isCatTheme)
                   Positioned.fill(child: CatScene(isDark: isDark)),
-                if (isCryingTheme)
-                  Positioned.fill(child: CryingScene(isDark: isDark)),
                 // انیمیشن برف (فقط در تم برفی) — RepaintBoundary keeps the
                 // continuous animation from repainting the rest of the tree.
                 if (isSnowTheme)
@@ -502,707 +494,947 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ),
 
-                // محتوای اصلی
-                Column(
-                  children: [
-                    Expanded(
-                      child: Align(
-                        // Center horizontally, but bias vertically slightly
-                        // BELOW center so the power button sits centered and a
-                        // touch lower, as requested.
-                        alignment: isMascotTheme
-                            ? const Alignment(0.0, 0.5)
-                            : const Alignment(0.0, 0.15),
-                        child: Consumer<VpnProvider>(
-                          builder: (context, provider, _) {
-                            // Show loading when servers are being fetched on startup
-                            if (provider.isLoadingServers &&
-                                provider.servers.isEmpty) {
-                              return Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const FourWinLoader(),
-                                  const SizedBox(height: 24),
-                                  Text(
-                                    'Loading servers...',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: isDark
-                                          ? Colors.white70
-                                          : Colors.black54,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-
-                            // Standard centered layout:
-                            //  - The power button is the fixed visual anchor and sits
-                            //    in the true center of the screen (slightly below via
-                            //    the Stack alignment used by the caller).
-                            //  - Protocol selector + status text sit in a fixed-height
-                            //    zone ABOVE the button.
-                            //  - Stats / errors sit in a fixed-height zone BELOW the
-                            //    button. Because both zones have fixed heights, the
-                            //    button never moves when text appears or disappears.
-                            return Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // ===== TOP ZONE (fixed height): protocol + status =====
-                                SizedBox(
-                                  // Keep the selector/status lane proportional on
-                                  // short phones. The lower controls are a separate,
-                                  // constant viewport, so protocol content cannot
-                                  // move the power rect.
-                                  height:
-                                      MediaQuery.sizeOf(context).height >= 720
-                                      ? 150
-                                      : 100,
-                                  child: Column(
-                                    mainAxisAlignment: isMascotTheme
-                                        ? MainAxisAlignment.start
-                                        : MainAxisAlignment.end,
+                // The connection anchor uses the entire safe viewport, not the
+                // remaining space above protocol-specific server controls.
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final laneHeight = constraints.maxHeight >= 720
+                        ? 120.0
+                        : 108.0;
+                    final controlsHeight = (constraints.maxHeight * .20).clamp(
+                      96.0,
+                      180.0,
+                    );
+                    final statsHeight =
+                        (constraints.maxHeight / 2 - 100 - controlsHeight - 20)
+                            .clamp(0.0, laneHeight);
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Positioned.fill(
+                          child: Align(
+                            alignment: Alignment.center,
+                            child: Consumer<VpnProvider>(
+                              builder: (context, provider, _) {
+                                // Show loading when servers are being fetched on startup
+                                if (provider.isLoadingServers &&
+                                    provider.servers.isEmpty) {
+                                  return Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      // Keep a fixed name lane for the mascot themes.
-                                      if (isMascotTheme &&
-                                          MediaQuery.sizeOf(context).height >=
-                                              720)
-                                        const SizedBox(height: 50),
-                                      // Keep the selector reachable in a compact
-                                      // capsule, without repeating the selected
-                                      // protocol name in a second pill.
-                                      Tooltip(
-                                        message: 'Select protocol',
-                                        child: Semantics(
-                                          button: true,
-                                          label: 'Select protocol',
-                                          child: Material(
-                                            color: Colors.transparent,
-                                            child: InkWell(
-                                              borderRadius:
-                                                  BorderRadius.circular(24),
-                                              onTap: () {
-                                                showDialog(
-                                                  context: context,
-                                                  barrierColor: Colors.black
-                                                      .withValues(
-                                                        alpha: isDark
-                                                            ? 0.22
-                                                            : 0.16,
-                                                      ),
-                                                  builder: (context) =>
-                                                      const ProtocolSelectorDialog(),
-                                                );
-                                              },
-                                              child: Container(
-                                                key: const ValueKey(
-                                                  'protocol-selector-trigger',
-                                                ),
-                                                width: 56,
-                                                height: 48,
-                                                decoration: BoxDecoration(
-                                                  color:
-                                                      (isDark
-                                                              ? Colors.white
-                                                              : Colors.black)
-                                                          .withValues(
-                                                            alpha: .08,
-                                                          ),
-                                                  borderRadius:
-                                                      BorderRadius.circular(24),
-                                                  border: Border.all(
-                                                    color:
-                                                        (isDark
-                                                                ? Colors.white
-                                                                : Colors.black)
-                                                            .withValues(
-                                                              alpha: .18,
-                                                            ),
-                                                  ),
-                                                ),
-                                                child: Icon(
-                                                  Icons.tune_rounded,
-                                                  color: isDark
-                                                      ? Colors.white70
-                                                      : Colors.black54,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      SizedBox(height: isMascotTheme ? 8 : 18),
-
-                                      // Connection Status Text
+                                      const FourWinLoader(),
+                                      const SizedBox(height: 24),
                                       Text(
-                                        _getStatusText(provider.status),
+                                        'Loading servers...',
                                         style: TextStyle(
-                                          fontSize: isMascotTheme ? 14 : 16,
+                                          fontSize: 16,
                                           color: isDark
                                               ? Colors.white70
                                               : Colors.black54,
                                           fontWeight: FontWeight.w500,
                                         ),
                                       ),
-                                      // Active Proxy server name (under the status text).
-                                      if (provider.selectedProtocol ==
-                                              'proxy' &&
-                                          provider.activeProxyServer !=
-                                              null) ...[
-                                        const SizedBox(height: 6),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 24,
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                Icons.swap_horiz,
-                                                size: 15,
-                                                color: isDark
-                                                    ? Colors.white54
-                                                    : Colors.black45,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Flexible(
-                                                child: Text(
-                                                  provider
-                                                          .activeProxyServer!
-                                                          .remark
-                                                          .isEmpty
-                                                      ? provider
-                                                            .activeProxyServer!
-                                                            .address
-                                                      : provider
-                                                            .activeProxyServer!
-                                                            .remark,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  textAlign: TextAlign.center,
-                                                  style: TextStyle(
-                                                    fontSize: isMascotTheme
-                                                        ? 12
-                                                        : 13,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: isDark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                      // Active Xray config name (under the status text).
-                                      if (provider.selectedProtocol == 'xray' &&
-                                          provider.activeXrayServer !=
-                                              null) ...[
-                                        const SizedBox(height: 6),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 24,
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                Icons.dns,
-                                                size: 15,
-                                                color: isDark
-                                                    ? Colors.white54
-                                                    : Colors.black45,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Flexible(
-                                                child: Text(
-                                                  provider
-                                                          .activeXrayServer!
-                                                          .remark
-                                                          .isEmpty
-                                                      ? provider
-                                                            .activeXrayServer!
-                                                            .address
-                                                      : provider
-                                                            .activeXrayServer!
-                                                            .remark,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  textAlign: TextAlign.center,
-                                                  style: TextStyle(
-                                                    fontSize: isMascotTheme
-                                                        ? 12
-                                                        : 13,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: isDark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
                                     ],
-                                  ),
-                                ),
+                                  );
+                                }
 
-                                // ===== CENTER: Connect Button (fixed, always centered) =====
-                                Stack(
-                                  alignment: Alignment.center,
-                                  clipBehavior: Clip.none,
+                                // Standard centered layout:
+                                //  - The power button is the fixed visual anchor and sits
+                                //    in the true center of the safe viewport.
+                                //  - Protocol selector + status text sit in a fixed-height
+                                //    zone ABOVE the button.
+                                //  - Stats / errors sit in a fixed-height zone BELOW the
+                                //    button. Because both zones have fixed heights, the
+                                //    button never moves when text appears or disappears.
+                                return Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    // Pink theme: colourful hearts burst from behind the
-                                    // button on connect, then fade out after a moment.
-                                    if (isPinkTheme)
-                                      HeartBurst(
-                                        trigger: _heartBurstTrigger == 0
-                                            ? null
-                                            : _heartBurstTrigger,
-                                        size: 340,
-                                      ),
-                                    GestureDetector(
-                                      onTap: () =>
-                                          _handleConnectTap(context, provider),
-                                      onLongPress: () =>
-                                          _handleLongPress(context),
-                                      child: KeyedSubtree(
-                                        key: const ValueKey('power-button'),
-                                        child: Container(
-                                          key: _powerButtonKey,
-                                          width: 200,
-                                          height: 200,
-                                          decoration: BoxDecoration(
-                                            // تم پیکسلی: مربع با گوشه‌های تیز
-                                            // تم عادی: دایره
-                                            shape: isPixelTheme
-                                                ? BoxShape.rectangle
-                                                : BoxShape.circle,
-                                            borderRadius: isPixelTheme
-                                                ? BorderRadius.zero
-                                                : null,
-                                            color: _getButtonColor(
-                                              provider.status,
-                                              isDark,
-                                            ),
-                                            gradient: isMascotTheme
-                                                ? LinearGradient(
-                                                    begin: Alignment.topLeft,
-                                                    end: Alignment.bottomRight,
-                                                    colors: [
-                                                      Color.lerp(
-                                                        _getButtonColor(
-                                                          provider.status,
-                                                          isDark,
-                                                        ),
-                                                        Colors.white,
-                                                        .18,
-                                                      )!,
-                                                      _getButtonColor(
-                                                        provider.status,
-                                                        isDark,
-                                                      ),
-                                                    ],
-                                                  )
-                                                : null,
-                                            border: isMascotTheme
-                                                ? Border.all(
-                                                    color: isCatTheme
-                                                        ? (isDark
-                                                              ? const Color(
-                                                                  0xFFCDE8DC,
-                                                                )
-                                                              : const Color(
-                                                                  0xFFFFE6D3,
-                                                                ))
-                                                        : (isDark
-                                                              ? const Color(
-                                                                  0xFFE1DAFF,
-                                                                )
-                                                              : const Color(
-                                                                  0xFFEEE7FF,
-                                                                )),
-                                                    width: 3,
-                                                  )
-                                                : isPixelTheme
-                                                ? Border.all(
-                                                    color: Colors.black
-                                                        .withValues(alpha: 0.3),
-                                                    width: 4,
-                                                  )
-                                                : null,
-                                            boxShadow: isPixelTheme
-                                                ? [
-                                                    // سایه پیکسلی (بدون blur)
-                                                    BoxShadow(
-                                                      offset: const Offset(
-                                                        8,
-                                                        8,
-                                                      ),
-                                                      blurRadius: 0,
-                                                      color: Colors.black
+                                    // ===== TOP ZONE (fixed height): protocol + status =====
+                                    SizedBox(
+                                      height: laneHeight,
+                                      child: Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.start,
+                                        children: [
+                                          // A fixed-size capsule keeps protocol changes
+                                          // from shifting the surrounding controls.
+                                          Tooltip(
+                                            message: 'Select protocol',
+                                            child: Semantics(
+                                              button: true,
+                                              label:
+                                                  'Select protocol, current: ${_protocolName(provider.selectedProtocol)}',
+                                              child: Material(
+                                                color: Colors.transparent,
+                                                child: InkWell(
+                                                  borderRadius:
+                                                      BorderRadius.circular(24),
+                                                  onTap: () {
+                                                    showDialog(
+                                                      context: context,
+                                                      barrierColor: Colors.black
                                                           .withValues(
-                                                            alpha: 0.5,
+                                                            alpha: isDark
+                                                                ? 0.22
+                                                                : 0.16,
                                                           ),
+                                                      builder: (context) =>
+                                                          const ProtocolSelectorDialog(),
+                                                    );
+                                                  },
+                                                  child: Container(
+                                                    key: const ValueKey(
+                                                      'protocol-selector-trigger',
                                                     ),
-                                                  ]
-                                                : isSnowTheme
-                                                ? const [
-                                                    BoxShadow(
-                                                      color: Color(0x407AC9E8),
-                                                      blurRadius: 32,
-                                                      spreadRadius: 3,
-                                                    ),
-                                                    BoxShadow(
-                                                      color: Color(0x1FBAEFFF),
-                                                      blurRadius: 64,
-                                                      spreadRadius: 8,
-                                                    ),
-                                                  ]
-                                                : isMascotTheme
-                                                ? [
-                                                    BoxShadow(
+                                                    width: 176,
+                                                    height: 48,
+                                                    decoration: BoxDecoration(
                                                       color:
+                                                          (isDark
+                                                                  ? Colors.white
+                                                                  : Colors
+                                                                        .black)
+                                                              .withValues(
+                                                                alpha: .08,
+                                                              ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            24,
+                                                          ),
+                                                      border: Border.all(
+                                                        color:
+                                                            (isDark
+                                                                    ? Colors
+                                                                          .white
+                                                                    : Colors
+                                                                          .black)
+                                                                .withValues(
+                                                                  alpha: .18,
+                                                                ),
+                                                      ),
+                                                    ),
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 14,
+                                                          ),
+                                                      child: Row(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .center,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.tune_rounded,
+                                                            size: 20,
+                                                            color: iconColor,
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 8,
+                                                          ),
+                                                          Flexible(
+                                                            child: Text(
+                                                              _protocolName(
+                                                                provider
+                                                                    .selectedProtocol,
+                                                              ),
+                                                              key: const ValueKey(
+                                                                'selected-protocol-label',
+                                                              ),
+                                                              maxLines: 1,
+                                                              overflow:
+                                                                  TextOverflow
+                                                                      .ellipsis,
+                                                              style: TextStyle(
+                                                                color:
+                                                                    textColor,
+                                                                fontSize: 14,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+
+                                          // Connection Status Text
+                                          SizedBox(
+                                            height: 24,
+                                            child: FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: Text(
+                                                _getStatusText(provider.status),
+                                                style: TextStyle(
+                                                  fontSize: isMascotTheme
+                                                      ? 14
+                                                      : 16,
+                                                  color: isDark
+                                                      ? Colors.white70
+                                                      : Colors.black54,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          // Reserve the server-name lane even with no
+                                          // active server, keeping status/selector fixed.
+                                          SizedBox(
+                                            height: 28,
+                                            child: Column(
+                                              children: [
+                                                // Active Proxy server name (under the status text).
+                                                if (provider.selectedProtocol ==
+                                                        'proxy' &&
+                                                    provider.activeProxyServer !=
+                                                        null) ...[
+                                                  const SizedBox(height: 6),
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 24,
+                                                        ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons.swap_horiz,
+                                                          size: 15,
+                                                          color: isDark
+                                                              ? Colors.white54
+                                                              : Colors.black45,
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 6,
+                                                        ),
+                                                        Flexible(
+                                                          child: Text(
+                                                            provider
+                                                                    .activeProxyServer!
+                                                                    .remark
+                                                                    .isEmpty
+                                                                ? provider
+                                                                      .activeProxyServer!
+                                                                      .address
+                                                                : provider
+                                                                      .activeProxyServer!
+                                                                      .remark,
+                                                            maxLines: 1,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            textAlign: TextAlign
+                                                                .center,
+                                                            style: TextStyle(
+                                                              fontSize:
+                                                                  isMascotTheme
+                                                                  ? 12
+                                                                  : 13,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              color: isDark
+                                                                  ? Colors.white
+                                                                  : Colors
+                                                                        .black87,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                                // Active Xray config name (under the status text).
+                                                if (provider.selectedProtocol ==
+                                                        'xray' &&
+                                                    provider.activeXrayServer !=
+                                                        null) ...[
+                                                  const SizedBox(height: 6),
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 24,
+                                                        ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons.dns,
+                                                          size: 15,
+                                                          color: isDark
+                                                              ? Colors.white54
+                                                              : Colors.black45,
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 6,
+                                                        ),
+                                                        Flexible(
+                                                          child: Text(
+                                                            provider
+                                                                    .activeXrayServer!
+                                                                    .remark
+                                                                    .isEmpty
+                                                                ? provider
+                                                                      .activeXrayServer!
+                                                                      .address
+                                                                : provider
+                                                                      .activeXrayServer!
+                                                                      .remark,
+                                                            maxLines: 1,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            textAlign: TextAlign
+                                                                .center,
+                                                            style: TextStyle(
+                                                              fontSize:
+                                                                  isMascotTheme
+                                                                  ? 12
+                                                                  : 13,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              color: isDark
+                                                                  ? Colors.white
+                                                                  : Colors
+                                                                        .black87,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+
+                                    // ===== CENTER: Connect Button (fixed, always centered) =====
+                                    Stack(
+                                      alignment: Alignment.center,
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        // Pink theme: colourful hearts burst from behind the
+                                        // button on connect, then fade out after a moment.
+                                        if (isPinkTheme)
+                                          HeartBurst(
+                                            trigger: _heartBurstTrigger == 0
+                                                ? null
+                                                : _heartBurstTrigger,
+                                            size: 340,
+                                          ),
+                                        GestureDetector(
+                                          onTap: () => _handleConnectTap(
+                                            context,
+                                            provider,
+                                          ),
+                                          onLongPress: () =>
+                                              _handleLongPress(context),
+                                          child: KeyedSubtree(
+                                            key: const ValueKey('power-button'),
+                                            child: Container(
+                                              key: _powerButtonKey,
+                                              width: 200,
+                                              height: 200,
+                                              decoration: BoxDecoration(
+                                                // تم پیکسلی: مربع با گوشه‌های تیز
+                                                // تم عادی: دایره
+                                                shape: isPixelTheme
+                                                    ? BoxShape.rectangle
+                                                    : BoxShape.circle,
+                                                borderRadius: isPixelTheme
+                                                    ? BorderRadius.zero
+                                                    : null,
+                                                color: _getButtonColor(
+                                                  provider.status,
+                                                  isDark,
+                                                ),
+                                                gradient: isMascotTheme
+                                                    ? LinearGradient(
+                                                        begin:
+                                                            Alignment.topLeft,
+                                                        end: Alignment
+                                                            .bottomRight,
+                                                        colors: [
+                                                          Color.lerp(
+                                                            _getButtonColor(
+                                                              provider.status,
+                                                              isDark,
+                                                            ),
+                                                            Colors.white,
+                                                            .18,
+                                                          )!,
                                                           _getButtonColor(
                                                             provider.status,
                                                             isDark,
-                                                          ).withValues(
-                                                            alpha: isDark
-                                                                ? .24
-                                                                : .18,
                                                           ),
-                                                      blurRadius: 36,
-                                                      spreadRadius: 5,
-                                                      offset: const Offset(
-                                                        0,
-                                                        8,
-                                                      ),
-                                                    ),
-                                                  ]
-                                                : isDark
-                                                ? [
-                                                    // نئون گلو در dark mode
-                                                    BoxShadow(
-                                                      color: _getButtonColor(
-                                                        provider.status,
-                                                        isDark,
-                                                      ).withValues(alpha: 0.6),
-                                                      blurRadius: 40,
-                                                      spreadRadius: 10,
-                                                    ),
-                                                    BoxShadow(
-                                                      color: _getButtonColor(
-                                                        provider.status,
-                                                        isDark,
-                                                      ).withValues(alpha: 0.4),
-                                                      blurRadius: 80,
-                                                      spreadRadius: 20,
-                                                    ),
-                                                  ]
-                                                : [
-                                                    BoxShadow(
-                                                      color: _getButtonColor(
-                                                        provider.status,
-                                                        isDark,
-                                                      ).withValues(alpha: 0.3),
-                                                      blurRadius: 20,
-                                                      spreadRadius: 5,
-                                                    ),
-                                                  ],
-                                          ),
-                                          child: RainButtonSurface(
-                                            enabled: isRainTheme,
-                                            child: SnowButtonSurface(
-                                              enabled: isSnowTheme,
-                                              tint: _getButtonColor(
-                                                provider.status,
-                                                isDark,
-                                              ),
-                                              child: Center(
-                                                child: provider.isConnecting
-                                                    ? FourWinLoader(
-                                                        color: isDark
-                                                            ? Colors.black87
-                                                            : Colors.white,
-                                                        strokeWidth: 3,
+                                                        ],
                                                       )
-                                                    : Icon(
-                                                        _getButtonIcon(
-                                                          provider.status,
+                                                    : null,
+                                                border: isMascotTheme
+                                                    ? Border.all(
+                                                        color: isCatTheme
+                                                            ? (isDark
+                                                                  ? const Color(
+                                                                      0xFFCDE8DC,
+                                                                    )
+                                                                  : const Color(
+                                                                      0xFFFFE6D3,
+                                                                    ))
+                                                            : (isDark
+                                                                  ? const Color(
+                                                                      0xFFE1DAFF,
+                                                                    )
+                                                                  : const Color(
+                                                                      0xFFEEE7FF,
+                                                                    )),
+                                                        width: 3,
+                                                      )
+                                                    : isPixelTheme
+                                                    ? Border.all(
+                                                        color: Colors.black
+                                                            .withValues(
+                                                              alpha: 0.3,
+                                                            ),
+                                                        width: 4,
+                                                      )
+                                                    : null,
+                                                boxShadow: isPixelTheme
+                                                    ? [
+                                                        // سایه پیکسلی (بدون blur)
+                                                        BoxShadow(
+                                                          offset: const Offset(
+                                                            8,
+                                                            8,
+                                                          ),
+                                                          blurRadius: 0,
+                                                          color: Colors.black
+                                                              .withValues(
+                                                                alpha: 0.5,
+                                                              ),
                                                         ),
-                                                        size: 80,
-                                                        color: isDark
-                                                            ? Colors.black87
-                                                            : Colors.white,
-                                                      ),
+                                                      ]
+                                                    : isSnowTheme
+                                                    ? const [
+                                                        BoxShadow(
+                                                          color: Color(
+                                                            0x407AC9E8,
+                                                          ),
+                                                          blurRadius: 32,
+                                                          spreadRadius: 3,
+                                                        ),
+                                                        BoxShadow(
+                                                          color: Color(
+                                                            0x1FBAEFFF,
+                                                          ),
+                                                          blurRadius: 64,
+                                                          spreadRadius: 8,
+                                                        ),
+                                                      ]
+                                                    : isMascotTheme
+                                                    ? [
+                                                        BoxShadow(
+                                                          color:
+                                                              _getButtonColor(
+                                                                provider.status,
+                                                                isDark,
+                                                              ).withValues(
+                                                                alpha: isDark
+                                                                    ? .24
+                                                                    : .18,
+                                                              ),
+                                                          blurRadius: 36,
+                                                          spreadRadius: 5,
+                                                          offset: const Offset(
+                                                            0,
+                                                            8,
+                                                          ),
+                                                        ),
+                                                      ]
+                                                    : isDark
+                                                    ? [
+                                                        // نئون گلو در dark mode
+                                                        BoxShadow(
+                                                          color:
+                                                              _getButtonColor(
+                                                                provider.status,
+                                                                isDark,
+                                                              ).withValues(
+                                                                alpha: 0.6,
+                                                              ),
+                                                          blurRadius: 40,
+                                                          spreadRadius: 10,
+                                                        ),
+                                                        BoxShadow(
+                                                          color:
+                                                              _getButtonColor(
+                                                                provider.status,
+                                                                isDark,
+                                                              ).withValues(
+                                                                alpha: 0.4,
+                                                              ),
+                                                          blurRadius: 80,
+                                                          spreadRadius: 20,
+                                                        ),
+                                                      ]
+                                                    : [
+                                                        BoxShadow(
+                                                          color:
+                                                              _getButtonColor(
+                                                                provider.status,
+                                                                isDark,
+                                                              ).withValues(
+                                                                alpha: 0.3,
+                                                              ),
+                                                          blurRadius: 20,
+                                                          spreadRadius: 5,
+                                                        ),
+                                                      ],
+                                              ),
+                                              child: RainButtonSurface(
+                                                enabled: isRainTheme,
+                                                child: SnowButtonSurface(
+                                                  enabled: isSnowTheme,
+                                                  tint: _getButtonColor(
+                                                    provider.status,
+                                                    isDark,
+                                                  ),
+                                                  child: Center(
+                                                    child: provider.isConnecting
+                                                        ? FourWinLoader(
+                                                            color: isDark
+                                                                ? Colors.black87
+                                                                : Colors.white,
+                                                            strokeWidth: 3,
+                                                          )
+                                                        : Icon(
+                                                            _getButtonIcon(
+                                                              provider.status,
+                                                            ),
+                                                            size: 80,
+                                                            color: isDark
+                                                                ? Colors.black87
+                                                                : Colors.white,
+                                                          ),
+                                                  ),
+                                                ),
                                               ),
                                             ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                    // ===== BOTTOM ZONE (fixed height): stats / errors =====
+                                    SizedBox(
+                                      height: laneHeight,
+                                      child: Padding(
+                                        padding: EdgeInsets.only(
+                                          bottom: laneHeight - statsHeight,
+                                        ),
+                                        child: SingleChildScrollView(
+                                          key: const ValueKey(
+                                            'home-connection-details',
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              const SizedBox(height: 20),
+                                              // Data Usage Info
+                                              if (provider.isConnected &&
+                                                  (provider.selectedProtocol ==
+                                                          'sstp' ||
+                                                      provider.selectedProtocol ==
+                                                          'direct_dns' ||
+                                                      provider.selectedProtocol ==
+                                                          'xray' ||
+                                                      provider.selectedProtocol ==
+                                                          'proxy' ||
+                                                      provider.selectedProtocol ==
+                                                          'warp' ||
+                                                      provider.selectedProtocol ==
+                                                          'openvpn' ||
+                                                      provider.selectedProtocol ==
+                                                          'psiphon'))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 32,
+                                                      ),
+                                                  child: Text(
+                                                    provider.dataUsage,
+                                                    style: TextStyle(
+                                                      fontSize: 14,
+                                                      color: isDark
+                                                          ? Colors.white70
+                                                          : Colors.black87,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                ),
+                                              // Connection Duration
+                                              if (provider.isConnected &&
+                                                  provider
+                                                          .connectionDuration
+                                                          .inSeconds >
+                                                      0)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 12,
+                                                      ),
+                                                  child: Column(
+                                                    children: [
+                                                      Text(
+                                                        _formatDuration(
+                                                          provider
+                                                              .connectionDuration,
+                                                        ),
+                                                        style: TextStyle(
+                                                          fontSize: 14,
+                                                          color: isDark
+                                                              ? Colors.white54
+                                                              : Colors.black54,
+                                                          fontWeight:
+                                                              FontWeight.w500,
+                                                        ),
+                                                      ),
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets.only(
+                                                              top: 8,
+                                                            ),
+                                                        child:
+                                                            _buildPingIndicator(
+                                                              provider,
+                                                              isDark,
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              // Error Message
+                                              if (provider.errorMessage != null)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 12,
+                                                        left: 32,
+                                                        right: 32,
+                                                      ),
+                                                  child: Text(
+                                                    provider.errorMessage!,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: isDark
+                                                          ? Colors.red[300]!
+                                                          : Colors.red,
+                                                    ),
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                ),
+                                            ],
                                           ),
                                         ),
                                       ),
                                     ),
                                   ],
-                                ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
 
-                                // ===== BOTTOM ZONE (fixed height): stats / errors =====
-                                SizedBox(
-                                  height:
-                                      MediaQuery.sizeOf(context).height >= 720
-                                      ? 150
-                                      : 100,
-                                  child: SingleChildScrollView(
-                                    child: Column(
+                        // Bottom-aligned, bounded and scrollable: diagnostics can
+                        // grow without lifting ordinary server/action buttons.
+                        Positioned(
+                          bottom: 8,
+                          left: 0,
+                          right: 0,
+                          child: ConstrainedBox(
+                            key: const ValueKey('home-bottom-controls-zone'),
+                            constraints: BoxConstraints(
+                              maxHeight: controlsHeight,
+                            ),
+                            child: SingleChildScrollView(
+                              reverse: true,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
+                              child: Consumer<VpnProvider>(
+                                builder: (context, provider, _) {
+                                  if (provider.selectedProtocol == 'mix') {
+                                    return Column(
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        const SizedBox(height: 20),
-                                        // Data Usage Info
-                                        if (provider.isConnected &&
-                                            (provider.selectedProtocol ==
-                                                    'sstp' ||
-                                                provider.selectedProtocol ==
-                                                    'direct_dns' ||
-                                                provider.selectedProtocol ==
-                                                    'xray' ||
-                                                provider.selectedProtocol ==
-                                                    'proxy' ||
-                                                provider.selectedProtocol ==
-                                                    'warp' ||
-                                                provider.selectedProtocol ==
-                                                    'openvpn' ||
-                                                provider.selectedProtocol ==
-                                                    'psiphon'))
-                                          Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 32,
-                                            ),
-                                            child: Text(
-                                              provider.dataUsage,
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                color: isDark
-                                                    ? Colors.white70
-                                                    : Colors.black87,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                              textAlign: TextAlign.center,
-                                            ),
-                                          ),
-                                        // Connection Duration
-                                        if (provider.isConnected &&
+                                        Text(
+                                          provider.selectedMixStrategy?.name ??
+                                              'No strategy selected',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        if (provider.mixDiagnostics != null &&
                                             provider
-                                                    .connectionDuration
-                                                    .inSeconds >
-                                                0)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 12,
-                                            ),
-                                            child: Column(
-                                              children: [
-                                                Text(
-                                                  _formatDuration(
-                                                    provider.connectionDuration,
-                                                  ),
-                                                  style: TextStyle(
-                                                    fontSize: 14,
-                                                    color: isDark
-                                                        ? Colors.white54
-                                                        : Colors.black54,
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                                ),
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                        top: 8,
-                                                      ),
-                                                  child: _buildPingIndicator(
-                                                    provider,
-                                                    isDark,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
+                                                    .mixDiagnostics!
+                                                    .strategyId ==
+                                                provider.selectedMixStrategyId)
+                                          MixChainDiagnostics(
+                                            diagnostics:
+                                                provider.mixDiagnostics!,
                                           ),
-                                        // Error Message
-                                        if (provider.errorMessage != null)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 12,
-                                              left: 32,
-                                              right: 32,
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: OutlinedButton.icon(
+                                            icon: const Icon(
+                                              Icons.account_tree,
                                             ),
-                                            child: Text(
-                                              provider.errorMessage!,
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: isDark
-                                                    ? Colors.red[300]!
-                                                    : Colors.red,
+                                            label: const Text('Strategy'),
+                                            onPressed: () => Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    const MixStrategiesScreen(),
                                               ),
-                                              textAlign: TextAlign.center,
+                                            ),
+                                            style: OutlinedButton.styleFrom(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 16,
+                                                  ),
                                             ),
                                           ),
+                                        ),
                                       ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-
-                    // Server Action Button (Next Server for SSTP, Server List for DNS).
-                    // Keep this zone at a stable height: Psiphon's list status and
-                    // Mix's failure action are both taller than the ordinary button,
-                    // and must not change the center position of the power controls.
-                    SizedBox(
-                      key: const ValueKey('home-bottom-controls-zone'),
-                      // This remains constant across protocols. Contents scroll
-                      // instead of being forced into the viewport: ordinary
-                      // buttons retain intrinsic height while Mix/Psiphon
-                      // diagnostics remain reachable on short screens.
-                      height: MediaQuery.sizeOf(context).height >= 720
-                          ? 216
-                          : 96,
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 12,
-                        ),
-                        child: Consumer<VpnProvider>(
-                          builder: (context, provider, _) {
-                            if (provider.selectedProtocol == 'mix') {
-                              return Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    provider.selectedMixStrategy?.name ??
-                                        'No strategy selected',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  if (provider.mixDiagnostics != null &&
-                                      provider.mixDiagnostics!.strategyId ==
-                                          provider.selectedMixStrategyId)
-                                    MixChainDiagnostics(
-                                      diagnostics: provider.mixDiagnostics!,
-                                    ),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: OutlinedButton.icon(
-                                      icon: const Icon(Icons.account_tree),
-                                      label: const Text('Strategy'),
-                                      onPressed: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              const MixStrategiesScreen(),
+                                    );
+                                  }
+                                  // DNS: Always show "Server List" button
+                                  if (provider.selectedProtocol ==
+                                      'direct_dns') {
+                                    return SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) =>
+                                                  const DnsServersScreen(),
+                                            ),
+                                          );
+                                        },
+                                        icon: Icon(
+                                          Icons.dns,
+                                          color: isDark
+                                              ? Colors.white70
+                                              : Colors.black87,
                                         ),
-                                      ),
-                                      style: OutlinedButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 16,
+                                        label: Text(
+                                          'Server List',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: isDark
+                                                ? Colors.white70
+                                                : Colors.black87,
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-                            // DNS: Always show "Server List" button
-                            if (provider.selectedProtocol == 'direct_dns') {
-                              return SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) =>
-                                            const DnsServersScreen(),
+                                        style: OutlinedButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 16,
+                                          ),
+                                          side: BorderSide(
+                                            color: isDark
+                                                ? Colors.white24
+                                                : Colors.black12,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     );
-                                  },
-                                  icon: Icon(
-                                    Icons.dns,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black87,
-                                  ),
-                                  label: Text(
-                                    'Server List',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: isDark
-                                          ? Colors.white70
-                                          : Colors.black87,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                    ),
-                                    side: BorderSide(
-                                      color: isDark
-                                          ? Colors.white24
-                                          : Colors.black12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }
+                                  }
 
-                            // SSTP: the grouped server list is always available.
-                            if (provider.selectedProtocol == 'sstp') {
-                              final group = provider.selectedSstpGroup;
-                              final server = provider.selectedServer;
-                              final groupNames = provider.sstpGroups.where(
-                                (g) => g.id == group,
-                              );
-                              final groupName = groupNames.isEmpty
-                                  ? '4win Free Servers'
-                                  : groupNames.first.name;
-                              final label = group == null
-                                  ? (server == null
-                                        ? 'Choose an SSTP server'
-                                        : server.fullAddress)
-                                  : server == null
-                                  ? 'Group: $groupName'
-                                  : '$groupName • ${server.fullAddress}';
-                              return Column(
-                                children: [
-                                  Text(
-                                    label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: ElevatedButton.icon(
-                                      onPressed: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              const SstpServersScreen(),
+                                  // SSTP: the grouped server list is always available.
+                                  if (provider.selectedProtocol == 'sstp') {
+                                    final group = provider.selectedSstpGroup;
+                                    final server = provider.selectedServer;
+                                    final groupNames = provider.sstpGroups
+                                        .where((g) => g.id == group);
+                                    final groupName = groupNames.isEmpty
+                                        ? '4win Free Servers'
+                                        : groupNames.first.name;
+                                    final label = group == null
+                                        ? (server == null
+                                              ? 'Choose an SSTP server'
+                                              : server.fullAddress)
+                                        : server == null
+                                        ? 'Group: $groupName'
+                                        : '$groupName • ${server.fullAddress}';
+                                    return Column(
+                                      children: [
+                                        Text(
+                                          label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: ElevatedButton.icon(
+                                            onPressed: () => Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    const SstpServersScreen(),
+                                              ),
+                                            ),
+                                            icon: const Icon(Icons.vpn_key),
+                                            label: const Text(
+                                              'Server List',
+                                              style: TextStyle(fontSize: 16),
+                                            ),
+                                            style: ElevatedButton.styleFrom(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 16,
+                                                  ),
+                                              backgroundColor:
+                                                  Colors.tealAccent.shade700,
+                                              foregroundColor: Colors.white,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  }
+
+                                  // OpenVPN: Always show "OpenVPN Configs" button
+                                  if (provider.selectedProtocol == 'openvpn') {
+                                    return SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) =>
+                                                  const OpenVpnConfigsScreen(),
+                                            ),
+                                          );
+                                        },
+                                        icon: Icon(
+                                          Icons.shield,
+                                          color: isDark
+                                              ? Colors.white70
+                                              : Colors.black87,
+                                        ),
+                                        label: Text(
+                                          'OpenVPN Configs',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: isDark
+                                                ? Colors.white70
+                                                : Colors.black87,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 16,
+                                          ),
+                                          side: BorderSide(
+                                            color: isDark
+                                                ? Colors.white24
+                                                : Colors.black12,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                      icon: const Icon(Icons.vpn_key),
+                                    );
+                                  }
+
+                                  // Slow DNS: Show DNS Scanner and Configs buttons
+                                  if (provider.selectedProtocol == 'slowdns') {
+                                    return Column(
+                                      children: [
+                                        // DNS Scanner button
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: ElevatedButton.icon(
+                                            onPressed: () {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      const SlowDnsConfigsScreen(),
+                                                ),
+                                              );
+                                            },
+                                            icon: const Icon(Icons.radar),
+                                            label: const Text(
+                                              'DNS Scanner & Configs',
+                                              style: TextStyle(fontSize: 16),
+                                            ),
+                                            style: ElevatedButton.styleFrom(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 16,
+                                                  ),
+                                              backgroundColor: Colors.orange,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  }
+
+                                  // Proxy: Always show "Proxy Servers" button (mirrors Xray).
+                                  if (provider.selectedProtocol == 'proxy') {
+                                    final showNext =
+                                        provider.proxyGroupSelected;
+                                    final serverListBtn = ElevatedButton.icon(
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                const ProxyServersScreen(),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.swap_horiz),
                                       label: const Text(
-                                        'Server List',
+                                        'Proxy Servers',
                                         style: TextStyle(fontSize: 16),
                                       ),
                                       style: ElevatedButton.styleFrom(
@@ -1218,351 +1450,252 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-
-                            // OpenVPN: Always show "OpenVPN Configs" button
-                            if (provider.selectedProtocol == 'openvpn') {
-                              return SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) =>
-                                            const OpenVpnConfigsScreen(),
-                                      ),
                                     );
-                                  },
-                                  icon: Icon(
-                                    Icons.shield,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black87,
-                                  ),
-                                  label: Text(
-                                    'OpenVPN Configs',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: isDark
-                                          ? Colors.white70
-                                          : Colors.black87,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                    ),
-                                    side: BorderSide(
-                                      color: isDark
-                                          ? Colors.white24
-                                          : Colors.black12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }
 
-                            // Slow DNS: Show DNS Scanner and Configs buttons
-                            if (provider.selectedProtocol == 'slowdns') {
-                              return Column(
-                                children: [
-                                  // DNS Scanner button
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: ElevatedButton.icon(
-                                      onPressed: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) =>
-                                                const SlowDnsConfigsScreen(),
-                                          ),
-                                        );
-                                      },
-                                      icon: const Icon(Icons.radar),
-                                      label: const Text(
-                                        'DNS Scanner & Configs',
-                                        style: TextStyle(fontSize: 16),
+                                    final nextBtn = OutlinedButton.icon(
+                                      onPressed: provider.isConnecting
+                                          ? null
+                                          : () async {
+                                              await provider
+                                                  .selectNextProxyServer();
+                                              final s =
+                                                  provider.selectedProxyServer;
+                                              if (!context.mounted ||
+                                                  s == null) {
+                                                return;
+                                              }
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    'Next: ${s.remark.isEmpty ? s.address : s.remark}',
+                                                  ),
+                                                  duration: const Duration(
+                                                    seconds: 1,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                      icon: Icon(
+                                        Icons.skip_next,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black87,
                                       ),
-                                      style: ElevatedButton.styleFrom(
+                                      label: Text(
+                                        'Next',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: isDark
+                                              ? Colors.white70
+                                              : Colors.black87,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      style: OutlinedButton.styleFrom(
                                         padding: const EdgeInsets.symmetric(
                                           vertical: 16,
                                         ),
-                                        backgroundColor: Colors.orange,
+                                        side: BorderSide(
+                                          color: isDark
+                                              ? Colors.white24
+                                              : Colors.black12,
+                                        ),
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(
                                             12,
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
+                                    );
 
-                            // Proxy: Always show "Proxy Servers" button (mirrors Xray).
-                            if (provider.selectedProtocol == 'proxy') {
-                              final showNext = provider.proxyGroupSelected;
-                              final serverListBtn = ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const ProxyServersScreen(),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(Icons.swap_horiz),
-                                label: const Text(
-                                  'Proxy Servers',
-                                  style: TextStyle(fontSize: 16),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  backgroundColor: Colors.tealAccent.shade700,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              );
+                                    return Row(
+                                      children: [
+                                        Expanded(
+                                          flex: showNext ? 3 : 1,
+                                          child: serverListBtn,
+                                        ),
+                                        if (showNext) ...[
+                                          const SizedBox(width: 10),
+                                          Expanded(flex: 2, child: nextBtn),
+                                        ],
+                                      ],
+                                    );
+                                  }
 
-                              final nextBtn = OutlinedButton.icon(
-                                onPressed: provider.isConnecting
-                                    ? null
-                                    : () async {
-                                        await provider.selectNextProxyServer();
-                                        final s = provider.selectedProxyServer;
-                                        if (!context.mounted || s == null)
-                                          return;
-                                        ScaffoldMessenger.of(
+                                  // Xray: Always show "Xray Servers" button
+                                  if (provider.selectedProtocol == 'xray') {
+                                    final showNext =
+                                        provider.xrayFreeGroupSelected;
+                                    final serverListBtn = ElevatedButton.icon(
+                                      onPressed: () {
+                                        Navigator.push(
                                           context,
-                                        ).showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              'Next: ${s.remark.isEmpty ? s.address : s.remark}',
-                                            ),
-                                            duration: const Duration(
-                                              seconds: 1,
-                                            ),
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                const XrayServersScreen(),
                                           ),
                                         );
                                       },
-                                icon: Icon(
-                                  Icons.skip_next,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black87,
-                                ),
-                                label: Text(
-                                  'Next',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black87,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  side: BorderSide(
-                                    color: isDark
-                                        ? Colors.white24
-                                        : Colors.black12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              );
-
-                              return Row(
-                                children: [
-                                  Expanded(
-                                    flex: showNext ? 3 : 1,
-                                    child: serverListBtn,
-                                  ),
-                                  if (showNext) ...[
-                                    const SizedBox(width: 10),
-                                    Expanded(flex: 2, child: nextBtn),
-                                  ],
-                                ],
-                              );
-                            }
-
-                            // Xray: Always show "Xray Servers" button
-                            if (provider.selectedProtocol == 'xray') {
-                              final showNext = provider.xrayFreeGroupSelected;
-                              final serverListBtn = ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const XrayServersScreen(),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(Icons.rocket_launch),
-                                label: const Text(
-                                  'Xray Servers',
-                                  style: TextStyle(fontSize: 16),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  backgroundColor: Colors.tealAccent.shade700,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              );
-
-                              final nextBtn = OutlinedButton.icon(
-                                onPressed: provider.isConnecting
-                                    ? null
-                                    : () async {
-                                        await provider.selectNextFreeServer();
-                                        final s = provider.selectedXrayServer;
-                                        if (!context.mounted || s == null)
-                                          return;
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              'Next: ${s.remark.isEmpty ? s.address : s.remark}',
-                                            ),
-                                            duration: const Duration(
-                                              seconds: 1,
-                                            ),
+                                      icon: const Icon(Icons.rocket_launch),
+                                      label: const Text(
+                                        'Xray Servers',
+                                        style: TextStyle(fontSize: 16),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                        ),
+                                        backgroundColor:
+                                            Colors.tealAccent.shade700,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
                                           ),
-                                        );
-                                      },
-                                icon: Icon(
-                                  Icons.skip_next,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black87,
-                                ),
-                                label: Text(
-                                  'Next',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black87,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  side: BorderSide(
-                                    color: isDark
-                                        ? Colors.white24
-                                        : Colors.black12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              );
+                                        ),
+                                      ),
+                                    );
 
-                              // Next Server sits NEXT TO the Server List button, and
-                              // only when a whole group is selected as the target.
-                              return Row(
-                                children: [
-                                  Expanded(
-                                    flex: showNext ? 3 : 1,
-                                    child: serverListBtn,
-                                  ),
-                                  if (showNext) ...[
-                                    const SizedBox(width: 10),
-                                    Expanded(flex: 2, child: nextBtn),
-                                  ],
-                                ],
-                              );
-                            }
-
-                            if (provider.selectedProtocol == 'psiphon') {
-                              return PsiphonServerListStatus(isDark: isDark);
-                            }
-
-                            // WARP: no user-picked server list and no manual "register"
-                            // action — the app registers the Cloudflare identity by
-                            // itself automatically (on first connect, and again by
-                            // itself if a stored identity turns out to be unusable).
-                            // This is a plain read-only status readout showing the
-                            // Cloudflare edge endpoint currently in use, NOT a button.
-                            if (provider.selectedProtocol == 'warp') {
-                              final account = provider.warpAccount;
-                              final label = provider.warpRegistering
-                                  ? 'Registering WARP identity…'
-                                  : account != null
-                                  ? 'WARP endpoint: ${account.peerEndpoint}'
-                                  : 'WARP (sets up automatically on connect)';
-                              return Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                  horizontal: 16,
-                                ),
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: const Color(
-                                      0xFFF38020,
-                                    ).withValues(alpha: 0.5),
-                                  ),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.cloud_done,
-                                      color: Color(0xFFF38020),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        label,
-                                        style: const TextStyle(
-                                          fontSize: 15,
+                                    final nextBtn = OutlinedButton.icon(
+                                      onPressed: provider.isConnecting
+                                          ? null
+                                          : () async {
+                                              await provider
+                                                  .selectNextFreeServer();
+                                              final s =
+                                                  provider.selectedXrayServer;
+                                              if (!context.mounted ||
+                                                  s == null) {
+                                                return;
+                                              }
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    'Next: ${s.remark.isEmpty ? s.address : s.remark}',
+                                                  ),
+                                                  duration: const Duration(
+                                                    seconds: 1,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                      icon: Icon(
+                                        Icons.skip_next,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black87,
+                                      ),
+                                      label: Text(
+                                        'Next',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: isDark
+                                              ? Colors.white70
+                                              : Colors.black87,
                                           fontWeight: FontWeight.w500,
                                         ),
-                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                        ),
+                                        side: BorderSide(
+                                          color: isDark
+                                              ? Colors.white24
+                                              : Colors.black12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                      ),
+                                    );
 
-                            return const SizedBox.shrink();
-                          },
+                                    // Next Server sits NEXT TO the Server List button, and
+                                    // only when a whole group is selected as the target.
+                                    return Row(
+                                      children: [
+                                        Expanded(
+                                          flex: showNext ? 3 : 1,
+                                          child: serverListBtn,
+                                        ),
+                                        if (showNext) ...[
+                                          const SizedBox(width: 10),
+                                          Expanded(flex: 2, child: nextBtn),
+                                        ],
+                                      ],
+                                    );
+                                  }
+
+                                  if (provider.selectedProtocol == 'psiphon') {
+                                    return PsiphonServerListStatus(
+                                      isDark: isDark,
+                                    );
+                                  }
+
+                                  // WARP: no user-picked server list and no manual "register"
+                                  // action — the app registers the Cloudflare identity by
+                                  // itself automatically (on first connect, and again by
+                                  // itself if a stored identity turns out to be unusable).
+                                  // This is a plain read-only status readout showing the
+                                  // Cloudflare edge endpoint currently in use, NOT a button.
+                                  if (provider.selectedProtocol == 'warp') {
+                                    final account = provider.warpAccount;
+                                    final label = provider.warpRegistering
+                                        ? 'Registering WARP identity…'
+                                        : account != null
+                                        ? 'WARP endpoint: ${account.peerEndpoint}'
+                                        : 'WARP (sets up automatically on connect)';
+                                    return Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 16,
+                                        horizontal: 16,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(
+                                          color: const Color(
+                                            0xFFF38020,
+                                          ).withValues(alpha: 0.5),
+                                        ),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.cloud_done,
+                                            color: Color(0xFFF38020),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              label,
+                                              style: const TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }
+
+                                  return const SizedBox.shrink();
+                                },
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
+                      ],
+                    );
+                  },
                 ),
                 // Airborne rain stays above the glow. The solid button masks
                 // it, with RainButtonSurface painting impacts/runoff instead.
@@ -1580,6 +1713,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
     );
   }
+
+  String _protocolName(String protocol) => switch (protocol) {
+    'xray' => 'Xray',
+    'psiphon' => 'Psiphon',
+    'warp' => 'WARP',
+    'openvpn' => 'OpenVPN',
+    'sstp' => 'SSTP',
+    'direct_dns' => 'DNS changer',
+    'proxy' => 'Proxy',
+    'slowdns' => 'Slow DNS',
+    'mix' => 'Mix',
+    _ => 'Select protocol',
+  };
 
   String _getStatusText(VpnConnectionStatus status) {
     switch (status) {
@@ -1613,20 +1759,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return isDark ? const Color(0xFF709D93) : const Color(0xFFAC6549);
       }
     }
-    if (themeProvider.selectedTheme == AppTheme.crying) {
-      switch (status) {
-        case VpnConnectionStatus.connected:
-          return isDark ? const Color(0xFF97DDD0) : const Color(0xFF397F83);
-        case VpnConnectionStatus.connecting:
-        case VpnConnectionStatus.disconnecting:
-          return isDark ? const Color(0xFFF1C7A2) : const Color(0xFF93633E);
-        case VpnConnectionStatus.disconnected:
-          return isDark ? const Color(0xFFB9AEFF) : const Color(0xFF7863B5);
-        case VpnConnectionStatus.error:
-          return isDark ? const Color(0xFFFFAFCA) : const Color(0xFFB34269);
-      }
-    }
-
     // Pink theme: همه چی صورتی (با نسخه شب)
     if (isPinkTheme) {
       if (isDark) {
@@ -1819,8 +1951,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // رنگ نور ملایم از پایین صفحه
   Color _getGlowColor(VpnConnectionStatus status, bool isDark) {
-    if (context.watch<ThemeProvider>().selectedTheme == AppTheme.crying ||
-        context.watch<ThemeProvider>().selectedTheme == AppTheme.cat) {
+    if (context.watch<ThemeProvider>().selectedTheme == AppTheme.cat) {
       return _getButtonColor(status, isDark);
     }
     switch (status) {
