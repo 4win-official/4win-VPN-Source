@@ -1,3 +1,5 @@
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -66,10 +68,10 @@ void main() {
       );
       final gradient = (tint.decoration as BoxDecoration).gradient!;
       // Guard against reverting to a nearly opaque light/dark panel.
-      expect(gradient.colors.every((color) => color.a < 0.45), isTrue);
+      expect(gradient.colors.every((color) => color.a <= 0.24), isTrue);
       expect(find.byType(BackdropFilter), findsOneWidget);
       final blur = tester.widget<BackdropFilter>(find.byType(BackdropFilter));
-      expect(blur.filter.toString(), contains('20.0'));
+      expect(blur.filter.toString(), contains('2.0'));
       final selectedRow = tester.widget<Ink>(
         find.byKey(const ValueKey('protocol-row-warp')),
       );
@@ -80,6 +82,12 @@ void main() {
       final otherDecoration = otherRow.decoration! as BoxDecoration;
       expect(selectedDecoration.gradient, isNot(otherDecoration.gradient));
       expect(selectedDecoration.border, isNot(otherDecoration.border));
+      expect(
+        selectedDecoration.gradient!.colors.every(
+          (color) => HSLColor.fromColor(color).saturation < 0.01,
+        ),
+        isTrue,
+      );
       final settings = find.byTooltip('WARP settings');
       expect(tester.getSize(settings).width, greaterThanOrEqualTo(44));
       expect(tester.getSize(settings).height, greaterThanOrEqualTo(44));
@@ -91,7 +99,7 @@ void main() {
       final paint = tester.widget<CustomPaint>(
         find.descendant(of: glass, matching: find.byType(CustomPaint)).first,
       );
-      expect(paint.painter, isNotNull);
+      expect(paint.painter, isNull);
       expect(paint.foregroundPainter, isNotNull);
       expect(find.text('Select Protocol'), findsOneWidget);
       expect(
@@ -99,7 +107,15 @@ void main() {
         findsOneWidget,
       );
       expect(find.byTooltip('WARP settings'), findsOneWidget);
-      expect(find.byIcon(Icons.check_circle), findsOneWidget);
+      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+      final selectedSemantics = tester.getSemantics(
+        find.byKey(const ValueKey('protocol-row-warp')),
+      );
+      expect(
+        selectedSemantics.flagsCollection.isSelected == Tristate.isTrue,
+        isTrue,
+      );
+      expect(selectedSemantics.flagsCollection.isButton, isTrue);
       expect(tester.takeException(), isNull);
       // A theme change must update the glass rather than cache its old tint.
       final opposite = brightness == Brightness.dark
@@ -117,6 +133,48 @@ void main() {
       provider.dispose();
     });
   }
+
+  testWidgets('protocol row icons are grayscale and selected row is semantic', (
+    tester,
+  ) async {
+    final provider = _SelectorProvider();
+    await _open(tester, provider, Brightness.dark);
+
+    for (final protocol in const [
+      'mix',
+      'xray',
+      'psiphon',
+      'warp',
+      'openvpn',
+      'sstp',
+      'direct_dns',
+      'proxy',
+      'slowdns',
+    ]) {
+      final row = find.byKey(ValueKey('protocol-row-$protocol'));
+      final leadingIcon = tester.widget<Icon>(
+        find.descendant(of: row, matching: find.byType(Icon)).first,
+      );
+      final channels = [
+        (leadingIcon.color!.r * 255).round(),
+        (leadingIcon.color!.g * 255).round(),
+        (leadingIcon.color!.b * 255).round(),
+      ];
+      final maxChannel = channels.reduce((a, b) => a > b ? a : b);
+      final minChannel = channels.reduce((a, b) => a < b ? a : b);
+      final channelRange = maxChannel - minChannel;
+      expect(channelRange, lessThanOrEqualTo(8));
+    }
+
+    final selected = tester.getSemantics(
+      find.byKey(const ValueKey('protocol-row-warp')),
+    );
+    expect(selected.flagsCollection.isSelected == Tristate.isTrue, isTrue);
+    expect(selected.flagsCollection.isButton, isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    provider.dispose();
+  });
 
   testWidgets('standalone selector scrolls on a compact display', (
     tester,

@@ -539,100 +539,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              // Protocol Selector Button
-                              Consumer<VpnProvider>(
-                                builder: (context, vpnProvider, _) {
-                                  return GestureDetector(
-                                    onTap: () {
-                                      showDialog(
-                                        context: context,
-                                        // Keep the real backdrop visible through the glass.
-                                        barrierColor: Colors.black.withValues(
-                                          alpha: isDark ? 0.22 : 0.16,
-                                        ),
-                                        builder: (context) => const ProtocolSelectorDialog(),
-                                      );
-                                    },
-                                    child: Container(
-                                      margin: const EdgeInsets.symmetric(horizontal: 32),
-                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                      decoration: BoxDecoration(
-                                        color: isDark
-                                            ? const Color(0xFF1A1A1A).withValues(alpha: 0.5)
-                                            : Colors.white.withValues(alpha: 0.9),
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(
-                                          color: isDark
-                                              ? Colors.white.withValues(alpha: 0.2)
-                                              : Colors.black.withValues(alpha: 0.1),
-                                          width: 1,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Icon(
-                                                vpnProvider.selectedProtocol == 'mix'
-                                                    ? Icons.account_tree
-                                                    : vpnProvider.selectedProtocol == 'sstp'
-                                                    ? Icons.vpn_key
-                                                    : vpnProvider.selectedProtocol == 'openvpn'
-                                                        ? Icons.shield
-                                                        : vpnProvider.selectedProtocol == 'slowdns'
-                                                            ? Icons.cloud_queue
-                                                            : vpnProvider.selectedProtocol == 'xray'
-                                                                ? Icons.rocket_launch
-                                                                : vpnProvider.selectedProtocol == 'proxy'
-                                                                    ? Icons.swap_horiz
-                                                                    : vpnProvider.selectedProtocol == 'psiphon'
-                                                                        ? Icons.public
-                                                                        : vpnProvider.selectedProtocol == 'warp'
-                                                                            ? Icons.cloud_done
-                                                                            : Icons.dns,
-                                                color: vpnProvider.selectedProtocol == 'mix'
-                                                    ? Colors.cyan
-                                                    : vpnProvider.selectedProtocol == 'sstp'
-                                                    ? Colors.green
-                                                    : vpnProvider.selectedProtocol == 'openvpn'
-                                                        ? Colors.purple
-                                                        : vpnProvider.selectedProtocol == 'slowdns'
-                                                            ? Colors.orange
-                                                            : vpnProvider.selectedProtocol == 'xray'
-                                                                ? Colors.tealAccent.shade700
-                                                                : vpnProvider.selectedProtocol == 'proxy'
-                                                                    ? Colors.tealAccent.shade700
-                                                                    : vpnProvider.selectedProtocol == 'psiphon'
-                                                                        ? Colors.deepPurple
-                                                                        : vpnProvider.selectedProtocol == 'warp'
-                                                                            ? const Color(0xFFF38020)
-                                                                            : Colors.blue,
-                                                size: 20,
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Text(
-                                                'Protocol: ${vpnProvider.selectedProtocol == "mix" ? "Mix" : vpnProvider.selectedProtocol == "sstp" ? "SSTP" : vpnProvider.selectedProtocol == "openvpn" ? "OpenVPN" : vpnProvider.selectedProtocol == "slowdns" ? "Slow DNS" : vpnProvider.selectedProtocol == "xray" ? "Xray" : vpnProvider.selectedProtocol == "proxy" ? "Proxy" : vpnProvider.selectedProtocol == "psiphon" ? "Psiphon" : vpnProvider.selectedProtocol == "warp" ? "WARP" : "DNS changer"}',
-                                                style: TextStyle(
-                                                  fontSize: 14,
-                                                  color: isDark ? Colors.white : Colors.black87,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          Icon(
-                                            Icons.arrow_forward_ios,
-                                            size: 16,
-                                            color: isDark ? Colors.white54 : Colors.black54,
-                                          ),
-                                        ],
-                                      ),
+                              // Keep the selector reachable without repeating
+                              // the selected protocol in a separate glass pill.
+                              IconButton(
+                                tooltip: 'Select protocol',
+                                icon: const Icon(Icons.tune_rounded),
+                                color: isDark ? Colors.white70 : Colors.black54,
+                                constraints: const BoxConstraints(
+                                  minWidth: 48,
+                                  minHeight: 48,
+                                ),
+                                onPressed: () {
+                                  showDialog(
+                                    context: context,
+                                    barrierColor: Colors.black.withValues(
+                                      alpha: isDark ? 0.22 : 0.16,
                                     ),
+                                    builder: (context) => const ProtocolSelectorDialog(),
                                   );
                                 },
                               ),
-
                               const SizedBox(height: 18),
 
                               // Connection Status Text

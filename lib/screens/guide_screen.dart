@@ -93,7 +93,7 @@ class GuideScreen extends StatelessWidget {
               icon: Icons.swap_vert,
               title: 'Choose a protocol',
               description:
-                  'Tap the protocol name to open the protocol selector. 4win VPN '
+                  'Tap the sliders icon above the connection status to open the protocol selector. 4win VPN '
                   'supports several ways to connect:\n\n'
                   '• SSTP — classic tunnel, good on restrictive networks.\n'
                   '• DNS Changer — changes only your DNS.\n'
