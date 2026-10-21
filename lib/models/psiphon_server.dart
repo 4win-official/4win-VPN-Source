@@ -1,6 +1,7 @@
 /// Public server metadata only. Psiphon authentication material stays native.
 class PsiphonServer {
   final String id;
+  final String? legacyId;
   final String ipAddress;
   final String region;
   final int? port;
@@ -8,15 +9,20 @@ class PsiphonServer {
   const PsiphonServer({
     required this.id,
     required this.ipAddress,
+    this.legacyId,
     this.region = '',
     this.port,
   });
+
+  bool matchesId(String selectedId) =>
+      id == selectedId || legacyId == selectedId;
 
   factory PsiphonServer.fromMap(Map<Object?, Object?> map) {
     final rawPort = map['port'];
     final port = rawPort is num ? rawPort.toInt() : int.tryParse('$rawPort');
     return PsiphonServer(
       id: (map['id'] ?? '').toString(),
+      legacyId: map['legacyId']?.toString(),
       ipAddress: (map['ipAddress'] ?? '').toString(),
       region: (map['region'] ?? '').toString(),
       port: port != null && port > 0 && port <= 65535 ? port : null,

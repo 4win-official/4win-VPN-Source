@@ -42,6 +42,58 @@ class PsiphonServerListStoreTest {
     private fun store(dir: File, bundled: ByteArray = envelope("aa11\n")) =
         PsiphonServerListStore(dir, publicKey) { ByteArrayInputStream(bundled) }
 
+    private fun encodedServer(ip: String = "192.0.2.1", port: Int = 443): String =
+        """{"ipAddress":"$ip","sshPort":$port,"region":"NL"}""".toByteArray()
+            .joinToString("") { "%02x".format(it) }
+
+    @Test fun selectedServerResolvesLatestVerifiedRevisionAndNeverRemovedServer() {
+        val dir = tempDir()
+        val old = encodedServer()
+        val bundled = envelope(old)
+        val reader = store(dir, bundled)
+        val initial = reader.readCatalog().entries.single()
+        assertEquals(old, reader.resolve(initial.legacyId)?.encoded)
+        val fresh = encodedServer(port = 8443)
+        assertTrue(reader.refresh(listOf("fresh")) { envelope(fresh) })
+        assertEquals(fresh, reader.resolve(initial.id)?.encoded)
+        assertNull(reader.resolve(initial.legacyId))
+        assertTrue(reader.refresh(listOf("removed")) { envelope(encodedServer("192.0.2.2")) })
+        // Do not fall back to a bundled/stale selected server after removal.
+        assertNull(reader.resolve(initial.id))
+        assertNull(reader.resolve(initial.legacyId))
+    }
+
+    @Test fun startupSnapshotKeepsSelectionAndEmbeddedBytesTogetherDuringRefresh() {
+        val dir = tempDir()
+        val old = encodedServer()
+        val reader = store(dir, envelope(old))
+        val startup = reader.readCatalog()
+        val selection = startup.entries.single().id
+        val fresh = encodedServer(port = 8443)
+        assertTrue(reader.refresh(listOf("fresh")) { envelope(fresh) })
+        assertEquals("$old\n", startup.encoded)
+        assertEquals(old, startup.resolve(selection)?.encoded)
+        assertEquals("$fresh\n", reader.readCatalog().encoded)
+        assertEquals(fresh, reader.resolve(selection)?.encoded)
+    }
+
+    @Test fun invalidOrUnusableCacheFallsBackToOneVerifiedBundledSnapshot() {
+        val dir = tempDir()
+        val bundledEntry = encodedServer()
+        val reader = store(dir, envelope(bundledEntry))
+        val id = reader.readCatalog().entries.single().id
+        // Even a valid signature does not make a malformed catalog usable.
+        assertTrue(reader.refresh(listOf("unusable")) { envelope("aa11") })
+        val fallback = reader.readCatalog()
+        assertEquals("bundled", fallback.source)
+        assertEquals("$bundledEntry\n", fallback.encoded)
+        assertEquals(bundledEntry, fallback.resolve(id)?.encoded)
+        File(dir, PsiphonServerListStore.CACHE_NAME).writeBytes(byteArrayOf(1, 2, 3))
+        assertEquals(bundledEntry, reader.readCatalog().resolve(id)?.encoded)
+        val invalidBundle = PsiphonServerListStore(dir, publicKey) { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
+        assertThrows(Exception::class.java) { invalidBundle.readCatalog() }
+    }
+
     @Test fun absentAndCorruptCacheUseVerifiedBundledFallback() {
         val dir = tempDir()
         val bundled = envelope("aa11\nbb22\n")

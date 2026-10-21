@@ -316,7 +316,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
     final selectedMissing =
         selectedId != null &&
         list != null &&
-        !list.servers.any((server) => server.id == selectedId);
+        !list.servers.any((server) => server.matchesId(selectedId));
     return Scaffold(
       appBar: AppBar(
         title: const Text('Psiphon servers'),

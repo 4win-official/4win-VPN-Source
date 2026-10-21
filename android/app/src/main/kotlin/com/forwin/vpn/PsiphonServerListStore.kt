@@ -13,7 +13,14 @@ internal class PsiphonServerListStore(
     private val publicKey: String,
     private val bundled: () -> InputStream,
 ) {
-    data class Snapshot(val entries: List<PsiphonServerCatalog.Entry>, val source: String, val updatedAt: Long?)
+    data class Snapshot(
+        val entries: List<PsiphonServerCatalog.Entry>,
+        val source: String,
+        val updatedAt: Long?,
+        internal val encoded: String,
+    ) {
+        fun resolve(id: String): PsiphonServerCatalog.Entry? = entries.firstOrNull { it.matchesId(id) }
+    }
 
     companion object {
         const val CACHE_NAME = "server-list.bin"
@@ -66,17 +73,17 @@ internal class PsiphonServerListStore(
             val verified = PsiphonBootstrap.readServerEntries(cache.inputStream(), publicKey)
             val entries = PsiphonServerCatalog.parse(verified.encoded)
             require(entries.isNotEmpty()) { "verified cache contains no usable server entries" }
-            Snapshot(entries, "cache", cache.lastModified().takeIf { it > 0L })
+            Snapshot(entries, "cache", cache.lastModified().takeIf { it > 0L }, verified.encoded)
         } catch (_: Exception) {
             val verified = PsiphonBootstrap.readServerEntries(bundled(), publicKey)
             val entries = PsiphonServerCatalog.parse(verified.encoded)
             require(entries.isNotEmpty()) { "bundled snapshot contains no usable server entries" }
-            Snapshot(entries, "bundled", null)
+            Snapshot(entries, "bundled", null, verified.encoded)
         }
     }
 
     /** Resolves only against the latest verified snapshot, never stale SDK data. */
-    fun resolve(id: String): PsiphonServerCatalog.Entry? = readCatalog().entries.firstOrNull { it.id == id }
+    fun resolve(id: String): PsiphonServerCatalog.Entry? = readCatalog().resolve(id)
 
     /** Verify first, fsync a private temp file, then atomically publish for other processes. */
     fun refresh(urls: List<String>, fetch: (String) -> ByteArray = ::download): Boolean {

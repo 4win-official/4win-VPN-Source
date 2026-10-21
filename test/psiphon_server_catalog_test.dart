@@ -44,6 +44,25 @@ void main() {
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
   test(
+    'stable and exact legacy IDs match without accepting an unknown target',
+    () {
+      final server = PsiphonServer.fromMap({
+        'id': 'ip-v1:stable-server',
+        'legacyId': 'exact-current-record-hash',
+        'ipAddress': '192.0.2.1',
+        'port': 443,
+      });
+      expect(server.matchesId('ip-v1:stable-server'), isTrue);
+      expect(server.matchesId('exact-current-record-hash'), isTrue);
+      expect(server.matchesId('removed-record-hash'), isFalse);
+      expect(
+        const PsiphonServer(id: 'id', ipAddress: '192.0.2.1').matchesId(''),
+        isFalse,
+      );
+    },
+  );
+
+  test(
     'catalog bridge distinguishes signed cache date and public server metadata',
     () async {
       messenger.setMockMethodCallHandler(

@@ -16,7 +16,31 @@ class PsiphonServerCatalogTest {
         assertEquals("192.0.2.1", entry.ipAddress)
         assertEquals("CA", entry.region)
         assertEquals(443, entry.port)
-        assertEquals(MessageDigest.getInstance("SHA-256").digest(encoded.toByteArray()).joinToString("") { "%02x".format(it) }, entry.id)
+        val legacyId = MessageDigest.getInstance("SHA-256").digest(encoded.toByteArray()).joinToString("") { "%02x".format(it) }
+        assertTrue(entry.id.startsWith("ip-v1:"))
+        assertNotEquals(legacyId, entry.id)
+        assertEquals(legacyId, entry.legacyId)
+        assertTrue(entry.matchesId(legacyId))
+        assertTrue(entry.matchesId(entry.id))
+        assertFalse(entry.matchesId("untrusted-or-removed-id"))
+    }
+
+    @Test fun selectionSurvivesSignedRecordRevisionButUsesNewConnectionMaterial() {
+        val old = PsiphonServerCatalog.parse(hex("""{"ipAddress":"192.0.2.1","sshPort":443,"sshPassword":"old"}""")).single()
+        val fresh = PsiphonServerCatalog.parse(hex("""{"sshPassword":"new","sshPort":8443,"ipAddress":"192.0.2.1"}""")).single()
+        assertEquals(old.id, fresh.id)
+        assertNotEquals(old.encoded, fresh.encoded)
+        assertEquals(8443, fresh.port)
+        // An old full-record hash cannot authorize stale credentials.
+        assertFalse(fresh.matchesId(old.legacyId))
+        val other = PsiphonServerCatalog.parse(hex("""{"ipAddress":"192.0.2.2","sshPort":443}""")).single()
+        assertNotEquals(old.id, other.id)
+    }
+
+    @Test fun equivalentIpAndHexEncodingsKeepTheSameStableIdentity() {
+        val first = PsiphonServerCatalog.parse(hex("""{"ipAddress":"2001:db8::1","sshPort":443}""")).single()
+        val second = PsiphonServerCatalog.parse(hex("""{"ipAddress":"2001:0db8:0:0:0:0:0:1","sshPort":443}""").uppercase()).single()
+        assertEquals(first.id, second.id)
     }
 
     @Test fun skipsMalformedNoIpAndNoPortEntriesAndCapsCatalog() {

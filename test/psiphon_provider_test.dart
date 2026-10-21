@@ -47,8 +47,12 @@ void main() {
         case 'prepare':
           return true;
         case 'start':
-        case 'stop':
         case 'reconnect':
+          return true;
+        case 'stop':
+          // App-origin cleanup does not emit onDisconnected. Native teardown
+          // may still replace its status text after the cause was consumed.
+          nativeStatus = 'Disconnected';
           return true;
         case 'isConnected':
           return nativeConnected;
@@ -169,6 +173,48 @@ void main() {
 
       expect(provider.status, VpnConnectionStatus.error);
       expect(provider.errorMessage, contains('Psiphon failed: fixture'));
+      provider.dispose();
+    },
+  );
+
+  test(
+    'failed-start cleanup stops native service without erasing its cause',
+    () async {
+      nativeConnected = false;
+      nativeStatus = 'Psiphon failed: traffic bridge failed to start';
+      final provider = await makeProvider();
+      await provider.connect();
+      expect(calls.where((call) => call == 'stop'), hasLength(1));
+      expect(nativeStatus, 'Disconnected');
+      expect(provider.status, VpnConnectionStatus.error);
+      expect(provider.errorMessage, contains('traffic bridge failed'));
+      provider.dispose();
+    },
+  );
+
+  test(
+    'notification Psiphon disconnect still cancels an in-flight connect',
+    () async {
+      nativeConnected = false;
+      // A real notification action must not be ignored because a previous
+      // failure is still in the cross-process status cache.
+      nativeStatus = 'Psiphon failed: previous startup failure';
+      final provider = await makeProvider();
+      final operation = provider.connect();
+      while (!calls.contains('start')) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      await messenger.handlePlatformMessage(
+        'com.forwin.vpn/vpn_state',
+        const StandardMethodCodec().encodeMethodCall(
+          MethodCall('onDisconnected', {'protocol': 'psiphon'}),
+        ),
+        (_) {},
+      );
+      await operation;
+      expect(provider.status, VpnConnectionStatus.disconnected);
+      expect(calls, contains('stop'));
       provider.dispose();
     },
   );

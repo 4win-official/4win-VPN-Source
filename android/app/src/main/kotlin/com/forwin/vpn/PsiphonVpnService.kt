@@ -349,8 +349,12 @@ class PsiphonVpnService : VpnService() {
             }
             ACTION_DISCONNECT -> {
                 val token = intent.getStringExtra(EXTRA_GENERATION)
-                if (token == null || token == connectionGeneration) VpnStateBroadcast.notifyDisconnected(this, "psiphon")
                 if (token != null && token != connectionGeneration) return START_STICKY
+                // Only a generation-scoped notification action is an external
+                // user disconnect. Flutter's tokenless stop also runs during
+                // failed-start cleanup; echoing it back as onDisconnected races
+                // the connect loop and erases the original error in the UI.
+                if (token != null) VpnStateBroadcast.notifyDisconnected(this, "psiphon")
                 runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
                 connectionGeneration = null
                 reconnectInFlight.set(false)
@@ -684,9 +688,16 @@ class PsiphonVpnService : VpnService() {
         val bootstrap = assets.open("mix_psiphon_bootstrap.json").bufferedReader().use {
             JSONObject(it.readText())
         }
+        val selectedSnapshot = if (currentTargetServerId != null) {
+            try {
+                PsiphonServerList.readCatalog(applicationContext, bootstrap)
+            } catch (e: Exception) {
+                throw IllegalStateException("Unable to verify the selected Psiphon server. Refresh the signed list and select a server or Automatic.", e)
+            }
+        } else null
         // A fresh datastore must not depend on reaching the discovery drop
         // before it has any server it can tunnel through (often blocked).
-        val embeddedServers = try {
+        val embeddedServers = selectedSnapshot?.encoded ?: try {
             PsiphonServerList.readLatest(applicationContext, bootstrap).also {
                 plog("verified ${it.count} cached/bundled bootstrap servers")
             }.encoded
@@ -696,11 +707,11 @@ class PsiphonVpnService : VpnService() {
             ""
         }
         val selectedEntry = currentTargetServerId?.let { requestedId ->
-            PsiphonServerListStore(
-                java.io.File(applicationContext.filesDir, "psiphon-server-list"),
-                bootstrap.getString("RemoteServerListSignaturePublicKey"),
-                { applicationContext.assets.open(PsiphonBootstrap.SERVER_LIST_ASSET) }
-            ).resolve(requestedId) ?: throw IllegalStateException("Selected Psiphon server is no longer in the verified snapshot")
+            // Resolve from the SAME verified bytes passed to startTunneling.
+            // An atomic background refresh may publish a different snapshot
+            // between two reads; it must not change this startup's selection.
+            selectedSnapshot?.resolve(requestedId)
+                ?: throw IllegalStateException("Selected Psiphon server is no longer in the verified list. Open Psiphon server list and select a server or Automatic, then retry.")
         }
         val config = PsiphonConfig.build(bootstrap, region, selectedEntry?.encoded).toString()
         fun callback(tag: String, block: () -> Unit) {

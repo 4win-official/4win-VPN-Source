@@ -19,7 +19,12 @@ internal object PsiphonServerCatalog {
         val region: String,
         val port: Int?,
         internal val encoded: String,
-    )
+    ) {
+        // Older versions persisted a hash of the entire signed record. Accept
+        // it only if that exact record is still in the current verified list.
+        val legacyId: String get() = sha256(encoded.toByteArray(Charsets.UTF_8))
+        fun matchesId(requestedId: String): Boolean = id == requestedId || legacyId == requestedId
+    }
 
     fun parse(encodedList: String): List<Entry> {
         val result = ArrayList<Entry>()
@@ -38,7 +43,11 @@ internal object PsiphonServerCatalog {
             val ip = json.optString("ipAddress", "").trim()
             if (!validIp(ip)) continue
             val port = candidatePort(json)
-            val id = sha256(encoded.toByteArray(Charsets.UTF_8))
+            // A selection identifies a server, not a revision of its credentials,
+            // ports or JSON serialization. Always take connection material from
+            // the newly verified record, never from the persisted identifier.
+            val canonicalIp = InetAddress.getByName(ip).hostAddress ?: continue
+            val id = "ip-v1:" + sha256(canonicalIp.toByteArray(Charsets.UTF_8))
             result += Entry(id, ip, json.optString("region", "").trim(), port, encoded)
         }
         return result

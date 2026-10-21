@@ -225,7 +225,7 @@ class MainActivity: FlutterActivity() {
                             val bootstrap = assets.open("mix_psiphon_bootstrap.json").bufferedReader().use { org.json.JSONObject(it.readText()) }
                             val snapshot = PsiphonServerList.readCatalog(applicationContext, bootstrap)
                             val servers = snapshot.entries.map { entry ->
-                                mapOf("id" to entry.id, "ipAddress" to entry.ipAddress, "region" to entry.region, "port" to entry.port)
+                                mapOf("id" to entry.id, "legacyId" to entry.legacyId, "ipAddress" to entry.ipAddress, "region" to entry.region, "port" to entry.port)
                             }
                             runOnUiThread { result.success(mapOf("servers" to servers, "source" to snapshot.source, "updatedAt" to snapshot.updatedAt)) }
                         } catch (t: Throwable) {
