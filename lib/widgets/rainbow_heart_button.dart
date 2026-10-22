@@ -26,7 +26,7 @@ class RainbowHeartButton extends StatefulWidget {
 }
 
 class _RainbowHeartButtonState extends State<RainbowHeartButton>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const _calloutDuration = Duration(seconds: 4);
   static const _maxCalloutWidth = 176.0;
   static const _calloutHeight = 54.0;
@@ -35,6 +35,10 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
   final LayerLink _layerLink = LayerLink();
   late final AnimationController _beat;
   late final Animation<double> _beatCurve;
+  late final AnimationController _calloutAnimation;
+  late final CurvedAnimation _calloutCurve;
+  bool _isDismissing = false;
+  bool _reduceMotion = false;
   Timer? _calloutTimer;
   Timer? _dismissTimer;
   OverlayEntry? _calloutEntry;
@@ -47,6 +51,21 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
     _beatCurve = CurvedAnimation(parent: _beat, curve: Curves.easeInOut);
+    _calloutAnimation =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 420),
+          reverseDuration: const Duration(milliseconds: 240),
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.dismissed && _isDismissing) {
+            _removeCallout();
+          }
+        });
+    _calloutCurve = CurvedAnimation(
+      parent: _calloutAnimation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
     _scheduleCallout(first: true);
   }
 
@@ -64,6 +83,8 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
       return;
     }
     _removeCallout();
+    _isDismissing = false;
+    _reduceMotion = MediaQuery.disableAnimationsOf(context);
 
     final overlay = Overlay.of(context, rootOverlay: true);
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -102,15 +123,34 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
       ),
     );
     overlay.insert(_calloutEntry!);
+    if (_reduceMotion) {
+      _calloutAnimation.value = 1;
+    } else {
+      _calloutAnimation.forward(from: 0);
+    }
     _dismissTimer = Timer(_calloutDuration, () {
-      _removeCallout();
+      _dismissCallout();
       if (mounted) _scheduleCallout();
     });
+  }
+
+  void _dismissCallout() {
+    if (_calloutEntry == null || _isDismissing) return;
+    _isDismissing = true;
+    // Keep the overlay alive for the outro, but stop accepting taps as soon
+    // as its original four-second visibility window ends.
+    _calloutEntry?.markNeedsBuild();
+    if (_reduceMotion) {
+      _removeCallout();
+    } else {
+      _calloutAnimation.reverse();
+    }
   }
 
   void _removeCallout() {
     _dismissTimer?.cancel();
     _dismissTimer = null;
+    _calloutAnimation.stop();
     _calloutEntry?.remove();
     _calloutEntry?.dispose();
     _calloutEntry = null;
@@ -129,22 +169,28 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
       ),
     );
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 420),
-      curve: Curves.easeOutCubic,
-      builder: (context, value, child) => Opacity(
-        opacity: value,
-        child: Transform.scale(
-          scale: 0.94 + 0.06 * value,
-          alignment: Directionality.of(context) == TextDirection.ltr
-              ? Alignment.topRight
-              : Alignment.topLeft,
-          child: child,
-        ),
-      ),
+    return AnimatedBuilder(
+      animation: _calloutCurve,
+      builder: (context, child) {
+        final value = _calloutCurve.value;
+        return IgnorePointer(
+          ignoring: _isDismissing,
+          child: Opacity(
+            key: const ValueKey('support-callout-opacity'),
+            opacity: value,
+            child: Transform.translate(
+              offset: Offset(0, -7 * (1 - value)),
+              child: Transform.scale(
+                scale: 0.94 + 0.06 * value,
+                alignment: Directionality.of(context) == TextDirection.ltr
+                    ? Alignment.topRight
+                    : Alignment.topLeft,
+                child: child,
+              ),
+            ),
+          ),
+        );
+      },
       child: Semantics(
         button: true,
         label: widget.tooltip,
@@ -228,6 +274,8 @@ class _RainbowHeartButtonState extends State<RainbowHeartButton>
   void dispose() {
     _calloutTimer?.cancel();
     _removeCallout();
+    _calloutCurve.dispose();
+    _calloutAnimation.dispose();
     _beat.dispose();
     super.dispose();
   }
