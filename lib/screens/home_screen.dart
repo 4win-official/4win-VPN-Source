@@ -1,7 +1,6 @@
 import '../widgets/mix_chain_diagnostics.dart';
 import 'mix_strategies_screen.dart';
 import 'dart:io';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +16,7 @@ import '../widgets/rain_button_surface.dart';
 import '../widgets/autumn_animation.dart';
 import '../widgets/day_night_animation.dart';
 import '../widgets/cat_scene.dart';
+import '../widgets/liquid_background.dart';
 import '../widgets/heart_burst.dart';
 import '../widgets/protocol_selector_dialog.dart';
 import '../widgets/rainbow_heart_button.dart';
@@ -391,33 +391,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 File(customBg).existsSync();
             return Stack(
               children: [
-                // Liquid Glass: gradient backdrop rendered behind the frosted
-                // glass overlay so the blur has something to work with.
-                if (isLiquidGlassTheme)
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: isDark
-                              ? const [
-                                  Color(0xFF1B2A4A),
-                                  Color(0xFF0B1020),
-                                  Color(0xFF2A1B4A),
-                                ]
-                              : const [
-                                  Color(0xFFBFD4FF),
-                                  Color(0xFFEAF0FF),
-                                  Color(0xFFDDCBFF),
-                                ],
-                        ),
-                      ),
-                    ),
-                  ),
+                // Only Liquid gets the animated, isolated frosted backdrop.
                 if (isLiquidGlassTheme)
                   const Positioned.fill(
-                    child: RepaintBoundary(child: _LiquidGlassBackdrop()),
+                    child: RepaintBoundary(child: LiquidBackground()),
                   ),
 
                 if (hasCustomBg)
@@ -2143,104 +2120,6 @@ class _SettingsTransitionOverlayState extends State<_SettingsTransitionOverlay>
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// Frosted-glass overlay for the Liquid Glass theme. It blurs whatever is
-/// rendered behind it (the gradient backdrop) and lays a subtle translucent
-/// sheen + soft floating blobs on top, giving the modern "liquid glass" look.
-class _LiquidGlassBackdrop extends StatefulWidget {
-  const _LiquidGlassBackdrop();
-
-  @override
-  State<_LiquidGlassBackdrop> createState() => _LiquidGlassBackdropState();
-}
-
-class _LiquidGlassBackdropState extends State<_LiquidGlassBackdrop>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c;
-
-  @override
-  void initState() {
-    super.initState();
-    _c = AnimationController(vsync: this, duration: const Duration(seconds: 14))
-      ..repeat();
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return IgnorePointer(
-      child: Stack(
-        children: [
-          // Soft floating colour blobs behind the blur for depth.
-          AnimatedBuilder(
-            animation: _c,
-            builder: (context, _) {
-              final t = _c.value;
-              return Stack(
-                children: [
-                  Positioned(
-                    top: 80 + 40 * (0.5 - (t - 0.5).abs()),
-                    left: -40,
-                    child: _blob(
-                      const Color(0xFF4FC3F7).withValues(alpha: 0.5),
-                      220,
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 120 - 40 * (0.5 - (t - 0.5).abs()),
-                    right: -50,
-                    child: _blob(
-                      const Color(0xFFB388FF).withValues(alpha: 0.5),
-                      260,
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-          // The blur layer (frosted glass).
-          BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: isDark
-                      ? [
-                          Colors.white.withValues(alpha: 0.06),
-                          Colors.white.withValues(alpha: 0.02),
-                        ]
-                      : [
-                          Colors.white.withValues(alpha: 0.35),
-                          Colors.white.withValues(alpha: 0.12),
-                        ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _blob(Color color, double size) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(colors: [color, color.withValues(alpha: 0.0)]),
       ),
     );
   }

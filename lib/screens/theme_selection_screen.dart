@@ -130,9 +130,9 @@ class ThemeSelectionScreen extends StatelessWidget {
 
                 const SizedBox(height: 16),
 
-                // ── Liquid Glass (highlighted, new premium theme) ──────────
+                // ── Liquid (highlighted, new premium theme) ──────────
                 _ThemeCard(
-                  title: 'Liquid Glass 🫧',
+                  title: 'Liquid',
                   description: 'Modern frosted-glass look (Light + Dark)',
                   icon: Icons.blur_on,
                   color: const Color(0xFF5B8CFF),
