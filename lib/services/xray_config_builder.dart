@@ -7,7 +7,12 @@ class XrayConfigBuilder {
   static String build(XrayServer server, {bool fragmentEnabled = true, String fragmentPackets = 'tlshello', String fragmentLength = '10-20', String fragmentInterval = '10-20', String fragmentHost = '', bool trafficCompression = false, bool proxyMode = false, int proxyPort = 4444}) {
     final proxy = _buildProxyOutbound(server);
     final outbounds = <Map<String, dynamic>>[];
-    if (trafficCompression && !_hasXtlsFlow(proxy)) proxy['mux'] = {'enabled': true, 'concurrency': 8, 'xudpConcurrency': 8, 'xudpProxyUDP443': 'reject'};
+    // XHTTP manages multiplexing itself (including extra.xmux). Generic Mux
+    // breaks its data path even though the core accepts the JSON config.
+    if (trafficCompression && !_hasXtlsFlow(proxy) &&
+        (proxy['streamSettings'] as Map?)?['network'] != 'xhttp') {
+      proxy['mux'] = {'enabled': true, 'concurrency': 8, 'xudpConcurrency': 8, 'xudpProxyUDP443': 'reject'};
+    }
     if (fragmentEnabled && fragmentHost.trim().isNotEmpty) _applyFakeHost(proxy, fragmentHost.trim());
     if (fragmentEnabled) {
       final stream = Map<String, dynamic>.from((proxy['streamSettings'] as Map?) ?? const {});
@@ -144,17 +149,17 @@ class XrayConfigBuilder {
 
   static Map<String, dynamic> _vmessOutbound(XrayServer server) {
     final m = jsonDecode(utf8.decode(base64.decode(_pad(server.link.substring(8))))) as Map<String, dynamic>;
-    return {'protocol': 'vmess', 'settings': {'vnext': [{'address': server.address, 'port': server.port, 'users': [{'id': '${m['id'] ?? ''}', 'alterId': int.tryParse('${m['aid'] ?? 0}') ?? 0, 'security': '${m['scy'] ?? 'auto'}'}]}]}, 'streamSettings': _streamSettings(network: '${m['net'] ?? 'tcp'}', security: '${m['tls'] ?? ''}', sni: '${m['sni'] ?? m['host'] ?? ''}', host: '${m['host'] ?? ''}', path: '${m['path'] ?? ''}', alpn: '${m['alpn'] ?? ''}', fp: '${m['fp'] ?? ''}')};
+    return {'protocol': 'vmess', 'settings': {'vnext': [{'address': server.address, 'port': server.port, 'users': [{'id': '${m['id'] ?? ''}', 'alterId': int.tryParse('${m['aid'] ?? 0}') ?? 0, 'security': '${m['scy'] ?? 'auto'}'}]}]}, 'streamSettings': _streamSettings(network: '${m['net'] ?? 'tcp'}', security: '${m['tls'] ?? ''}', sni: '${m['sni'] ?? m['host'] ?? ''}', host: '${m['host'] ?? ''}', path: '${m['path'] ?? ''}', alpn: '${m['alpn'] ?? ''}', fp: '${m['fp'] ?? ''}', mode: '${m['mode'] ?? ''}', extra: m['extra'])};
   }
 
   static Map<String, dynamic> _vlessOutbound(XrayServer server) {
     final uri = Uri.parse(server.link), q = uri.queryParameters;
-    return {'protocol': 'vless', 'settings': {'vnext': [{'address': server.address, 'port': server.port, 'users': [{'id': uri.userInfo, 'encryption': q['encryption'] ?? 'none', if ((q['flow'] ?? '').isNotEmpty) 'flow': q['flow']}]}]}, 'streamSettings': _streamSettings(network: q['type'] ?? 'tcp', security: q['security'] ?? '', sni: q['sni'] ?? q['host'] ?? '', host: q['host'] ?? '', path: q['path'] ?? '', alpn: q['alpn'] ?? '', fp: q['fp'] ?? '', pbk: q['pbk'] ?? '', sid: q['sid'] ?? '', serviceName: q['serviceName'] ?? '')};
+    return {'protocol': 'vless', 'settings': {'vnext': [{'address': server.address, 'port': server.port, 'users': [{'id': uri.userInfo, 'encryption': q['encryption'] ?? 'none', if ((q['flow'] ?? '').isNotEmpty) 'flow': q['flow']}]}]}, 'streamSettings': _streamSettings(network: q['type'] ?? 'tcp', security: q['security'] ?? '', sni: q['sni'] ?? q['host'] ?? '', host: q['host'] ?? '', path: q['path'] ?? '', alpn: q['alpn'] ?? '', fp: q['fp'] ?? '', pbk: q['pbk'] ?? '', sid: q['sid'] ?? '', serviceName: q['serviceName'] ?? '', mode: q['mode'] ?? '', extra: q['extra'])};
   }
 
   static Map<String, dynamic> _trojanOutbound(XrayServer server) {
     final uri = Uri.parse(server.link), q = uri.queryParameters;
-    return {'protocol': 'trojan', 'settings': {'servers': [{'address': server.address, 'port': server.port, 'password': uri.userInfo}]}, 'streamSettings': _streamSettings(network: q['type'] ?? 'tcp', security: q['security'] ?? 'tls', sni: q['sni'] ?? q['host'] ?? '', host: q['host'] ?? '', path: q['path'] ?? '', alpn: q['alpn'] ?? '', fp: q['fp'] ?? '')};
+    return {'protocol': 'trojan', 'settings': {'servers': [{'address': server.address, 'port': server.port, 'password': uri.userInfo}]}, 'streamSettings': _streamSettings(network: q['type'] ?? 'tcp', security: q['security'] ?? 'tls', sni: q['sni'] ?? q['host'] ?? '', host: q['host'] ?? '', path: q['path'] ?? '', alpn: q['alpn'] ?? '', fp: q['fp'] ?? '', pbk: q['pbk'] ?? '', sid: q['sid'] ?? '', serviceName: q['serviceName'] ?? '', mode: q['mode'] ?? '', extra: q['extra'])};
   }
 
   static Map<String, dynamic> _shadowsocksOutbound(XrayServer server) {
@@ -170,11 +175,28 @@ class XrayConfigBuilder {
     return {'protocol': 'shadowsocks', 'settings': {'servers': [{'address': server.address, 'port': server.port, 'method': method, 'password': password}]}, 'streamSettings': {'network': 'tcp'}};
   }
 
-  static Map<String, dynamic> _streamSettings({required String network, required String security, String sni = '', String host = '', String path = '', String alpn = '', String fp = '', String pbk = '', String sid = '', String serviceName = ''}) {
-    final stream = <String, dynamic>{'network': network.isEmpty ? 'tcp' : network};
+  static Map<String, dynamic> _streamSettings({required String network, required String security, String sni = '', String host = '', String path = '', String alpn = '', String fp = '', String pbk = '', String sid = '', String serviceName = '', String mode = '', Object? extra}) {
+    // SplitHTTP is the legacy share-link name for XHTTP. Both use the same
+    // core settings; do not route them through the removed HTTP/H2 transport.
+    final transport = network == 'splithttp' ? 'xhttp' : network;
+    final stream = <String, dynamic>{'network': transport.isEmpty ? 'tcp' : transport};
     if (security == 'tls') { stream['security'] = 'tls'; stream['tlsSettings'] = {if (sni.isNotEmpty) 'serverName': sni, if (alpn.isNotEmpty) 'alpn': alpn.split(','), if (fp.isNotEmpty) 'fingerprint': fp, 'allowInsecure': false}; }
     else if (security == 'reality') { stream['security'] = 'reality'; stream['realitySettings'] = {if (sni.isNotEmpty) 'serverName': sni, 'fingerprint': fp.isNotEmpty ? fp : 'chrome', if (pbk.isNotEmpty) 'publicKey': pbk, if (sid.isNotEmpty) 'shortId': sid, 'spiderX': ''}; }
-    switch (network) {
+    switch (transport) {
+      case 'xhttp':
+        stream['xhttpSettings'] = {
+          'path': path.isEmpty ? '/' : path,
+          if (host.isNotEmpty) 'host': host,
+          'mode': mode.isEmpty ? 'auto' : mode,
+          if (extra != null && extra != '') 'extra': _xhttpExtra(extra),
+        };
+        break;
+      case 'httpupgrade':
+        stream['httpupgradeSettings'] = {
+          'path': path.isEmpty ? '/' : path,
+          if (host.isNotEmpty) 'host': host,
+        };
+        break;
       case 'ws': stream['wsSettings'] = {'path': path.isEmpty ? '/' : path, if (host.isNotEmpty) 'headers': {'Host': host}}; break;
       case 'grpc': stream['grpcSettings'] = {'serviceName': serviceName.isNotEmpty ? serviceName : path, 'multiMode': false}; break;
       case 'h2':
@@ -182,6 +204,16 @@ class XrayConfigBuilder {
       case 'tcp': if (host.isNotEmpty && path.isNotEmpty) stream['tcpSettings'] = {'header': {'type': 'http', 'request': {'path': [path], 'headers': {'Host': [host]}}}}; break;
     }
     return stream;
+  }
+
+  // URI query parameters have already been percent-decoded by Uri. Decode
+  // JSON only once so encoded paths/headers inside extra remain intact.
+  static Map<String, dynamic> _xhttpExtra(Object value) {
+    final decoded = value is String ? jsonDecode(value) : value;
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('XHTTP extra must be a JSON object');
+    }
+    return decoded;
   }
 
   static void _applyFakeHost(Map<String, dynamic> proxy, String host) {
