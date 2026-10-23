@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.MediaPlayer
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.VpnService
@@ -44,6 +45,7 @@ class MainActivity: FlutterActivity() {
     private var vpnStateReceiver: BroadcastReceiver? = null
     private val VPN_REQUEST_CODE = 100
     private val XRAY_REQUEST_CODE = 101
+    private var catMeowPlayer: MediaPlayer? = null
 
     // Holds an .ovpn file that the user opened/shared into the app (via VIEW or
     // SEND intents) until the Flutter side pulls it with getPendingOvpnImport.
@@ -90,11 +92,27 @@ class MainActivity: FlutterActivity() {
         val pending = pendingPsiphonPermission
         pendingPsiphonPermission = null
         try { pending?.success(false) } catch (_: Throwable) {}
+        catMeowPlayer?.release()
+        catMeowPlayer = null
         super.onDestroy()
     }
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.forwin.vpn/cat_audio"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "playMeow" -> try {
+                    playCatMeow()
+                    result.success(null)
+                } catch (error: Throwable) {
+                    result.error("CAT_MEOW_FAILED", "Unable to play cat meow", error.message)
+                }
+                else -> result.notImplemented()
+            }
+        }
         val stateChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VPN_STATE_CHANNEL)
         vpnStateChannel = stateChannel
         stateChannel.setMethodCallHandler { call, result ->
@@ -1139,6 +1157,39 @@ class MainActivity: FlutterActivity() {
         b(0x00); b(0x01)
         return out.toByteArray()
     }
+
+    private fun playCatMeow() {
+        catMeowPlayer?.let { previous ->
+            catMeowPlayer = null
+            previous.release()
+        }
+
+        val player = MediaPlayer()
+        catMeowPlayer = player
+        try {
+            assets.openFd("cat_meow.mp3").use { sound ->
+                player.setDataSource(sound.fileDescriptor, sound.startOffset, sound.length)
+            }
+            player.setOnCompletionListener { completed ->
+                if (catMeowPlayer === completed) catMeowPlayer = null
+                completed.release()
+            }
+            player.setOnErrorListener { failed, _, _ ->
+                if (catMeowPlayer === failed) catMeowPlayer = null
+                failed.release()
+                true
+            }
+            player.setOnPreparedListener { prepared ->
+                if (catMeowPlayer === prepared) prepared.start() else prepared.release()
+            }
+            player.prepareAsync()
+        } catch (error: Throwable) {
+            if (catMeowPlayer === player) catMeowPlayer = null
+            player.release()
+            throw error
+        }
+    }
+
     private fun nativeVpnState(protocol: String): Map<String, Any> {
         var running = false
         var reconnecting = false

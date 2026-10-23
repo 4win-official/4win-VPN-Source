@@ -104,6 +104,17 @@ void main() {
           'selected_theme': AppTheme.cat.index,
           'is_dark_mode': dark,
         });
+        const catAudioChannel = MethodChannel('com.forwin.vpn/cat_audio');
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        final audioCalls = <String>[];
+        messenger.setMockMethodCallHandler(catAudioChannel, (call) async {
+          audioCalls.add(call.method);
+          return null;
+        });
+        addTearDown(
+          () => messenger.setMockMethodCallHandler(catAudioChannel, null),
+        );
         final themes = ThemeProvider();
         final vpn = _CatVpn();
         addTearDown(themes.dispose);
@@ -161,6 +172,9 @@ void main() {
           mascot.top,
           greaterThanOrEqualTo(tester.getRect(find.byType(AppBar)).bottom),
         );
+        await tester.tapAt(mascot.center);
+        await tester.pump();
+        expect(audioCalls, ['playMeow']);
         expect(
           selectorRect.top,
           greaterThanOrEqualTo(tester.getRect(find.byType(AppBar)).bottom),

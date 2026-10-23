@@ -16,6 +16,7 @@ import '../widgets/rain_button_surface.dart';
 import '../widgets/autumn_animation.dart';
 import '../widgets/day_night_animation.dart';
 import '../widgets/cat_scene.dart';
+import '../widgets/cat_power_button_ears.dart';
 import '../widgets/liquid_background.dart';
 import '../widgets/heart_burst.dart';
 import '../widgets/protocol_selector_dialog.dart';
@@ -43,6 +44,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  static const MethodChannel _catAudioChannel = MethodChannel(
+    'com.forwin.vpn/cat_audio',
+  );
+
   final UpdateService _updateService = UpdateService();
   final GlobalKey _powerButtonKey = GlobalKey();
 
@@ -189,6 +194,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  Future<void> _playCatMeow() async {
+    if (!mounted ||
+        context.read<ThemeProvider>().selectedTheme != AppTheme.cat) {
+      return;
+    }
+    try {
+      await _catAudioChannel.invokeMethod<void>('playMeow');
+    } catch (_) {
+      // Sound is decorative; playback failure must not affect VPN controls.
+    }
   }
 
   @override
@@ -411,7 +428,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 if (isCatTheme)
-                  Positioned.fill(child: CatScene(isDark: isDark)),
+                  Positioned.fill(
+                    child: CatScene(isDark: isDark, onCatTap: _playCatMeow),
+                  ),
                 // انیمیشن برف (فقط در تم برفی) — RepaintBoundary keeps the
                 // continuous animation from repainting the rest of the tree.
                 if (isSnowTheme)
@@ -1011,6 +1030,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             ),
                                           ),
                                         ),
+                                        if (isCatTheme)
+                                          Positioned(
+                                            top: -31,
+                                            left: 0,
+                                            right: 0,
+                                            height: 66,
+                                            child: CatPowerButtonEars(
+                                              furColor: _getButtonColor(
+                                                provider.status,
+                                                isDark,
+                                              ),
+                                              outlineColor: isDark
+                                                  ? const Color(0xFFCDE8DC)
+                                                  : const Color(0xFFFFE6D3),
+                                            ),
+                                          ),
                                       ],
                                     ),
 

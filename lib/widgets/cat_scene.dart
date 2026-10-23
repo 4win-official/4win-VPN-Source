@@ -2,12 +2,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// A small, sleepy cat mascot that decorates the top of a screen without
-/// intercepting interaction or adding semantics.
+/// A small, sleepy cat mascot that decorates the top of the Cat-theme screen.
 class CatScene extends StatefulWidget {
-  const CatScene({super.key, required this.isDark});
+  const CatScene({super.key, required this.isDark, this.onCatTap});
 
   final bool isDark;
+  final VoidCallback? onCatTap;
 
   @override
   State<CatScene> createState() => _CatSceneState();
@@ -59,19 +59,40 @@ class _CatSceneState extends State<CatScene>
       _controller.repeat();
     }
 
-    return IgnorePointer(
-      child: ExcludeSemantics(
-        child: RepaintBoundary(
-          child: CustomPaint(
-            painter: CatScenePainter(
-              isDark: widget.isDark,
-              animation: _animation,
-              topInset: MediaQuery.paddingOf(context).top,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        final painter = CatScenePainter(
+          isDark: widget.isDark,
+          animation: _animation,
+          topInset: MediaQuery.paddingOf(context).top,
+        );
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ExcludeSemantics(
+                  child: RepaintBoundary(
+                    child: CustomPaint(painter: painter, size: Size.infinite),
+                  ),
+                ),
+              ),
             ),
-            size: Size.infinite,
-          ),
-        ),
-      ),
+            Positioned.fromRect(
+              rect: painter.mascotBounds(size).inflate(4),
+              child: Semantics(
+                button: true,
+                label: 'Cat mascot',
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: widget.onCatTap,
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
