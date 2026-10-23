@@ -98,6 +98,46 @@ void main() {
       }
     }
 
+    test('tlshello does not alter a plain TCP server', () {
+      final server = _server('vless', 'tcp', security: 'none');
+      final config = jsonDecode(
+        XrayConfigBuilder.build(server, fragmentEnabled: true),
+      ) as Map<String, dynamic>;
+      final outbounds = config['outbounds'] as List;
+      final proxy = outbounds.first as Map;
+      expect(outbounds.any((outbound) => outbound['tag'] == 'fragment'), isFalse);
+      expect((proxy['streamSettings'] as Map).containsKey('sockopt'), isFalse);
+    });
+
+    test('TCP write fragmentation remains available without TLS', () {
+      final server = _server('vless', 'tcp', security: 'none');
+      final config = jsonDecode(
+        XrayConfigBuilder.build(
+          server,
+          fragmentEnabled: true,
+          fragmentPackets: '1-3',
+          fragmentLength: '10-20',
+          fragmentInterval: '1-2',
+        ),
+      ) as Map<String, dynamic>;
+      final outbounds = config['outbounds'] as List;
+      expect(outbounds.any((outbound) => outbound['tag'] == 'fragment'), isTrue);
+    });
+
+    test('Fragment is skipped for non-TCP transports', () {
+      final server = _server('vless', 'quic');
+      final config = jsonDecode(
+        XrayConfigBuilder.build(server, fragmentEnabled: true),
+      ) as Map<String, dynamic>;
+      final outbounds = config['outbounds'] as List;
+      expect(outbounds.any((outbound) => outbound['tag'] == 'fragment'), isFalse);
+      expect(
+        ((outbounds.first as Map)['streamSettings'] as Map)
+            .containsKey('sockopt'),
+        isFalse,
+      );
+    });
+
     for (final transport in ['xhttp', 'splithttp', 'httpupgrade']) {
       test('$transport defaults to root path without an invented host', () {
         final proxy = _proxy(
@@ -192,22 +232,27 @@ void main() {
       );
     });
 
-    test('fragment host override preserves transport host and path', () {
+    test('fragment host is only an SNI fallback and preserves transport settings', () {
       final server = _server('vless', 'httpupgrade');
       final connection = _proxy(
-        XrayConfigBuilder.build(server, fragmentHost: 'fake.example.com'),
+        XrayConfigBuilder.build(
+          server,
+          fragmentEnabled: true,
+          fragmentHost: 'fake.example.com',
+        ),
       );
       expect(
         connection,
         _proxy(
           XrayConfigBuilder.buildForDelayTest(
             server,
+            fragmentEnabled: true,
             fragmentHost: 'fake.example.com',
           ),
         ),
       );
       final stream = connection['streamSettings'];
-      expect(stream['tlsSettings']['serverName'], 'fake.example.com');
+      expect(stream['tlsSettings']['serverName'], 'tls.example.com');
       expect(stream['httpupgradeSettings']['host'], 'cdn.example.com');
       expect(stream['httpupgradeSettings']['path'], '/tunnel%2Fpart?ed=2560');
     });

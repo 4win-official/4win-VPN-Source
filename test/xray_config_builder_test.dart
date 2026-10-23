@@ -103,6 +103,28 @@ void main() {
       expect((stream['sockopt'] as Map)['dialerProxy'], 'fragment');
     });
 
+    test('leaves Fragment off unless the setting is explicitly enabled', () {
+      final config = jsonDecode(XrayConfigBuilder.build(vlessServer()))
+          as Map<String, dynamic>;
+      final outbounds = config['outbounds'] as List;
+      expect(outbounds.any((outbound) => outbound['tag'] == 'fragment'), isFalse);
+      expect(
+        (outbounds.first['streamSettings'] as Map).containsKey('sockopt'),
+        isFalse,
+      );
+    });
+
+    test('rejects TLS ClientHello fragments shorter than 6 bytes', () {
+      expect(
+        () => XrayConfigBuilder.build(
+          vlessServer(),
+          fragmentEnabled: true,
+          fragmentLength: '1-5',
+        ),
+        throwsFormatException,
+      );
+    });
+
     test('rejects unsupported protocols', () {
       final bad = XrayServer(
         id: 'x9',

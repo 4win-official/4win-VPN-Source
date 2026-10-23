@@ -4,7 +4,11 @@ import '../models/proxy_server.dart';
 import '../models/warp_account.dart';
 
 class XrayConfigBuilder {
-  static String build(XrayServer server, {bool fragmentEnabled = true, String fragmentPackets = 'tlshello', String fragmentLength = '10-20', String fragmentInterval = '10-20', String fragmentHost = '', bool trafficCompression = false, bool proxyMode = false, int proxyPort = 4444}) {
+  static const defaultFragmentPackets = 'tlshello';
+  static const defaultFragmentLength = '100-200';
+  static const defaultFragmentInterval = '10-20';
+
+  static String build(XrayServer server, {bool fragmentEnabled = false, String fragmentPackets = defaultFragmentPackets, String fragmentLength = defaultFragmentLength, String fragmentInterval = defaultFragmentInterval, String fragmentHost = '', bool trafficCompression = false, bool proxyMode = false, int proxyPort = 4444}) {
     final proxy = _buildProxyOutbound(server);
     final outbounds = <Map<String, dynamic>>[];
     // XHTTP manages multiplexing itself (including extra.xmux). Generic Mux
@@ -13,17 +17,18 @@ class XrayConfigBuilder {
         (proxy['streamSettings'] as Map?)?['network'] != 'xhttp') {
       proxy['mux'] = {'enabled': true, 'concurrency': 8, 'xudpConcurrency': 8, 'xudpProxyUDP443': 'reject'};
     }
-    if (fragmentEnabled && fragmentHost.trim().isNotEmpty) _applyFakeHost(proxy, fragmentHost.trim());
-    if (fragmentEnabled) {
-      final stream = Map<String, dynamic>.from((proxy['streamSettings'] as Map?) ?? const {});
-      final sockopt = Map<String, dynamic>.from((stream['sockopt'] as Map?) ?? const {});
-      sockopt['dialerProxy'] = 'fragment';
-      stream['sockopt'] = sockopt;
-      proxy['streamSettings'] = stream;
-    }
+    final fragmentOutbound = fragmentEnabled
+        ? _configureFragment(
+            proxy,
+            packets: fragmentPackets,
+            length: fragmentLength,
+            interval: fragmentInterval,
+            host: fragmentHost,
+          )
+        : null;
     proxy['tag'] = 'proxy';
     outbounds.add(proxy);
-    if (fragmentEnabled) outbounds.add({'tag': 'fragment', 'protocol': 'freedom', 'settings': {'fragment': {'packets': fragmentPackets, 'length': fragmentLength, 'interval': fragmentInterval}}, 'streamSettings': {'sockopt': {'tcpNoDelay': true, 'tcpKeepAliveIdle': 100}}});
+    if (fragmentOutbound != null) outbounds.add(fragmentOutbound);
     outbounds.add({'tag': 'direct', 'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIP'}});
     outbounds.add({'tag': 'block', 'protocol': 'blackhole', 'settings': {'response': {'type': 'http'}}});
     return _encode(proxyMode ? _proxyInbounds(proxyPort) : _vpnInbounds(), outbounds);
@@ -108,21 +113,121 @@ class XrayConfigBuilder {
     return const JsonEncoder.withIndent('  ').convert({'log': {'loglevel': 'none'}, 'dns': {'servers': ['1.1.1.1', '8.8.8.8', 'localhost']}, 'outbounds': [outbound]});
   }
 
-  static String buildForDelayTest(XrayServer server, {bool fragmentEnabled = true, String fragmentPackets = 'tlshello', String fragmentLength = '10-20', String fragmentInterval = '10-20', String fragmentHost = ''}) {
+  static String buildForDelayTest(XrayServer server, {bool fragmentEnabled = false, String fragmentPackets = defaultFragmentPackets, String fragmentLength = defaultFragmentLength, String fragmentInterval = defaultFragmentInterval, String fragmentHost = ''}) {
     final proxy = _buildProxyOutbound(server);
-    if (fragmentEnabled && fragmentHost.trim().isNotEmpty) _applyFakeHost(proxy, fragmentHost.trim());
     final outbounds = <Map<String, dynamic>>[];
-    if (fragmentEnabled) {
-      final stream = Map<String, dynamic>.from((proxy['streamSettings'] as Map?) ?? const {});
-      final sockopt = Map<String, dynamic>.from((stream['sockopt'] as Map?) ?? const {});
-      sockopt['dialerProxy'] = 'fragment';
-      stream['sockopt'] = sockopt;
-      proxy['streamSettings'] = stream;
-    }
+    final fragmentOutbound = fragmentEnabled
+        ? _configureFragment(
+            proxy,
+            packets: fragmentPackets,
+            length: fragmentLength,
+            interval: fragmentInterval,
+            host: fragmentHost,
+          )
+        : null;
     proxy['tag'] = 'proxy';
     outbounds.add(proxy);
-    if (fragmentEnabled) outbounds.add({'tag': 'fragment', 'protocol': 'freedom', 'settings': {'fragment': {'packets': fragmentPackets, 'length': fragmentLength, 'interval': fragmentInterval}}});
+    if (fragmentOutbound != null) outbounds.add(fragmentOutbound);
     return const JsonEncoder.withIndent('  ').convert({'log': {'loglevel': 'none'}, 'dns': {'servers': ['1.1.1.1', '8.8.8.8', 'localhost']}, 'outbounds': outbounds});
+  }
+
+  /// Xray fragmentation is a TCP dialer feature. `tlshello` additionally
+  /// requires a TLS/REALITY ClientHello; never attach that dialer to a plain
+  /// or UDP transport, where Xray may ignore the chain or fail the connection.
+  static Map<String, dynamic>? _configureFragment(
+    Map<String, dynamic> proxy, {
+    required String packets,
+    required String length,
+    required String interval,
+    required String host,
+  }) {
+    final stream = Map<String, dynamic>.from(
+      (proxy['streamSettings'] as Map?) ?? const {},
+    );
+    final network = '${stream['network'] ?? 'tcp'}'.toLowerCase();
+    const tcpNetworks = {
+      'tcp',
+      'raw',
+      'ws',
+      'grpc',
+      'http',
+      'h2',
+      'httpupgrade',
+      'xhttp',
+    };
+    if (!tcpNetworks.contains(network)) return null;
+
+    final packetMode = packets.trim().toLowerCase();
+    final tlsHello = packetMode == 'tlshello';
+    final security = '${stream['security'] ?? 'none'}'.toLowerCase();
+    if (tlsHello && security != 'tls' && security != 'reality') return null;
+    if (!tlsHello) {
+      _parseFragmentRange(packetMode, field: 'packets', minimum: 1);
+    }
+
+    final lengthRange = _parseFragmentRange(
+      length,
+      field: 'length',
+      minimum: tlsHello ? 6 : 1,
+    );
+    _parseFragmentRange(
+      interval,
+      field: 'interval',
+      minimum: tlsHello ? 0 : 1,
+    );
+    if (tlsHello && lengthRange.first < 6) {
+      throw const FormatException(
+        'TLS ClientHello fragment length must be at least 6 bytes.',
+      );
+    }
+
+    final trimmedHost = host.trim();
+    if (trimmedHost.isNotEmpty) _applyFakeHost(proxy, trimmedHost);
+
+    final currentStream = Map<String, dynamic>.from(
+      (proxy['streamSettings'] as Map?) ?? const {},
+    );
+    final sockopt = Map<String, dynamic>.from(
+      (currentStream['sockopt'] as Map?) ?? const {},
+    );
+    sockopt['dialerProxy'] = 'fragment';
+    currentStream['sockopt'] = sockopt;
+    proxy['streamSettings'] = currentStream;
+
+    return {
+      'tag': 'fragment',
+      'protocol': 'freedom',
+      'settings': {
+        'fragment': {
+          'packets': packetMode,
+          'length': length.trim(),
+          'interval': interval.trim(),
+        },
+      },
+      'streamSettings': {
+        'sockopt': {'tcpNoDelay': true, 'tcpKeepAliveIdle': 100},
+      },
+    };
+  }
+
+  static List<int> _parseFragmentRange(
+    String value, {
+    required String field,
+    required int minimum,
+  }) {
+    final match = RegExp(r'^(\d+)(?:-(\d+))?$').firstMatch(value.trim());
+    if (match == null) {
+      throw FormatException(
+        'Invalid Fragment $field. Use an integer or an inclusive range.',
+      );
+    }
+    final first = int.parse(match.group(1)!);
+    final last = int.parse(match.group(2) ?? match.group(1)!);
+    const maxInt32 = 0x7fffffff;
+    if (first < minimum || last < minimum || first > last || last > maxInt32) {
+      throw FormatException('Invalid Fragment $field range.');
+    }
+    return [first, last];
   }
 
   static List<Map<String, dynamic>> _vpnInbounds() => [
@@ -216,11 +321,21 @@ class XrayConfigBuilder {
     return decoded;
   }
 
+  /// Use the optional host only as an SNI fallback. Fragmenting the ClientHello
+  /// already hides a configured SNI from single-packet DPI; replacing it can
+  /// break TLS certificate checks or REALITY authentication. Never invent TLS
+  /// for a server whose link has no TLS security.
   static void _applyFakeHost(Map<String, dynamic> proxy, String host) {
     final stream = Map<String, dynamic>.from((proxy['streamSettings'] as Map?) ?? const {});
-    if (stream['security'] == 'tls') { final tls = Map<String, dynamic>.from((stream['tlsSettings'] as Map?) ?? const {}); tls['serverName'] = host; stream['tlsSettings'] = tls; }
-    else if (stream['security'] == 'reality') { final r = Map<String, dynamic>.from((stream['realitySettings'] as Map?) ?? const {}); r['serverName'] = host; stream['realitySettings'] = r; }
-    else { stream['security'] = 'tls'; stream['tlsSettings'] = {'serverName': host, 'allowInsecure': true}; }
+    if (stream['security'] == 'tls') {
+      final tls = Map<String, dynamic>.from((stream['tlsSettings'] as Map?) ?? const {});
+      if ('${tls['serverName'] ?? ''}'.trim().isEmpty) tls['serverName'] = host;
+      stream['tlsSettings'] = tls;
+    } else if (stream['security'] == 'reality') {
+      final reality = Map<String, dynamic>.from((stream['realitySettings'] as Map?) ?? const {});
+      if ('${reality['serverName'] ?? ''}'.trim().isEmpty) reality['serverName'] = host;
+      stream['realitySettings'] = reality;
+    }
     proxy['streamSettings'] = stream;
   }
 

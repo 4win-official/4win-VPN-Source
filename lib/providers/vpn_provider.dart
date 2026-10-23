@@ -2098,7 +2098,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     final fragEnabled = prefs.getBool('xray_fragment') ?? false;
     final fragPackets = prefs.getString('xray_fragment_packets') ?? 'tlshello';
-    final fragLength = prefs.getString('xray_fragment_length') ?? '10-20';
+    final fragLength = prefs.getString('xray_fragment_length') ?? '100-200';
     final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
     final fragHost = prefs.getString('xray_fragment_host') ?? '';
     return XrayConfigBuilder.buildForDelayTest(
@@ -2886,7 +2886,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       final fragEnabled = prefs.getBool('xray_fragment') ?? false;
       final fragPackets =
           prefs.getString('xray_fragment_packets') ?? 'tlshello';
-      final fragLength = prefs.getString('xray_fragment_length') ?? '10-20';
+      final fragLength = prefs.getString('xray_fragment_length') ?? '100-200';
       final fragInterval = prefs.getString('xray_fragment_interval') ?? '10-20';
       final fragHost = prefs.getString('xray_fragment_host') ?? '';
       // Connection mode: 'vpn' (system tunnel) or 'proxy' (local 127.0.0.1:4444

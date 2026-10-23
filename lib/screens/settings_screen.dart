@@ -50,7 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Xray fragment (moved here from the server list)
   bool _xrayFragment = false;
   final _xrayFragPacketsController = TextEditingController(text: 'tlshello');
-  final _xrayFragLengthController = TextEditingController(text: '10-20');
+  final _xrayFragLengthController = TextEditingController(text: '100-200');
   final _xrayFragIntervalController = TextEditingController(text: '10-20');
   final _xrayFakeHostController = TextEditingController();
   // Xray concurrent delay-test count (how many configs tested at once).
@@ -154,7 +154,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _xrayFragPacketsController.text =
           prefs.getString('xray_fragment_packets') ?? 'tlshello';
       _xrayFragLengthController.text =
-          prefs.getString('xray_fragment_length') ?? '10-20';
+          prefs.getString('xray_fragment_length') ?? '100-200';
       _xrayFragIntervalController.text =
           prefs.getString('xray_fragment_interval') ?? '10-20';
       _xrayFakeHostController.text =
@@ -225,7 +225,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setString(
         'xray_fragment_length',
         _xrayFragLengthController.text.trim().isEmpty
-            ? '10-20'
+            ? '100-200'
             : _xrayFragLengthController.text.trim());
     await prefs.setString(
         'xray_fragment_interval',
@@ -666,8 +666,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     Text(
-                      'Real Xray TLS fragmentation (freedom + fragment). '
-                      'Splits the ClientHello so DPI cannot read the SNI.',
+                      'For TCP/TLS Xray links only. Splits the ClientHello '
+                      'while preserving the server name from the link.',
                       style: TextStyle(
                         fontSize: 12,
                         color: isDark ? Colors.white60 : Colors.black54,
@@ -696,11 +696,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (enabled) ...[
             const SizedBox(height: 12),
-            // Fakehost (fake SNI) — overrides the TLS serverName.
+            // Optional SNI fallback, used only if the server link has none.
             TextField(
               controller: _xrayFakeHostController,
               decoration: const InputDecoration(
-                labelText: 'Fakehost (fake SNI, optional)',
+                labelText: 'SNI fallback (optional)',
                 hintText: 'cloudflare.com',
                 isDense: true,
                 border: OutlineInputBorder(),
@@ -727,7 +727,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     controller: _xrayFragLengthController,
                     decoration: const InputDecoration(
                       labelText: 'Length (byte)',
-                      hintText: '10-20',
+                      hintText: '100-200',
                       isDense: true,
                       border: OutlineInputBorder(),
                     ),
