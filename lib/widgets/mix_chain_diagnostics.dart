@@ -16,6 +16,9 @@ class MixChainDiagnostics extends StatelessWidget {
       data.phase == 'Chain stopped' ||
       data.states.contains(MixBlockState.failed);
 
+  static bool hasSuccessfulConnection(MixDiagnostics data) =>
+      data.phase == 'Connected — complete-chain test passed';
+
   void _showGraph(BuildContext context) {
     final provider = context.read<VpnProvider>();
     showModalBottomSheet<void>(
@@ -72,14 +75,21 @@ class MixChainDiagnostics extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => hasFailure(diagnostics)
-      ? OutlinedButton.icon(
-          key: const ValueKey('mix-failure-graph-button'),
-          onPressed: () => _showGraph(context),
-          icon: const Icon(Icons.account_tree, color: Colors.red),
-          label: const Text('View failed chain'),
-        )
-      : const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final failed = hasFailure(diagnostics);
+    final connected =
+        hasSuccessfulConnection(diagnostics) &&
+        !diagnostics.states.contains(MixBlockState.failed);
+    if (!failed && !connected) return const SizedBox.shrink();
+    return OutlinedButton.icon(
+      key: ValueKey(
+        failed ? 'mix-failure-graph-button' : 'mix-success-graph-button',
+      ),
+      onPressed: () => _showGraph(context),
+      icon: Icon(Icons.account_tree, color: failed ? Colors.red : null),
+      label: Text(failed ? 'View failed chain' : 'View Mix chain'),
+    );
+  }
 }
 
 /// A vertical connected block diagram, in device-to-exit order. The list is
@@ -184,6 +194,8 @@ class MixChainGraph extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final attributed = diagnostics.states.contains(MixBlockState.failed);
+    final connected =
+        !attributed && MixChainDiagnostics.hasSuccessfulConnection(diagnostics);
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
       itemCount: diagnostics.hops.length + 2,
@@ -198,6 +210,14 @@ class MixChainGraph extends StatelessWidget {
           );
         }
         if (item == diagnostics.hops.length + 1) {
+          if (connected) {
+            return const Column(
+              children: [
+                Icon(Icons.check_circle_outline, size: 34, color: Colors.green),
+                Text('Connected', textAlign: TextAlign.center),
+              ],
+            );
+          }
           return Column(
             children: [
               Icon(

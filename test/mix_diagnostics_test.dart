@@ -228,4 +228,58 @@ void main() {
     expect(find.byType(MixChainGraph), findsNothing);
     provider.dispose();
   });
+
+  testWidgets(
+    'successful Mix shows its chain graph with verified WARP egress',
+    (tester) async {
+      final strategy = MixStrategy(
+        id: 'warp-chain',
+        name: 'Verified WARP chain',
+        hops: const [
+          MixHop(protocol: 'xray', serverId: 'first'),
+          MixHop(protocol: 'warp', serverId: 'default'),
+        ],
+      );
+      final connected = MixDiagnostics.begin(strategy, 'connected').applyNative(
+        {
+          'attemptId': 'connected',
+          'phase': 'Connected — complete-chain test passed',
+          'blocks': [
+            {'index': 0, 'state': 'ready'},
+            {
+              'index': 1,
+              'state': 'verified',
+              'detail': 'WARP reachable · exit IP 104.16.132.229',
+            },
+          ],
+        },
+      );
+      final provider = _GraphProvider(connected);
+      await tester.pumpWidget(
+        ChangeNotifierProvider<VpnProvider>.value(
+          value: provider,
+          child: MaterialApp(
+            home: Scaffold(body: MixChainDiagnostics(diagnostics: connected)),
+          ),
+        ),
+      );
+
+      expect(find.text('View Mix chain'), findsOneWidget);
+      expect(find.text('View failed chain'), findsNothing);
+      expect(find.byType(MixChainGraph), findsNothing);
+      await tester.tap(find.text('View Mix chain'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MixChainGraph), findsOneWidget);
+      expect(find.text('1. Xray'), findsOneWidget);
+      expect(find.text('2. WARP'), findsOneWidget);
+      expect(find.text('WARP verified'), findsOneWidget);
+      expect(
+        find.text('WARP reachable · exit IP 104.16.132.229'),
+        findsOneWidget,
+      );
+      expect(find.text('Connected'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      provider.dispose();
+    },
+  );
 }
