@@ -241,14 +241,10 @@ def collect_go_class_names(jar_bytes: bytes, old_pkg: str) -> set[bytes]:
 # ELF patching (JNI export names + FindClass strings)
 # --------------------------------------------------------------------------
 #
-# Both patches are length-preserving substring rewrites, which makes them
-# independent of the ELF's internal structure: they work whether the .so has
-# section headers or is fully stripped, and they keep every string NUL-
-# terminated at the same offset, so symbol/string tables, hash tables and
-# relocations stay valid. `Java_go_` is a JNI-name prefix so specific that a
-# coincidental occurrence elsewhere in a gomobile .so is not a realistic
-# concern, and re-naming it anywhere is semantically correct anyway because
-# the Java class really did move to `gi`.
+# JNI and FindClass names are length-preserving rewrites, but changing exported
+# JNI names also invalidates the ELF dynamic symbol hash tables. We rebuild
+# those tables below; merely changing .dynstr leaves names visible to `nm` but
+# unreachable to Android's linker/dlsym lookup.
 
 
 def patch_so(data: bytes, class_prefix: tuple[str, str],
@@ -292,7 +288,239 @@ def patch_so(data: bytes, class_prefix: tuple[str, str],
             replaced += count
             report.append(f"  {cls.decode()} -> {new.decode()} x{count}")
 
-    return bytes(buf), report
+    patched, hash_report = rebuild_dynamic_symbol_hashes(bytes(buf))
+    report.extend(hash_report)
+    return patched, report
+
+
+def _elf_dynamic_info(data: bytes):
+    """Read ELF class, dynamic tags, and a virtual-address-to-file mapper."""
+    if len(data) < 52 or data[:4] != b"\x7fELF":
+        raise ValueError("not an ELF shared library")
+    elf_class, encoding = data[4], data[5]
+    if elf_class not in (1, 2) or encoding not in (1, 2):
+        raise ValueError("unsupported ELF class or byte order")
+    endian = "<" if encoding == 1 else ">"
+    word_size = 4 if elf_class == 1 else 8
+
+    if elf_class == 2:
+        phoff = struct.unpack_from(endian + "Q", data, 32)[0]
+        phentsize, phnum = struct.unpack_from(endian + "HH", data, 54)
+        phfmt = endian + "IIQQQQQQ"
+        dynfmt = endian + "qQ"
+    else:
+        phoff = struct.unpack_from(endian + "I", data, 28)[0]
+        phentsize, phnum = struct.unpack_from(endian + "HH", data, 42)
+        phfmt = endian + "IIIIIIII"
+        dynfmt = endian + "iI"
+
+    expected_phentsize = struct.calcsize(phfmt)
+    if phentsize < expected_phentsize or phoff + phentsize * phnum > len(data):
+        raise ValueError("invalid ELF program-header table")
+
+    load_segments: list[tuple[int, int, int]] = []
+    dynamic_segment: tuple[int, int] | None = None
+    for index in range(phnum):
+        fields = struct.unpack_from(phfmt, data, phoff + index * phentsize)
+        if elf_class == 2:
+            p_type, _flags, p_offset, p_vaddr, _paddr, p_filesz, _memsz, _align = fields
+        else:
+            p_type, p_offset, p_vaddr, _paddr, p_filesz, _memsz, _flags, _align = fields
+        if p_type == 1:  # PT_LOAD
+            load_segments.append((p_offset, p_vaddr, p_filesz))
+        elif p_type == 2:  # PT_DYNAMIC
+            dynamic_segment = (p_offset, p_filesz)
+    if dynamic_segment is None or not load_segments:
+        raise ValueError("ELF is missing PT_DYNAMIC or PT_LOAD")
+
+    def vaddr_to_offset(address: int, size: int = 1) -> int:
+        for file_offset, virtual_address, file_size in load_segments:
+            if virtual_address <= address and address + size <= virtual_address + file_size:
+                result = file_offset + address - virtual_address
+                if result + size <= len(data):
+                    return result
+        raise ValueError(f"ELF virtual address 0x{address:x} is not file-backed")
+
+    dyn_offset, dyn_size = dynamic_segment
+    dyn_entsize = struct.calcsize(dynfmt)
+    if dyn_offset + dyn_size > len(data) or dyn_size % dyn_entsize:
+        raise ValueError("invalid ELF dynamic segment")
+    tags: dict[int, int] = {}
+    for offset in range(dyn_offset, dyn_offset + dyn_size, dyn_entsize):
+        tag, value = struct.unpack_from(dynfmt, data, offset)
+        if tag == 0:  # DT_NULL
+            break
+        if tag in (4, 5, 6, 10, 11, 0x6FFFFEF5):
+            tags[tag] = value
+    return elf_class, endian, word_size, tags, vaddr_to_offset
+
+
+def _dynamic_symbols(data: bytes):
+    """Return ELF details, dynamic symbol names, and hash-table locations."""
+    elf_class, endian, word_size, tags, vaddr_to_offset = _elf_dynamic_info(data)
+    required = (4, 5, 6, 10, 11)
+    missing = [tag for tag in required if tag not in tags]
+    if missing:
+        raise ValueError(f"ELF lacks required dynamic tags: {missing}")
+    symtab_entry_size = 24 if elf_class == 2 else 16
+    if tags[11] != symtab_entry_size:
+        raise ValueError(f"unexpected DT_SYMENT size {tags[11]}")
+
+    hash_offset = vaddr_to_offset(tags[4], 8)
+    old_bucket_count, symbol_count = struct.unpack_from(endian + "II", data, hash_offset)
+    if old_bucket_count < 1 or symbol_count < 1:
+        raise ValueError("invalid ELF DT_HASH header")
+    old_hash_size = 8 + 4 * (old_bucket_count + symbol_count)
+    vaddr_to_offset(tags[4], old_hash_size)
+
+    symtab_offset = vaddr_to_offset(tags[6], symbol_count * symtab_entry_size)
+    strtab_offset = vaddr_to_offset(tags[5], tags[10])
+    strings = data[strtab_offset:strtab_offset + tags[10]]
+    names: list[bytes] = []
+    for index in range(symbol_count):
+        name_offset = struct.unpack_from(endian + "I", data,
+                                          symtab_offset + index * symtab_entry_size)[0]
+        if name_offset >= len(strings):
+            raise ValueError(f"dynamic symbol {index} has invalid st_name")
+        end = strings.find(b"\0", name_offset)
+        if end < 0:
+            raise ValueError(f"dynamic symbol {index} name is unterminated")
+        names.append(strings[name_offset:end])
+
+    gnu_offset = None
+    gnu_size = None
+    gnu_header = None
+    if 0x6FFFFEF5 in tags:
+        gnu_offset = vaddr_to_offset(tags[0x6FFFFEF5], 16)
+        gnu_header = struct.unpack_from(endian + "IIII", data, gnu_offset)
+        old_gnu_buckets, symoffset, bloom_size, _bloom_shift = gnu_header
+        if old_gnu_buckets < 1 or bloom_size < 1 or symoffset > symbol_count:
+            raise ValueError("invalid ELF DT_GNU_HASH header")
+        gnu_size = (16 + bloom_size * word_size + 4 * old_gnu_buckets +
+                    4 * (symbol_count - symoffset))
+        vaddr_to_offset(tags[0x6FFFFEF5], gnu_size)
+
+    return (elf_class, endian, word_size, tags, vaddr_to_offset, names,
+            hash_offset, old_hash_size, gnu_offset, gnu_size, gnu_header)
+
+
+def _gnu_hash(name: bytes) -> int:
+    value = 5381
+    for byte in name:
+        value = ((value << 5) + value + byte) & 0xFFFFFFFF
+    return value
+
+
+def rebuild_dynamic_symbol_hashes(data: bytes) -> tuple[bytes, list[str]]:
+    """Rebuild DT_HASH and DT_GNU_HASH after changing .dynstr symbol names.
+
+    One bucket deliberately keeps the existing dynsym order valid: all hashed
+    symbols form a single contiguous bucket chain. This avoids moving dynsym
+    entries (and therefore avoids changing relocation/version-table indexes).
+    The existing tables are large enough because reducing the bucket count can
+    only make each replacement table smaller or equal in size.
+    """
+    (elf_class, endian, word_size, tags, _vaddr_to_offset, names,
+     hash_offset, old_hash_size, gnu_offset, old_gnu_size, gnu_header) = _dynamic_symbols(data)
+    symbol_count = len(names)
+    out = bytearray(data)
+
+    # Valid SysV hash table with a single bucket and a complete linear chain.
+    sysv_chains = [0] * symbol_count
+    for index in range(1, symbol_count):
+        sysv_chains[index] = index + 1 if index + 1 < symbol_count else 0
+    sysv = (struct.pack(endian + "II", 1, symbol_count) +
+            struct.pack(endian + "I", 1 if symbol_count > 1 else 0) +
+            struct.pack(endian + f"{symbol_count}I", *sysv_chains))
+    if len(sysv) > old_hash_size:
+        raise ValueError("rebuilt DT_HASH does not fit the original ELF table")
+    out[hash_offset:hash_offset + len(sysv)] = sysv
+
+    messages = [f"rebuilt DT_HASH with one bucket for {symbol_count} symbols"]
+    if gnu_offset is not None and gnu_header is not None and old_gnu_size is not None:
+        _old_buckets, symoffset, bloom_size, bloom_shift = gnu_header
+        bloom_word_bits = word_size * 8
+        bloom = [0] * bloom_size
+        chain_values: list[int] = []
+        for index in range(symoffset, symbol_count):
+            value = _gnu_hash(names[index])
+            bloom_index = (value // bloom_word_bits) % bloom_size
+            bloom[bloom_index] |= 1 << (value % bloom_word_bits)
+            bloom[bloom_index] |= 1 << ((value >> bloom_shift) % bloom_word_bits)
+            chain_values.append(value & 0xFFFFFFFE)
+        if chain_values:
+            chain_values[-1] |= 1  # end of the single bucket's chain
+        gnu = (struct.pack(endian + "IIII", 1, symoffset, bloom_size, bloom_shift) +
+               struct.pack(endian + f"{bloom_size}{'Q' if word_size == 8 else 'I'}", *bloom) +
+               struct.pack(endian + "I", symoffset if symoffset < symbol_count else 0))
+        if chain_values:
+            gnu += struct.pack(endian + f"{len(chain_values)}I", *chain_values)
+        if len(gnu) > old_gnu_size:
+            raise ValueError("rebuilt DT_GNU_HASH does not fit the original ELF table")
+        out[gnu_offset:gnu_offset + len(gnu)] = gnu
+        messages.append("rebuilt DT_GNU_HASH with one bucket and a refreshed bloom filter")
+    return bytes(out), messages
+
+
+def elf_dynamic_symbol_resolves(data: bytes, name: bytes, table: str) -> bool:
+    """Simulate a SysV or GNU dynamic-hash lookup for an ELF symbol name."""
+    (_, endian, word_size, tags, vaddr_to_offset, names, _hash_offset,
+     _old_hash_size, gnu_offset, _gnu_size, gnu_header) = _dynamic_symbols(data)
+    if table == "sysv":
+        offset = vaddr_to_offset(tags[4], 8)
+        bucket_count, symbol_count = struct.unpack_from(endian + "II", data, offset)
+        bucket_offset = offset + 8
+        chain_offset = bucket_offset + 4 * bucket_count
+        bucket = struct.unpack_from(endian + "I", data,
+                                    bucket_offset + 4 * (_sysv_hash(name) % bucket_count))[0]
+        seen = 0
+        while bucket and bucket < symbol_count and seen < symbol_count:
+            if names[bucket] == name:
+                return True
+            bucket = struct.unpack_from(endian + "I", data, chain_offset + 4 * bucket)[0]
+            seen += 1
+        return False
+    if table != "gnu" or gnu_offset is None or gnu_header is None:
+        return False
+
+    bucket_count, symoffset, bloom_size, bloom_shift = struct.unpack_from(
+        endian + "IIII", data, gnu_offset)
+    if bucket_count < 1 or bloom_size < 1:
+        return False
+    word_fmt = "Q" if word_size == 8 else "I"
+    bloom_offset = gnu_offset + 16
+    bloom_index = (_gnu_hash(name) // (word_size * 8)) % bloom_size
+    bloom_word = struct.unpack_from(endian + word_fmt, data,
+                                    bloom_offset + bloom_index * word_size)[0]
+    value = _gnu_hash(name)
+    mask = (1 << (value % (word_size * 8))) | (1 << ((value >> bloom_shift) % (word_size * 8)))
+    if bloom_word & mask != mask:
+        return False
+    bucket_offset = bloom_offset + bloom_size * word_size
+    chain_offset = bucket_offset + 4 * bucket_count
+    index = struct.unpack_from(endian + "I", data,
+                               bucket_offset + 4 * (value % bucket_count))[0]
+    symbol_count = len(names)
+    while index >= symoffset and index < symbol_count:
+        chain = struct.unpack_from(endian + "I", data,
+                                   chain_offset + 4 * (index - symoffset))[0]
+        if (chain | 1) == (value | 1) and names[index] == name:
+            return True
+        if chain & 1:
+            return False
+        index += 1
+    return False
+
+
+def _sysv_hash(name: bytes) -> int:
+    value = 0
+    for byte in name:
+        value = (value << 4) + byte
+        high = value & 0xF0000000
+        if high:
+            value ^= high >> 24
+        value &= ~high
+    return value & 0xFFFFFFFF
 
 
 # --------------------------------------------------------------------------
@@ -398,9 +626,12 @@ def verify(entries: dict[str, bytes], class_prefix: tuple[str, str],
                         f"{info.filename}: reference to {cls.decode()} "
                         f"survived")
 
-    # native libs: no Java_go_ exports / go/Seq strings may survive anywhere;
-    # at least one lib must carry the relocated Java_gi_* exports.
+    # Native libs: no Java_go_ exports / go/Seq strings may survive anywhere;
+    # every packaged Psiphon ABI must resolve the initializer through both
+    # ELF hash tables, not merely contain its renamed string in .dynstr.
     saw_gi_exports = False
+    saw_gi_init = False
+    gi_init = b"Java_" + new_pkg.encode() + b"_Seq_init"
     for name, blob in entries.items():
         if not (name.startswith("jni/") and name.endswith(".so")):
             continue
@@ -408,6 +639,23 @@ def verify(entries: dict[str, bytes], class_prefix: tuple[str, str],
             problems.append(f"{name}: Java_{old_pkg}_* JNI exports survived")
         if (b"Java_" + new_pkg.encode() + b"_") in blob:
             saw_gi_exports = True
+        if name.endswith(f"/lib{new_lib}.so"):
+            abi = name.split("/")[1]
+            if gi_init not in blob:
+                problems.append(f"{name}: {gi_init.decode()} export is missing")
+            else:
+                saw_gi_init = True
+                for table, table_tag in (("gnu", "DT_GNU_HASH"), ("sysv", "DT_HASH")):
+                    try:
+                        resolves = elf_dynamic_symbol_resolves(blob, gi_init, table)
+                    except (ValueError, struct.error) as error:
+                        problems.append(f"{name}: cannot validate {table_tag} symbol lookup: {error}")
+                        continue
+                    if not resolves:
+                        problems.append(
+                            f"{name}: {gi_init.decode()} is unreachable through {table_tag}"
+                        )
+                print(f"  {abi}: {gi_init.decode()} resolves through DT_GNU_HASH and DT_HASH")
         for cls in go_classes:
             if cls in blob:
                 problems.append(
@@ -415,6 +663,8 @@ def verify(entries: dict[str, bytes], class_prefix: tuple[str, str],
     if not saw_gi_exports:
         problems.append(f"no jni/*.so carries Java_{new_pkg}_* exports — "
                         "the rename was a no-op?")
+    if not saw_gi_init:
+        problems.append(f"no lib{new_lib}.so exports {gi_init.decode()}")
 
     if problems:
         print("\nVERIFICATION FAILED:", file=sys.stderr)
