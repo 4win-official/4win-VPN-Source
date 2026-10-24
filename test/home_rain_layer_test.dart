@@ -7,6 +7,7 @@ import 'package:vpn_swift/models/openvpn_config.dart';
 import 'package:vpn_swift/providers/theme_provider.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/screens/home_screen.dart';
+import 'package:vpn_swift/widgets/glass_power_button_surface.dart';
 import 'package:vpn_swift/widgets/rain_animation.dart';
 import 'package:vpn_swift/widgets/rain_button_surface.dart';
 import 'package:vpn_swift/widgets/snow_button_surface.dart';
@@ -112,6 +113,7 @@ void main() {
       final provider = FakeVpnProvider();
       await pumpHome(tester, provider);
 
+      expect(find.byType(GlassPowerButtonSurface), findsNothing);
       final rain = find.byType(RainAnimation);
       expect(rain, findsOneWidget);
       final mainStack = tester.widget<Stack>(
@@ -161,6 +163,7 @@ void main() {
             .enabled,
         isTrue,
       );
+      expect(find.byType(GlassPowerButtonSurface), findsNothing);
       expect(find.byType(RainButtonSurface), findsOneWidget);
       expect(
         tester
@@ -173,6 +176,11 @@ void main() {
       await themes.setTheme(AppTheme.system);
       await tester.pump();
       expect(find.byType(RainAnimation), findsNothing);
+      expect(find.byType(GlassPowerButtonSurface), findsOneWidget);
+      expect(
+        tester.getRect(find.byKey(const ValueKey('power-button'))).size,
+        const Size(200, 200),
+      );
       expect(find.byType(SnowButtonSurface), findsOneWidget);
       expect(
         tester

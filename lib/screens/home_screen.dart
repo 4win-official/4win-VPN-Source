@@ -19,6 +19,7 @@ import '../widgets/cat_scene.dart';
 import '../widgets/cat_power_button_ears.dart';
 import '../widgets/liquid_background.dart';
 import '../widgets/heart_burst.dart';
+import '../widgets/glass_power_button_surface.dart';
 import '../widgets/protocol_selector_dialog.dart';
 import '../widgets/rainbow_heart_button.dart';
 import 'donate_screen.dart';
@@ -236,6 +237,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isAutumnTheme = themeProvider.selectedTheme == AppTheme.autumn;
     final isLiquidGlassTheme =
         themeProvider.selectedTheme == AppTheme.liquidGlass;
+    final isSystemTheme = themeProvider.selectedTheme == AppTheme.system;
 
     // Theme-specific colors
     // تم صورتی اکنون نسخه روز و شب دارد:
@@ -533,6 +535,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     ],
                                   );
                                 }
+
+                                final buttonContentColor = isSystemTheme
+                                    ? (isDark ? Colors.white : Colors.black87)
+                                    : (isDark ? Colors.black87 : Colors.white);
 
                                 // Standard centered layout:
                                 //  - The power button is the fixed visual anchor and sits
@@ -853,10 +859,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                 borderRadius: isPixelTheme
                                                     ? BorderRadius.zero
                                                     : null,
-                                                color: _getButtonColor(
-                                                  provider.status,
-                                                  isDark,
-                                                ),
+                                                color: isSystemTheme
+                                                    ? Colors.transparent
+                                                    : _getButtonColor(
+                                                        provider.status,
+                                                        isDark,
+                                                      ),
                                                 gradient: isMascotTheme
                                                     ? LinearGradient(
                                                         begin:
@@ -959,6 +967,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                           ),
                                                         ),
                                                       ]
+                                                    : isSystemTheme
+                                                    ? [
+                                                        BoxShadow(
+                                                          color:
+                                                              _getButtonColor(
+                                                                provider.status,
+                                                                isDark,
+                                                              ).withValues(
+                                                                alpha: isDark
+                                                                    ? .34
+                                                                    : .24,
+                                                              ),
+                                                          blurRadius: 38,
+                                                          spreadRadius: 2,
+                                                        ),
+                                                        BoxShadow(
+                                                          color: Colors.white
+                                                              .withValues(
+                                                                alpha: isDark
+                                                                    ? .24
+                                                                    : .32,
+                                                              ),
+                                                          blurRadius: 28,
+                                                        ),
+                                                        BoxShadow(
+                                                          color:
+                                                              const Color(
+                                                                0xFF8CBDF4,
+                                                              ).withValues(
+                                                                alpha: isDark
+                                                                    ? .18
+                                                                    : .10,
+                                                              ),
+                                                          blurRadius: 48,
+                                                          spreadRadius: 5,
+                                                        ),
+                                                      ]
                                                     : isDark
                                                     ? [
                                                         // نئون گلو در dark mode
@@ -1008,11 +1053,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                     isDark,
                                                   ),
                                                   child: Center(
-                                                    child: provider.isConnecting
+                                                    child: isSystemTheme
+                                                        ? GlassPowerButtonSurface(
+                                                            isDark: isDark,
+                                                            tint:
+                                                                _getButtonColor(
+                                                                  provider
+                                                                      .status,
+                                                                  isDark,
+                                                                ),
+                                                            child:
+                                                                provider
+                                                                    .isConnecting
+                                                                ? FourWinLoader(
+                                                                    color:
+                                                                        buttonContentColor,
+                                                                    strokeWidth:
+                                                                        3,
+                                                                  )
+                                                                : Icon(
+                                                                    _getButtonIcon(
+                                                                      provider
+                                                                          .status,
+                                                                    ),
+                                                                    size: 80,
+                                                                    color:
+                                                                        buttonContentColor,
+                                                                  ),
+                                                          )
+                                                        : provider.isConnecting
                                                         ? FourWinLoader(
-                                                            color: isDark
-                                                                ? Colors.black87
-                                                                : Colors.white,
+                                                            color:
+                                                                buttonContentColor,
                                                             strokeWidth: 3,
                                                           )
                                                         : Icon(
@@ -1020,9 +1092,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                               provider.status,
                                                             ),
                                                             size: 80,
-                                                            color: isDark
-                                                                ? Colors.black87
-                                                                : Colors.white,
+                                                            color:
+                                                                buttonContentColor,
                                                           ),
                                                   ),
                                                 ),
