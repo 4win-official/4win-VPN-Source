@@ -1,8 +1,9 @@
+import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
-/// A clear, reflective glass sphere that leaves its background visible.
+/// A clear, reflective glass sphere that leaves the scene behind it visible.
 ///
 /// The surface is decorative only: its child remains the existing power icon
 /// or connection loader, and callers keep ownership of the button gesture.
@@ -21,27 +22,104 @@ class GlassPowerButtonSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox.expand(
-      child: RepaintBoundary(
-        child: ClipOval(
-          child: BackdropFilter(
-            // Real glass softens the scene behind it just a little; the icon
-            // and the specular reflections painted above it remain crisp.
-            filter: ImageFilter.blur(sigmaX: 1.15, sigmaY: 1.15),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: -34,
+            top: -34,
+            right: -34,
+            bottom: -34,
             child: CustomPaint(
-              painter: GlassPowerButtonPainter(isDark: isDark, tint: tint),
-              child: Center(child: child),
+              painter: GlassPowerButtonGlowPainter(isDark: isDark, tint: tint),
+              child: const SizedBox.expand(),
             ),
           ),
-        ),
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: ClipOval(
+                child: BackdropFilter(
+                  // Keep the background legible through the clear lens.
+                  filter: ImageFilter.blur(sigmaX: 0.45, sigmaY: 0.45),
+                  child: CustomPaint(
+                    painter: GlassPowerButtonPainter(
+                      isDark: isDark,
+                      tint: tint,
+                    ),
+                    child: Center(child: child),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// Paints a stationary, transparent glass lens with restrained optical cues.
+/// A soft, small studio bloom around the glass edge; the center stays unlit.
+class GlassPowerButtonGlowPainter extends CustomPainter {
+  const GlassPowerButtonGlowPainter({required this.isDark, required this.tint});
+
+  final bool isDark;
+  final Color tint;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2 - 36.5;
+    if (radius <= 0) return;
+
+    final bounds = Rect.fromCircle(center: center, radius: radius + 34);
+    canvas.drawCircle(
+      center,
+      radius + 34,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            Colors.transparent,
+            Colors.transparent,
+            Colors.white.withValues(alpha: isDark ? 0.17 : 0.10),
+            const Color(0xFFBBD9F4).withValues(alpha: isDark ? 0.12 : 0.065),
+            Colors.transparent,
+          ],
+          stops: const [0, 0.75, 0.84, 0.92, 1],
+        ).createShader(bounds),
+    );
+
+    // Wide, very faint bloom under the sharper glass reflections.
+    canvas.drawCircle(
+      center,
+      radius + 1,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 18
+        ..color = Colors.white.withValues(alpha: isDark ? 0.13 : 0.075)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
+    );
+    canvas.drawCircle(
+      center,
+      radius + 1,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = tint.withValues(alpha: isDark ? 0.075 : 0.04)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 13),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant GlassPowerButtonGlowPainter oldDelegate) =>
+      oldDelegate.isDark != isDark || oldDelegate.tint != tint;
+}
+
+/// Paints a stationary dark lens with a sculpted silver-white glass rim.
 ///
-/// The uneven edge reflections and broad upper-left softbox reflection are
-/// intentional: unlike water, the glass has no ripples, beads, or caustics.
+/// Reflections are fixed studio highlights. There are no ripples, droplets,
+/// caustics, or liquid animation, and the central glass stays transparent.
 class GlassPowerButtonPainter extends CustomPainter {
   const GlassPowerButtonPainter({required this.isDark, required this.tint});
 
@@ -57,196 +135,233 @@ class GlassPowerButtonPainter extends CustomPainter {
     if (radius <= 0) return;
 
     final sphere = Rect.fromCircle(center: center, radius: radius);
-    final rim = Rect.fromCircle(center: center, radius: radius - 2.1);
+    final outerEdge = radius - 0.8;
+    final rim = Rect.fromCircle(center: center, radius: radius - 2.0);
 
-    // A very light smoked-glass body keeps the background visible while the
-    // edge shading gives the sphere a curved, solid-glass silhouette.
+    // A nearly clear graphite lens: a little edge shading gives it volume,
+    // while the center remains black on the reference's black background.
     canvas.drawCircle(
       center,
       radius,
       Paint()
         ..shader = RadialGradient(
-          center: const Alignment(-0.10, -0.12),
-          radius: 1.18,
-          colors: isDark
-              ? [
-                  Colors.white.withValues(alpha: 0.018),
-                  const Color(0xFF8293A2).withValues(alpha: 0.025),
-                  const Color(0xFFBBC9D5).withValues(alpha: 0.115),
-                  const Color(0xFF17212B).withValues(alpha: 0.17),
-                ]
-              : [
-                  Colors.white.withValues(alpha: 0.035),
-                  Colors.white.withValues(alpha: 0.075),
-                  const Color(0xFF9EABB6).withValues(alpha: 0.105),
-                  const Color(0xFF394651).withValues(alpha: 0.12),
-                ],
-          stops: const [0, 0.55, 0.88, 1],
+          center: const Alignment(0.02, -0.02),
+          radius: 1,
+          colors: [
+            Colors.white.withValues(alpha: isDark ? 0.004 : 0.010),
+            const Color(0xFF8D9BA9).withValues(alpha: isDark ? 0.010 : 0.018),
+            const Color(0xFF778694).withValues(alpha: isDark ? 0.024 : 0.036),
+            const Color(0xFFAAB8C5).withValues(alpha: isDark ? 0.052 : 0.075),
+            const Color(0xFFDAE5EF).withValues(alpha: isDark ? 0.075 : 0.105),
+          ],
+          stops: const [0, 0.54, 0.78, 0.94, 1],
         ).createShader(sphere),
     );
 
-    // Subtle internal edge shading makes the surface read as a thick lens,
-    // not as a flat circle outlined in white.
+    // The dark inset bevel separates the lens from its bright metal-like edge.
     canvas.drawCircle(
       center,
-      radius - 5.5,
+      radius - 5.2,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 10
-        ..color = Colors.black.withValues(alpha: isDark ? 0.16 : 0.09)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+        ..strokeWidth = 8
+        ..color = Colors.black.withValues(alpha: isDark ? 0.55 : 0.34)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
     );
 
-    // A dim continuous bevel anchors the segmented highlights. Most of the
-    // rim stays quiet; the brightest silver catches are deliberately uneven.
+    // Broad low light under the rim, then a quiet steel base all the way round.
     canvas.drawCircle(
       center,
-      radius - 1.7,
+      radius - 1.6,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.2
-        ..color = Colors.white.withValues(alpha: isDark ? 0.23 : 0.18),
+        ..strokeWidth = 9
+        ..color = const Color(
+          0xFFC8D7E6,
+        ).withValues(alpha: isDark ? 0.16 : 0.105)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5.2),
     );
     canvas.drawCircle(
       center,
-      radius - 2.0,
+      radius - 1.6,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 5.2
-        ..color = Colors.white.withValues(alpha: isDark ? 0.11 : 0.08)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.5),
-    );
-    canvas.drawCircle(
-      center,
-      radius - 2.0,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.2
+        ..strokeWidth = 7.2
         ..shader = SweepGradient(
+          transform: GradientRotation(-math.pi / 2),
           colors: [
-            Colors.white.withValues(alpha: isDark ? 0.62 : 0.48),
-            Colors.white.withValues(alpha: isDark ? 0.30 : 0.24),
-            const Color(0xFFB9D8F5).withValues(alpha: isDark ? 0.44 : 0.29),
-            Colors.white.withValues(alpha: isDark ? 0.22 : 0.15),
-            Colors.white.withValues(alpha: isDark ? 0.78 : 0.59),
-            Colors.white.withValues(alpha: isDark ? 0.96 : 0.77),
-            Colors.white.withValues(alpha: isDark ? 0.70 : 0.52),
-            tint.withValues(alpha: isDark ? 0.12 : 0.08),
-            Colors.white.withValues(alpha: isDark ? 0.40 : 0.30),
-            Colors.white.withValues(alpha: isDark ? 0.62 : 0.48),
+            Colors.white.withValues(alpha: isDark ? 0.36 : 0.26),
+            const Color(0xFFAAB6C2).withValues(alpha: isDark ? 0.17 : 0.12),
+            const Color(0xFFECF5FF).withValues(alpha: isDark ? 0.48 : 0.35),
+            Colors.white.withValues(alpha: isDark ? 0.10 : 0.07),
+            Colors.white.withValues(alpha: isDark ? 0.28 : 0.20),
+            const Color(0xFFB7D9FC).withValues(alpha: isDark ? 0.62 : 0.46),
+            Colors.white.withValues(alpha: isDark ? 0.13 : 0.09),
+            Colors.white.withValues(alpha: isDark ? 0.44 : 0.32),
+            const Color(0xFFB8C6D3).withValues(alpha: isDark ? 0.21 : 0.15),
+            Colors.white.withValues(alpha: isDark ? 0.36 : 0.26),
           ],
-          stops: const [0, 0.10, 0.20, 0.31, 0.40, 0.52, 0.63, 0.74, 0.86, 1],
+          stops: const [0, 0.09, 0.19, 0.29, 0.40, 0.53, 0.65, 0.76, 0.88, 1],
         ).createShader(rim),
     );
 
-    // Fine inner Fresnel line: faint enough to feel like a reflection inside
-    // the glass rather than a second drawn outline.
+    // Clean, narrow Fresnel lines frame the thicker variable silver bevel.
     canvas.drawCircle(
       center,
-      radius - 8.0,
+      outerEdge,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.8
-        ..color = Colors.white.withValues(alpha: isDark ? 0.13 : 0.09),
+        ..strokeWidth = 1.25
+        ..color = Colors.white.withValues(alpha: isDark ? 0.48 : 0.34),
+    );
+    canvas.drawCircle(
+      center,
+      radius - 7.2,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1
+        ..color = const Color(
+          0xFFDDEBFA,
+        ).withValues(alpha: isDark ? 0.26 : 0.17),
     );
 
-    // Soft reflection from a broad light source at the upper-left. A feathered
-    // underlayer and a translucent, tapered core mimic the reference's curved
-    // white reflection without turning it into a cartoon stroke.
-    final upperLeftReflection = Path()
-      ..moveTo(center.dx - radius * 0.70, center.dy - radius * 0.15)
-      ..cubicTo(
-        center.dx - radius * 0.62,
-        center.dy - radius * 0.48,
-        center.dx - radius * 0.36,
-        center.dy - radius * 0.77,
-        center.dx - radius * 0.10,
-        center.dy - radius * 0.82,
-      )
-      ..cubicTo(
-        center.dx - radius * 0.02,
-        center.dy - radius * 0.82,
-        center.dx + radius * 0.01,
-        center.dy - radius * 0.75,
-        center.dx - radius * 0.07,
-        center.dy - radius * 0.70,
-      )
-      ..cubicTo(
-        center.dx - radius * 0.29,
-        center.dy - radius * 0.66,
-        center.dx - radius * 0.48,
-        center.dy - radius * 0.43,
-        center.dx - radius * 0.55,
-        center.dy - radius * 0.19,
-      )
-      ..cubicTo(
-        center.dx - radius * 0.59,
-        center.dy - radius * 0.09,
-        center.dx - radius * 0.66,
-        center.dy - radius * 0.07,
-        center.dx - radius * 0.70,
-        center.dy - radius * 0.15,
-      )
-      ..close();
+    // Variable-width silver-white catches stay on the glass lip; the lens
+    // interior remains clear rather than carrying a broad studio streak.
+    _drawArc(
+      canvas,
+      rim,
+      start: -2.66,
+      sweep: 0.88,
+      width: 8.1,
+      color: const Color(0xFFEAF4FF).withValues(alpha: isDark ? 0.93 : 0.70),
+      blur: 3.2,
+    );
+    _drawArc(
+      canvas,
+      rim,
+      start: -2.61,
+      sweep: 0.77,
+      width: 4.2,
+      color: Colors.white.withValues(alpha: isDark ? 0.98 : 0.81),
+    );
 
+    // Smaller opposing specular catches: cool-white top/right, a blue-white
+    // glint at lower left, and a quiet lower-right reflection.
+    _drawArc(
+      canvas,
+      rim,
+      start: -1.47,
+      sweep: 0.60,
+      width: 8.2,
+      color: Colors.white.withValues(alpha: isDark ? 0.80 : 0.60),
+      blur: 4.2,
+    );
+    _drawArc(
+      canvas,
+      rim,
+      start: -1.41,
+      sweep: 0.51,
+      width: 4.8,
+      color: Colors.white.withValues(alpha: isDark ? 0.98 : 0.77),
+      blur: 0.9,
+    );
+    _drawArc(
+      canvas,
+      rim,
+      start: -0.12,
+      sweep: 0.25,
+      width: 3.0,
+      color: const Color(0xFFEAF5FF).withValues(alpha: isDark ? 0.74 : 0.53),
+      blur: 1.2,
+    );
+    _drawArc(
+      canvas,
+      rim,
+      start: 2.66,
+      sweep: 0.52,
+      width: 9.0,
+      color: const Color(0xFFE7F4FF).withValues(alpha: isDark ? 0.68 : 0.49),
+      blur: 4.0,
+    );
+    _drawArc(
+      canvas,
+      rim,
+      start: 2.72,
+      sweep: 0.42,
+      width: 5.2,
+      color: const Color(0xFFF4FAFF).withValues(alpha: isDark ? 0.95 : 0.72),
+      blur: 0.8,
+    );
+    _drawArc(
+      canvas,
+      rim,
+      start: 0.80,
+      sweep: 0.44,
+      width: 3.1,
+      color: Colors.white.withValues(alpha: isDark ? 0.58 : 0.39),
+      blur: 1.6,
+    );
+
+    // Fine inner glints add lens depth without a second circular ripple.
+    final rightReflection = Path()
+      ..moveTo(center.dx + radius * 0.69, center.dy - radius * 0.52)
+      ..cubicTo(
+        center.dx + radius * 0.78,
+        center.dy - radius * 0.42,
+        center.dx + radius * 0.82,
+        center.dy - radius * 0.27,
+        center.dx + radius * 0.81,
+        center.dy - radius * 0.14,
+      );
     canvas.drawPath(
-      upperLeftReflection,
-      Paint()
-        ..color = Colors.white.withValues(alpha: isDark ? 0.24 : 0.15)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
-    );
-    canvas.drawPath(
-      upperLeftReflection,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withValues(alpha: isDark ? 0.76 : 0.60),
-            Colors.white.withValues(alpha: isDark ? 0.52 : 0.38),
-            Colors.white.withValues(alpha: isDark ? 0.10 : 0.06),
-          ],
-          stops: const [0.08, 0.50, 1],
-        ).createShader(sphere),
-    );
-
-    // Narrow glints on the opposite edge and lower rim give the sphere depth
-    // while keeping the center clear and the light direction consistent.
-    canvas.drawArc(
-      rim,
-      -1.12,
-      0.62,
-      false,
+      rightReflection,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
-        ..strokeWidth = 2.0
-        ..color = Colors.white.withValues(alpha: isDark ? 0.58 : 0.42),
-    );
-    canvas.drawArc(
-      rim,
-      0.50,
-      0.42,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = 3.0
-        ..color = Colors.white.withValues(alpha: isDark ? 0.38 : 0.26)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.2),
-    );
-    canvas.drawArc(
-      rim,
-      2.18,
-      0.34,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = 2.2
-        ..color = Colors.white.withValues(alpha: isDark ? 0.31 : 0.21)
+        ..strokeWidth = 2.6
+        ..color = Colors.white.withValues(alpha: isDark ? 0.40 : 0.26)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.8),
     );
+
+    final innerLeftReflection = Path()
+      ..moveTo(center.dx - radius * 0.76, center.dy - radius * 0.10)
+      ..cubicTo(
+        center.dx - radius * 0.68,
+        center.dy + radius * 0.02,
+        center.dx - radius * 0.58,
+        center.dy + radius * 0.18,
+        center.dx - radius * 0.47,
+        center.dy + radius * 0.25,
+      );
+    canvas.drawPath(
+      innerLeftReflection,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 4.4
+        ..color = const Color(
+          0xFFB9D9F8,
+        ).withValues(alpha: isDark ? 0.23 : 0.13)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.8),
+    );
+  }
+
+  void _drawArc(
+    Canvas canvas,
+    Rect bounds, {
+    required double start,
+    required double sweep,
+    required double width,
+    required Color color,
+    double blur = 0,
+  }) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = width
+      ..color = color;
+    if (blur > 0) paint.maskFilter = MaskFilter.blur(BlurStyle.normal, blur);
+    canvas.drawArc(bounds, start, sweep, false, paint);
   }
 
   @override
