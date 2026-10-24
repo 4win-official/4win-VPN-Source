@@ -42,6 +42,7 @@ class PsiphonVpnService : VpnService() {
     private var psiphonTunnel: PsiphonTunnel? = null
     @Volatile private var tunnelRunning = false
     @Volatile private var killSwitchActive = false
+    @Volatile private var killSwitchEnabled = false
     private var currentRegion = ""
     private var currentTargetServerId: String? = null
     private var psiphonSocksPort = 0
@@ -86,9 +87,11 @@ class PsiphonVpnService : VpnService() {
         const val ACTION_CONNECT = "com.forwin.vpn.PSIPHON_CONNECT"
         const val ACTION_DISCONNECT = "com.forwin.vpn.PSIPHON_DISCONNECT"
         const val ACTION_RECONNECT = "com.forwin.vpn.PSIPHON_RECONNECT"
+        const val ACTION_KILLSWITCH_CHANGED = "com.forwin.vpn.PSIPHON_KILLSWITCH_CHANGED"
         const val EXTRA_EGRESS_REGION = "egress_region"
         const val EXTRA_TARGET_SERVER_ID = "target_server_id"
         const val EXTRA_GENERATION = "generation"
+        const val EXTRA_KILLSWITCH_ENABLED = "killswitch_enabled"
 
         /** Cross-process state snapshot broadcast (consumed via PsiphonStatusStore). */
         const val ACTION_STATUS = "com.forwin.vpn.PSIPHON_STATUS"
@@ -240,6 +243,10 @@ class PsiphonVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        // The service lives in :psiphon, so it cannot trust a long-lived
+        // SharedPreferences cache for changes made by Flutter's main process.
+        // MainActivity also sends updates while this service is alive.
+        killSwitchEnabled = KillSwitch.isEnabled(applicationContext)
         createNotificationChannel()
         val runtimeFailure = PsiphonNativeRuntime.initialize(applicationContext)
         if (runtimeFailure == null) {
@@ -255,10 +262,29 @@ class PsiphonVpnService : VpnService() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 try {
-                    val success = intent?.getBooleanExtra(
+                    val message = intent ?: return
+                    if (message.action == ACTION_KILLSWITCH_CHANGED) {
+                        val enabled = message.getBooleanExtra(EXTRA_KILLSWITCH_ENABLED, false)
+                        commands.execute {
+                            killSwitchEnabled = enabled
+                            plog("kill switch ${if (enabled) "enabled" else "disabled"} from settings")
+                            if (PsiphonKillSwitchPolicy.shouldReleaseBlackhole(enabled, killSwitchActive)) {
+                                getSharedPreferences("psiphon_service", MODE_PRIVATE)
+                                    .edit().putBoolean("wanted", false).apply()
+                                stopPsiphon(
+                                    fullStop = true,
+                                    finalStatus = "Disconnected — kill switch disabled",
+                                )
+                            } else {
+                                sendStatus()
+                            }
+                        }
+                        return
+                    }
+                    val success = message.getBooleanExtra(
                         PsiphonTunBridgeService.EXTRA_BRIDGE_SUCCESS, false
-                    ) ?: false
-                    val session = intent?.getStringExtra(PsiphonTunBridgeService.EXTRA_BRIDGE_SESSION)
+                    )
+                    val session = message.getStringExtra(PsiphonTunBridgeService.EXTRA_BRIDGE_SESSION)
                     commands.execute { onBridgeStatus(success, session) }
                 } catch (t: Throwable) {
                     try {
@@ -269,13 +295,14 @@ class PsiphonVpnService : VpnService() {
         }
         bridgeStatusReceiver = receiver
         val filter = IntentFilter(PsiphonTunBridgeService.ACTION_BRIDGE_STATUS)
+        filter.addAction(ACTION_KILLSWITCH_CHANGED)
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                @Suppress("DEPRECATION")
-                registerReceiver(receiver, filter)
-            }
+            androidx.core.content.ContextCompat.registerReceiver(
+                this,
+                receiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to register bridge status receiver", t)
         }
@@ -325,6 +352,9 @@ class PsiphonVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val prefs = getSharedPreferences("psiphon_service", MODE_PRIVATE)
+        if (intent?.hasExtra(EXTRA_KILLSWITCH_ENABLED) == true) {
+            killSwitchEnabled = intent.getBooleanExtra(EXTRA_KILLSWITCH_ENABLED, false)
+        }
         when (intent?.action) {
             ACTION_CONNECT -> {
                 if (!tunnelRunning) runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
@@ -502,7 +532,7 @@ class PsiphonVpnService : VpnService() {
             } catch (_: Throwable) {}
             psiphonTunnel = null
 
-            if (KillSwitch.isEnabled(applicationContext) && vpnInterface != null) {
+            if (PsiphonKillSwitchPolicy.shouldHoldBlackhole(killSwitchEnabled, vpnInterface != null)) {
                 // Kill switch: keep the TUN up as a blackhole so no traffic
                 // can leak, and stay alive for the next reconnect attempt.
                 enterBlackhole("startup failed: $failure")
@@ -544,7 +574,8 @@ class PsiphonVpnService : VpnService() {
                 reconnecting = false
             }
             bridgeRequested = false
-            val keepBlackhole = !fullStop && KillSwitch.isEnabled(applicationContext) && vpnInterface != null
+            val keepBlackhole = !fullStop &&
+                PsiphonKillSwitchPolicy.shouldHoldBlackhole(killSwitchEnabled, vpnInterface != null)
             tunnelRunning = false
             killSwitchActive = keepBlackhole
             psiphonCoreConnected = false
@@ -620,7 +651,7 @@ class PsiphonVpnService : VpnService() {
             } else {
                 // Bridge failed to start: with kill switch on, hold the TUN as
                 // a blackhole; otherwise tear down so traffic flows normally.
-                if (KillSwitch.isEnabled(applicationContext)) {
+                if (killSwitchEnabled) {
                     enterBlackhole("traffic bridge failed to start")
                 } else {
                     lastStatusText = "Psiphon bridge failed to start"
@@ -832,7 +863,7 @@ class PsiphonVpnService : VpnService() {
                     plog("tunnel core exited")
                     commands.execute {
                         if (activeSession == session) {
-                            if (KillSwitch.isEnabled(applicationContext)) {
+                            if (killSwitchEnabled) {
                                 lifecycleLock.acquire()
                                 try { enterBlackhole("tunnel core exited") }
                                 finally { lifecycleLock.release() }

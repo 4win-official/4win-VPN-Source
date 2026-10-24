@@ -46,6 +46,19 @@ class PsiphonService {
     }
   }
 
+  /// Synchronizes the saved preference with the isolated native Psiphon process.
+  /// A live update lets disabling the switch release an existing blackhole.
+  Future<bool> setKillSwitchEnabled(bool enabled) async {
+    try {
+      return await _channel.invokeMethod<bool>('updateKillSwitch', {
+            'enabled': enabled,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> reconnect() async {
     try {
       return await _channel.invokeMethod<bool>('reconnect') ?? false;

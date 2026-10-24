@@ -14,6 +14,7 @@ void main() {
       'prepare': true,
       'start': true,
       'stop': true,
+      'updateKillSwitch': true,
       'reconnect': true,
       'isRunning': true,
       'isConnected': true,
@@ -63,6 +64,14 @@ void main() {
     });
   });
 
+  test('saved kill switch preference is forwarded to native Psiphon', () async {
+    final service = PsiphonService();
+
+    expect(await service.setKillSwitchEnabled(true), isTrue);
+    expect(calls.single.method, 'updateKillSwitch');
+    expect(calls.single.arguments, {'enabled': true});
+  });
+
   test('platform failures degrade to safe defaults', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
@@ -73,6 +82,7 @@ void main() {
     expect(await service.prepare(), isFalse);
     expect(await service.start(), isFalse);
     expect(await service.stop(), isFalse);
+    expect(await service.setKillSwitchEnabled(true), isFalse);
     expect(await service.reconnect(), isFalse);
     expect(await service.isRunning, isFalse);
     expect(await service.isConnected, isFalse);

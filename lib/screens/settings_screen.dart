@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../widgets/four_win_loader.dart';
 import '../models/dns_server.dart';
+import '../services/psiphon_service.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
 import '../widgets/psiphon_server_list_status.dart';
@@ -763,6 +764,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('kill_switch', _killSwitch);
     await prefs.setBool('traffic_compression', _trafficCompression);
     await prefs.setString('connection_mode', _connectionMode);
+    await PsiphonService().setKillSwitchEnabled(_killSwitch);
     
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

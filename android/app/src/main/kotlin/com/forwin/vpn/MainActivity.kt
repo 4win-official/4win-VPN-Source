@@ -69,6 +69,10 @@ class MainActivity: FlutterActivity() {
     // transition to LEVEL_AUTH_FAILED is missed. Detecting either guarantees we
     // catch a wrong username/password like the official app does.
     private var openvpnLogListener: VpnStatus.LogListener? = null
+
+    private fun isPsiphonKillSwitchEnabled(): Boolean =
+        getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            .getBoolean("flutter.kill_switch", false)
     
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == PSIPHON_REQUEST_CODE) {
@@ -290,6 +294,7 @@ class MainActivity: FlutterActivity() {
                     val intent = Intent(this, PsiphonVpnService::class.java).apply {
                         action = PsiphonVpnService.ACTION_CONNECT
                         putExtra(PsiphonVpnService.EXTRA_EGRESS_REGION, call.argument<String>("egressRegion") ?: "")
+                        putExtra(PsiphonVpnService.EXTRA_KILLSWITCH_ENABLED, isPsiphonKillSwitchEnabled())
                         call.argument<String>("targetServerId")?.takeIf { it.isNotBlank() }?.let {
                             putExtra(PsiphonVpnService.EXTRA_TARGET_SERVER_ID, it)
                         }
@@ -299,8 +304,19 @@ class MainActivity: FlutterActivity() {
                 }
                 "stop" -> { startService(Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_DISCONNECT)); result.success(true) }
                 "reconnect" -> {
-                    val intent = Intent(this, PsiphonVpnService::class.java).setAction(PsiphonVpnService.ACTION_RECONNECT)
+                    val intent = Intent(this, PsiphonVpnService::class.java).apply {
+                        action = PsiphonVpnService.ACTION_RECONNECT
+                        putExtra(PsiphonVpnService.EXTRA_KILLSWITCH_ENABLED, isPsiphonKillSwitchEnabled())
+                    }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                    result.success(true)
+                }
+                "updateKillSwitch" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    sendBroadcast(Intent(PsiphonVpnService.ACTION_KILLSWITCH_CHANGED).apply {
+                        setPackage(packageName)
+                        putExtra(PsiphonVpnService.EXTRA_KILLSWITCH_ENABLED, enabled)
+                    })
                     result.success(true)
                 }
                 // NOTE: PsiphonVpnService runs in the :psiphon process, so its
