@@ -112,8 +112,17 @@ class MixCoordinatorService : VpnService() {
                 }
                 if (failure == null && states.all { it == "ready" }) phase = "Blocks initialized"
             }
+            fun verifiedWarp(index: Int, ip: String) = synchronized(lock) {
+                if (index in states.indices && states[index] != "failed") {
+                    states[index] = "verified"
+                    details[index] = "WARP reachable · exit IP $ip"
+                }
+                if (failure == null) phase = "Verifying WARP egress"
+            }
             fun failed(index: Int, detail: String = "Hop failed while starting") = synchronized(lock) {
-                if (index in states.indices) { states[index] = "failed"; details[index] = detail }
+                if (index in states.indices && states[index] != "failed") {
+                    states[index] = "failed"; details[index] = detail
+                }
                 phase = "Chain failed"; if (failure == null) failure = detail
             }
             /** Global errors are deliberately not attributed to the final hop. */
@@ -341,6 +350,16 @@ class MixCoordinatorService : VpnService() {
                         startRelay(i, relayConfig!!, relayPorts.getValue(i), relayUnderlayPorts.getValue(i)); supportsUdp = true
                     }
                 }
+                if (protocol == "warp") {
+                    val trace = try {
+                        MixEgressProbe.fetch(prefixPorts[i]).also { MixEgressProbe.requireWarpOn(it.warp, it.ip) }
+                    } catch (error: Throwable) {
+                        val detail = error.message ?: "Remote WARP egress could not be verified"
+                        diagnostics?.failed(i, detail)
+                        throw IllegalStateException("Stage ${i + 1}: $detail", error)
+                    }
+                    diagnostics?.verifiedWarp(i, trace.ip)
+                }
             } catch (error: Throwable) {
                 diagnostics?.failed(i)
                 throw error
@@ -354,7 +373,17 @@ class MixCoordinatorService : VpnService() {
         }?.let { prefixPorts[it] } ?: prefixPorts.last()
         val probe = MixRouting.vpn(plan, prefixPorts.last(), supportsUdp, probe = true,
             dnsExitPort = dnsPrefixPort)
-        val delay = Libv2ray.measureOutboundDelay(probe.toString(), "https://www.gstatic.com/generate_204")
+        val hasWarp = (0 until hops.length()).any { hops.getJSONObject(it).getString("protocol") == "warp" }
+        val delay = if (hasWarp) {
+            val cloudflare = runCatching {
+                Libv2ray.measureOutboundDelay(probe.toString(), MixEgressProbe.TRACE_URL)
+            }.getOrDefault(-1L)
+            if (cloudflare >= 0) cloudflare else runCatching {
+                Libv2ray.measureOutboundDelay(probe.toString(), "https://www.gstatic.com/generate_204")
+            }.getOrDefault(-1L)
+        } else {
+            Libv2ray.measureOutboundDelay(probe.toString(), "https://www.gstatic.com/generate_204")
+        }
         require(delay >= 0) { "The complete chain failed its connection test; no system tunnel was started" }
         ensureLive(current)
         diagnostics?.setPhase("Starting system tunnel")

@@ -1,6 +1,6 @@
 import 'mix_strategy.dart';
 
-enum MixBlockState { pending, starting, ready, failed, unverified }
+enum MixBlockState { pending, starting, ready, verified, failed, unverified }
 
 /// An attempt owns a frozen copy of the configured chain, never a filtered
 /// transport-only list. Ready means initialized, not individually reachable.
@@ -11,10 +11,14 @@ class MixDiagnostics {
     required this.strategyName,
     required List<MixHop> hops,
     required List<MixBlockState> states,
+    List<String?>? details,
     this.phase = 'Preparing chain',
     this.message,
   }) : hops = List.unmodifiable(hops),
-       states = List.unmodifiable(states);
+       states = List.unmodifiable(states),
+       details = List.unmodifiable(
+         details ?? List<String?>.filled(hops.length, null),
+       );
 
   factory MixDiagnostics.begin(MixStrategy strategy, String attemptId) =>
       MixDiagnostics(
@@ -30,6 +34,7 @@ class MixDiagnostics {
   final String strategyName;
   final List<MixHop> hops;
   final List<MixBlockState> states;
+  final List<String?> details;
   final String phase;
   final String? message;
 
@@ -37,12 +42,14 @@ class MixDiagnostics {
     String? phase,
     String? message,
     List<MixBlockState>? states,
+    List<String?>? details,
   }) => MixDiagnostics(
     attemptId: attemptId,
     strategyId: strategyId,
     strategyName: strategyName,
     hops: hops,
     states: states ?? this.states,
+    details: details ?? this.details,
     phase: phase ?? this.phase,
     message: message,
   );
@@ -53,6 +60,7 @@ class MixDiagnostics {
     final blocks = snapshot['blocks'];
     if (blocks is! List || blocks.length != hops.length) return this;
     final next = List<MixBlockState>.filled(hops.length, MixBlockState.pending);
+    final nextDetails = List<String?>.filled(hops.length, null);
     final seen = <int>{};
     for (final block in blocks) {
       if (block is! Map) return this;
@@ -67,11 +75,15 @@ class MixDiagnostics {
         'pending' => MixBlockState.pending,
         'starting' => MixBlockState.starting,
         'ready' => MixBlockState.ready,
+        'verified' => MixBlockState.verified,
         'failed' => MixBlockState.failed,
         _ => null,
       };
       if (state == null) return this;
       next[index] = state;
+      final detail = block['detail'];
+      if (detail != null && detail is! String) return this;
+      nextDetails[index] = detail as String?;
     }
     final nextPhase = snapshot['phase'] is String
         ? snapshot['phase'] as String
@@ -86,9 +98,18 @@ class MixDiagnostics {
         List.generate(
           next.length,
           (i) => next[i] == states[i],
-        ).every((v) => v)) {
+        ).every((v) => v) &&
+        List.generate(
+          nextDetails.length,
+          (i) => nextDetails[i] == details[i],
+      ).every((v) => v)) {
       return this;
     }
-    return update(states: next, phase: nextPhase, message: nextMessage);
+    return update(
+      states: next,
+      details: nextDetails,
+      phase: nextPhase,
+      message: nextMessage,
+    );
   }
 }

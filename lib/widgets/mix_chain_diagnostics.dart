@@ -93,6 +93,7 @@ class MixChainGraph extends StatelessWidget {
     MixBlockState.pending => 'Not reached',
     MixBlockState.starting => 'Starting',
     MixBlockState.ready => 'Initialized',
+    MixBlockState.verified => 'WARP verified',
     MixBlockState.failed => 'Failed here',
     MixBlockState.unverified => 'Unknown',
   };
@@ -101,6 +102,7 @@ class MixChainGraph extends StatelessWidget {
     MixBlockState.pending => (Icons.radio_button_unchecked, Colors.grey),
     MixBlockState.starting => (Icons.pending, Colors.blue),
     MixBlockState.ready => (Icons.check_circle, Colors.green),
+    MixBlockState.verified => (Icons.verified, Colors.green),
     MixBlockState.failed => (Icons.cancel, Colors.red),
     MixBlockState.unverified => (Icons.help_outline, Colors.orange),
   };
@@ -118,6 +120,7 @@ class MixChainGraph extends StatelessWidget {
     final (icon, color) = appearance(state);
     final title =
         '${index + 1}. ${MixStrategy.protocols[hop.protocol] ?? hop.protocol}';
+    final detail = diagnostics.details[index];
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
@@ -140,12 +143,27 @@ class MixChainGraph extends StatelessWidget {
                 Icon(icon, color: color, size: 30),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (detail != null && detail.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(
+                            detail,
+                            style: TextStyle(fontSize: 11, color: color),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -188,7 +206,9 @@ class MixChainGraph extends StatelessWidget {
                 color: attributed ? Colors.grey : Colors.orange,
               ),
               Text(
-                attributed ? 'Chain stopped' : 'Failure location unknown',
+                attributed
+                    ? 'Failure detected at block ${diagnostics.states.indexOf(MixBlockState.failed) + 1}'
+                    : 'Failure location unknown',
                 textAlign: TextAlign.center,
               ),
             ],

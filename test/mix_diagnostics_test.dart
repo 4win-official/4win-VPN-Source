@@ -92,6 +92,27 @@ void main() {
     }
   });
 
+  test('keeps the verified public WARP exit IP on the original block', () {
+    final diagnostics = MixDiagnostics.begin(chain(2), 'attempt');
+    final result = diagnostics.applyNative({
+      'attemptId': 'attempt',
+      'phase': 'Verifying WARP egress',
+      'blocks': [
+        {
+          'index': 0,
+          'state': 'verified',
+          'detail': 'WARP reachable · exit IP 104.16.132.229',
+        },
+        {'index': 1, 'state': 'ready'},
+      ],
+    });
+    expect(result.states, [MixBlockState.verified, MixBlockState.ready]);
+    expect(result.details, [
+      'WARP reachable · exit IP 104.16.132.229',
+      null,
+    ]);
+  });
+
   test('global failure does not invent a failed final block', () {
     final result = MixDiagnostics.begin(chain(2), 'a').applyNative({
       'attemptId': 'a',
@@ -200,6 +221,7 @@ void main() {
     expect(find.byType(MixChainGraph), findsOneWidget);
     expect(find.byKey(const ValueKey('mix-graph-block-1')), findsOneWidget);
     expect(find.text('Failed here'), findsOneWidget);
+    expect(find.text('Failure detected at block 2'), findsOneWidget);
     expect(find.byIcon(Icons.arrow_downward), findsWidgets);
     await tester.tap(find.byTooltip('Close chain graph'));
     await tester.pumpAndSettle();

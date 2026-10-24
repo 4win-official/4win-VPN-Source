@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bounded live WARP -> WARP identity/registration regression test."""
 from __future__ import annotations
-import argparse, hashlib, json, os, shutil, subprocess, sys, tempfile, time, tomllib
+import argparse, hashlib, ipaddress, json, os, shutil, subprocess, sys, tempfile, time, tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -16,6 +16,14 @@ def stop(*_):
 signal.signal(signal.SIGTERM,stop); signal.signal(signal.SIGINT,stop)
 print("STARTED",flush=True)
 rc=lib.aether_start_json(open(sys.argv[2],"rb").read()); print("NATIVE_RETURN "+str(rc),flush=True); sys.exit(1 if rc else 0)
+'''
+EGRESS_HARNESS = r'''import com.forwin.vpn.mix.MixEgressProbe;
+public final class MixEgressProbeHarness {
+  public static void main(String[] a) {
+    var result = MixEgressProbe.INSTANCE.fetch(Integer.parseInt(a[0]), 8000);
+    System.out.print(result.getIp() + "\t" + result.getWarp());
+  }
+}
 '''
 
 
@@ -55,6 +63,10 @@ def main() -> None:
         d0=td/"stage0"; d1=td/"stage1"; d0.mkdir(mode=0o700); d1.mkdir(mode=0o700)
         id0=d0/"account.toml"; id1=d1/"account.toml"; shutil.copyfile(account,id0); id0.chmod(0o600)
         port0,port1=free_port(),free_port(); cp=cpfile.read_text().strip()
+        harness=td/"MixEgressProbeHarness.java"; harness.write_text(EGRESS_HARNESS)
+        compiled=subprocess.run(["javac","-cp",cp,"-d",str(td),str(harness)],capture_output=True,text=True)
+        if compiled.returncode: raise RuntimeError("egress harness javac failed: "+compiled.stderr[-2000:])
+        harness_cp=str(td)+os.pathsep+cp
         common={"config_path":"__APP_FILES__/placeholder.toml","wireguard_config_path":"__APP_FILES__/placeholder.toml","protocol":"wg","forced_peer":"162.159.192.1:2408","wireguard_data_check":True,"log_level":"error"}
         c0=export_config(cp,d0,common,port0,"",id0); c0.pop("upstream_proxy",None)
         c1=export_config(cp,d1,common,port1,f"socks5://127.0.0.1:{port0}",id1)
@@ -67,20 +79,36 @@ def main() -> None:
         def live(port: int, label: str):
             while time.monotonic()<deadline:
                 r=probe(port, min(8,max(1,deadline-time.monotonic())))
-                if r.returncode==0 and "warp=on" in r.stdout.splitlines(): return
+                if r.returncode==0:
+                    fields=dict(line.split("=",1) for line in r.stdout.splitlines() if "=" in line)
+                    try: address=ipaddress.ip_address(fields.get("ip",""))
+                    except ValueError: address=None
+                    if fields.get("warp")=="on" and address is not None and address.is_global:
+                        return str(address)
                 time.sleep(1)
-            raise AssertionError(label+" did not produce Cloudflare warp=on")
-        live(port0,"stage0"); live(port1,"stage1")
+            raise AssertionError(label+" did not produce warp=on with a public egress IP")
+        def kotlin_probe(port: int, label: str):
+            result=subprocess.run(["java","-cp",harness_cp,"MixEgressProbeHarness",str(port)],capture_output=True,text=True,timeout=12)
+            if result.returncode: raise AssertionError(label+" production verifier failed: "+result.stderr[-1000:])
+            ip,separator,warp=result.stdout.partition("\t")
+            try: address=ipaddress.ip_address(ip)
+            except ValueError: address=None
+            if not separator or warp!="on" or address is None or not address.is_global:
+                raise AssertionError(label+" production verifier did not confirm WARP with a public IP")
+            return str(address)
+        stage0_ip=live(port0,"stage0"); stage1_ip=live(port1,"stage1")
+        kotlin_probe(port0,"MixEgressProbe stage0"); kotlin_probe(port1,"MixEgressProbe stage1")
         if not id1.is_file(): raise AssertionError("stage1 registration did not create identity TOML")
         f0=key_fingerprint(id0); f1=key_fingerprint(id1)
         if f0==f1: raise AssertionError("stage0 and stage1 wg_private_keys are not distinct")
         hash1=hashlib.sha256(id1.read_bytes()).digest()
-        terminate(p1); procs.remove(p1); p1=subprocess.Popen([sys.executable,"-c",WORKER,str(native),str(w1)],stdout=log1,stderr=subprocess.STDOUT,text=True); procs.append(p1); wait_port(port1,p1,timeout=min(30,deadline-time.monotonic())); live(port1,"stage1 restart")
+        terminate(p1); procs.remove(p1); p1=subprocess.Popen([sys.executable,"-c",WORKER,str(native),str(w1)],stdout=log1,stderr=subprocess.STDOUT,text=True); procs.append(p1); wait_port(port1,p1,timeout=min(30,deadline-time.monotonic())); live(port1,"stage1 restart"); kotlin_probe(port1,"MixEgressProbe stage1 restart")
         if hashlib.sha256(id1.read_bytes()).digest()!=hash1 or key_fingerprint(id1)!=f1: raise AssertionError("stage1 identity changed across restart")
         terminate(p0); time.sleep(1); failed=probe(port1,8)
         if failed.returncode==0: raise AssertionError("stage1 traffic bypassed stopped stage0; direct fallback detected")
         if hashlib.sha256(account.read_bytes()).digest()!=before: raise AssertionError("account fixture was modified")
-        print("PASS live WARP→WARP: distinct identities, real stage1 registration via stage0 SOCKS5, restart reuse stable, stage0 cut fail-closed",flush=True)
+        assert stage0_ip and stage1_ip
+        print("PASS live WARP→WARP: public egress IP at both ordered stages, distinct identities, stage1 registration via stage0 SOCKS5, restart reuse stable, stage0 cut fail-closed",flush=True)
     finally:
         for p in reversed(procs): terminate(p)
         if a.keep_temp: print(f"kept temp: {td}",file=sys.stderr)
