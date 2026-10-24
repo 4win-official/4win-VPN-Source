@@ -157,6 +157,7 @@ void main() {
       expect(config['protocol'], 'wg');
       expect(config['wireguard_data_check'], isTrue);
       expect(config['endpoint_discovery'], 'cache');
+      expect(config['quick_reconnect'], isTrue);
       expect(config['config_path'], contains('__APP_FILES__'));
     });
   });

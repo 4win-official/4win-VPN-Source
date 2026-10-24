@@ -50,6 +50,8 @@ pub struct StartOptions {
     pub retry_obfuscation_profiles: bool,
     pub endpoint_cache_path: Option<String>,
     pub endpoint_discovery: EndpointDiscovery,
+    /// Optional non-interactive preference for reusing the last verified WARP endpoint.
+    pub quick_reconnect: Option<bool>,
     pub masque_transport: MasqueTransport,
     pub tls_curve_preset: TlsCurvePreset,
     pub wireguard_data_check: bool,
@@ -158,6 +160,7 @@ impl StartOptions {
             retry_obfuscation_profiles: true,
             endpoint_cache_path: None,
             endpoint_discovery: EndpointDiscovery::Cache,
+            quick_reconnect: None,
             masque_transport: MasqueTransport::H3,
             tls_curve_preset: TlsCurvePreset::Chrome,
             wireguard_data_check: true,
@@ -1529,11 +1532,27 @@ fn is_identity_rejection(error: &AetherError) -> bool {
     text.contains(quic::CONNECT_STAGE_AFTER_REQUEST) && text.contains("TLS alert 49")
 }
 
+fn quick_reconnect_override(preference: Option<bool>, environment: Option<&str>) -> Option<bool> {
+    match environment {
+        Some("1") | Some("true") | Some("yes") | Some("on") => Some(true),
+        Some("0") | Some("false") | Some("no") | Some("off") => Some(false),
+        _ => preference,
+    }
+}
+
 async fn want_quick_reconnect(cached: &lastconn::LastConnection) -> bool {
-    match std::env::var("AETHER_QUICK_RECONNECT").as_deref() {
-        Ok("1") | Ok("true") | Ok("yes") | Ok("on") => return true,
-        Ok("0") | Ok("false") | Ok("no") | Ok("off") => return false,
-        _ => {}
+    want_quick_reconnect_with_preference(cached, None).await
+}
+
+async fn want_quick_reconnect_with_preference(
+    cached: &lastconn::LastConnection,
+    preference: Option<bool>,
+) -> bool {
+    if let Some(use_cached) = quick_reconnect_override(
+        preference,
+        std::env::var("AETHER_QUICK_RECONNECT").ok().as_deref(),
+    ) {
+        return use_cached;
     }
 
     let answer = prompt_line(&format!(
@@ -2215,6 +2234,14 @@ fn wg_tunnel_validate_timeout() -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
+fn wg_scan_parameters(options: &StartOptions, skip_scan: bool) -> (String, prober::IpScan) {
+    if skip_scan {
+        (String::new(), prober::IpScan::V4)
+    } else {
+        (options.scan_mode.label().to_string(), options.ip_scan)
+    }
+}
+
 async fn run_wireguard(
     identity: account::Identity,
     listen: SocketAddr,
@@ -2283,7 +2310,7 @@ async fn run_wireguard(
     if forced.is_none() && quick.is_none() && options.obfuscation_parameters.is_none() {
         if let Some(cached) = lastconn::load(&lastconn_path) {
             if let Ok(peer) = cached.peer.parse::<SocketAddr>() {
-                if want_quick_reconnect(&cached).await {
+                if want_quick_reconnect_with_preference(&cached, options.quick_reconnect).await {
                     let profile = aethernoize::from_profile(&cached.profile);
                     log::info!("[*] verifying cached WireGuard endpoint {peer} before reuse");
                     match wireguard::verify_endpoint(
@@ -2317,13 +2344,9 @@ async fn run_wireguard(
         }
     }
 
-    let (mode_str, ip) = if forced.is_some() || quick.is_some() {
-        (String::new(), prober::IpScan::V4)
-    } else {
-        let mode_str = select_scan_mode_str().await;
-        let ip = select_ip_version().await;
-        (mode_str, ip)
-    };
+    // Scan choices were already resolved by the CLI or supplied by the native app.
+    // Do not prompt stdin again from the WireGuard startup path.
+    let (mode_str, ip) = wg_scan_parameters(options, forced.is_some() || quick.is_some());
 
     let mut last_good: Option<(SocketAddr, aethernoize::AetherNoizeConfig, String)> = None;
     let mut consecutive_fails_on_peer: u32 = 0;
@@ -4190,6 +4213,31 @@ mod tests {
         assert_eq!(options.masque_profile(), "firewall");
         assert!(options.forced_peer.is_none());
         assert_eq!(options.endpoint_discovery, EndpointDiscovery::Cache);
+        assert_eq!(options.quick_reconnect, None);
+    }
+
+    #[test]
+    fn wireguard_uses_configured_scan_parameters_without_a_terminal_prompt() {
+        let mut options = StartOptions::new(Protocol::WireGuard, "aether.toml");
+        options.scan_mode = ScanMode::Turbo;
+        options.ip_scan = IpScan::Both;
+
+        assert_eq!(
+            wg_scan_parameters(&options, false),
+            ("turbo".to_string(), IpScan::Both)
+        );
+        assert_eq!(
+            wg_scan_parameters(&options, true),
+            (String::new(), IpScan::V4)
+        );
+    }
+
+    #[test]
+    fn explicit_quick_reconnect_preference_skips_the_prompt_but_environment_can_override() {
+        assert_eq!(quick_reconnect_override(Some(true), None), Some(true));
+        assert_eq!(quick_reconnect_override(Some(true), Some("0")), Some(false));
+        assert_eq!(quick_reconnect_override(None, Some("1")), Some(true));
+        assert_eq!(quick_reconnect_override(None, None), None);
     }
 
     #[test]

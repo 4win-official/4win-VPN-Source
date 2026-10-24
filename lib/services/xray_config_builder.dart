@@ -65,6 +65,8 @@ class XrayConfigBuilder {
       'scan_mode': 'balanced',
       'ip_scan': 'v4',
       'endpoint_discovery': 'cache',
+      // Native Android has no terminal prompt; reuse is still handshake- and data-validated.
+      'quick_reconnect': true,
       'wireguard_data_check': true,
       'retry_obfuscation_profiles': true,
       'tls_curve_preset': 'chrome',

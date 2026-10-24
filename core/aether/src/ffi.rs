@@ -152,6 +152,7 @@ struct NativeStartOptions {
     retry_obfuscation_profiles: bool,
     endpoint_cache_path: Option<String>,
     endpoint_discovery: String,
+    quick_reconnect: Option<bool>,
     masque_transport: String,
     tls_curve_preset: String,
     wireguard_data_check: bool,
@@ -204,6 +205,7 @@ impl Default for NativeStartOptions {
             retry_obfuscation_profiles: true,
             endpoint_cache_path: None,
             endpoint_discovery: "cache".into(),
+            quick_reconnect: None,
             masque_transport: "h3".into(),
             tls_curve_preset: "chrome".into(),
             wireguard_data_check: true,
@@ -260,6 +262,7 @@ impl TryFrom<NativeStartOptions> for StartOptions {
             .endpoint_cache_path
             .filter(|path| !path.trim().is_empty());
         options.endpoint_discovery = EndpointDiscovery::parse(&value.endpoint_discovery);
+        options.quick_reconnect = value.quick_reconnect;
         options.masque_transport = MasqueTransport::parse(&value.masque_transport);
         options.tls_curve_preset = TlsCurvePreset::parse(&value.tls_curve_preset);
         options.wireguard_data_check = value.wireguard_data_check;
@@ -789,7 +792,7 @@ mod tests {
     #[test]
     fn parses_advanced_android_start_options() {
         let native: NativeStartOptions = serde_json::from_str(
-            r#"{"config_path":"aether.toml","tls_curve_preset":"compatibility","wireguard_data_check":false,"log_level":"debug","perf_profile":"high","h2_fragmentation":true,"dns_servers":"9.9.9.9","route_block":"ads.example","team":"acme","gateway":true}"#,
+            r#"{"config_path":"aether.toml","tls_curve_preset":"compatibility","wireguard_data_check":false,"log_level":"debug","perf_profile":"high","h2_fragmentation":true,"dns_servers":"9.9.9.9","route_block":"ads.example","team":"acme","gateway":true,"quick_reconnect":true}"#,
         )
         .unwrap();
         let options = StartOptions::try_from(native).unwrap();
@@ -803,6 +806,7 @@ mod tests {
         assert_eq!(options.route_block.as_deref(), Some("ads.example"));
         assert_eq!(options.team.as_deref(), Some("acme"));
         assert!(options.gateway);
+        assert_eq!(options.quick_reconnect, Some(true));
     }
 
     #[test]
