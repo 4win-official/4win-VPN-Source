@@ -92,6 +92,16 @@ class MainActivity: FlutterActivity() {
         val pending = pendingPsiphonPermission
         pendingPsiphonPermission = null
         try { pending?.success(false) } catch (_: Throwable) {}
+        openvpnStateListener?.let {
+            try { VpnStatus.removeStateListener(it) } catch (_: Exception) {}
+            openvpnStateListener = null
+        }
+        openvpnLogListener?.let {
+            try { VpnStatus.removeLogListener(it) } catch (_: Exception) {}
+            openvpnLogListener = null
+        }
+        openvpnChannel = null
+        openvpnConnected = false
         catMeowPlayer?.release()
         catMeowPlayer = null
         super.onDestroy()

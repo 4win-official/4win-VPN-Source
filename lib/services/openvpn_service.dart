@@ -145,28 +145,36 @@ class OpenVpnService {
   
   /// Validate OpenVPN config file format
   static bool validateConfig(String configContent) {
-    // بررسی حداقل الزامات یک فایل .ovpn
     if (configContent.trim().isEmpty) {
       return false;
     }
-    
-    // باید حداقل یکی از کلمات کلیدی OpenVPN را داشته باشد
-    final requiredKeywords = [
-      'remote',
-      'client',
-      'dev',
-      'proto',
-    ];
-    
-    int foundKeywords = 0;
-    for (final keyword in requiredKeywords) {
-      if (configContent.contains(keyword)) {
-        foundKeywords++;
+
+    // Match directive names at the beginning of actual lines. Substring
+    // matching accepts comments and unrelated values such as `not-remote`.
+    final directives = <String>{};
+    for (final rawLine in configContent.split(RegExp(r'\r\n?|\n'))) {
+      final line = rawLine.trim();
+      if (line.isEmpty || line.startsWith('#') || line.startsWith(';')) {
+        continue;
+      }
+
+      final fields = line.split(RegExp(r'\s+'));
+      final directive = fields.first.toLowerCase();
+      if (directive == 'client') {
+        directives.add(directive);
+      } else if ((directive == 'remote' ||
+              directive == 'dev' ||
+              directive == 'proto') &&
+          fields.length >= 2 &&
+          fields[1].isNotEmpty) {
+        directives.add(directive);
       }
     }
-    
-    // حداقل 2 کلمه کلیدی باید وجود داشته باشد
-    return foundKeywords >= 2;
+
+    // A client profile must name a remote endpoint and include at least one
+    // other recognized client directive. This is deliberately a lightweight
+    // import check; the native OpenVPN parser remains authoritative at connect.
+    return directives.contains('remote') && directives.length >= 2;
   }
   
   /// Extract config name from file content (از comment یا remote)

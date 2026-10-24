@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/models/openvpn_config.dart';
+import '../lib/services/openvpn_service.dart';
 
 void main() {
   setUp(() {
@@ -118,6 +119,42 @@ SERVER CA
     expect(
       config.normalizedConfig,
       isNot(contains('client-cert-not-required')),
+    );
+  });
+
+  test('validates real remote and supporting client directives', () {
+    expect(
+      OpenVpnService.validateConfig('''
+# remote comment.example 1194
+client
+remote vpn.example 1194
+proto udp
+'''),
+      isTrue,
+    );
+  });
+
+  test('rejects comments and partial directive names as config fields', () {
+    expect(
+      OpenVpnService.validateConfig('''
+# remote vpn.example 1194
+# client
+not-remote vpn.example 1194
+device tun
+protocol udp
+'''),
+      isFalse,
+    );
+  });
+
+  test('requires an actual remote directive', () {
+    expect(
+      OpenVpnService.validateConfig('''
+client
+dev tun
+proto udp
+'''),
+      isFalse,
     );
   });
 }

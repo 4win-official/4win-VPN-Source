@@ -53,6 +53,19 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
   /// Imports an .ovpn whose content we already have (from a VIEW/SEND intent).
   Future<void> _startImportFromContent(
       String suggestedName, String configContent) async {
+    if (!OpenVpnService.validateConfig(configContent)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Invalid OpenVPN config. Add a remote endpoint and a client directive.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
     String configName = suggestedName
         .replaceAll('.ovpn', '')
         .replaceAll('.conf', '')
