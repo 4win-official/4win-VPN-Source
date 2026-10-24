@@ -135,6 +135,71 @@ void main() {
     expect(deleted.map((group) => group.name), isNot(contains('Offline')));
   });
 
+  test(
+    'adds and persists one manual server without changing the default group',
+    () async {
+      final store = SstpServerStore(
+        serverService: _FakeServerService([
+          VpnServer(address: 'free.example', port: 443),
+        ]),
+      );
+      final added = await store.addServer(
+        'manual.example',
+        8443,
+        username: 'alice',
+        password: 'secret',
+      );
+
+      expect(added, hasLength(2));
+      expect(added.first.id, 'default');
+      expect(added.first.servers.single.address, 'free.example');
+      expect(added.last.name, 'manual.example:8443');
+      expect(added.last.servers.single.username, 'alice');
+      expect(added.last.servers.single.password, 'secret');
+
+      final restored = await SstpServerStore(
+        serverService: _FakeServerService([]),
+      ).loadGroups();
+      expect(restored.last.servers.single.fullAddress, 'manual.example:8443');
+      expect(restored.last.servers.single.username, 'alice');
+      expect(restored.last.servers.single.password, 'secret');
+    },
+  );
+
+  test(
+    'rejects invalid host, port, or missing credentials for manual server',
+    () async {
+      final store = SstpServerStore(serverService: _FakeServerService([]));
+      expect(
+        () => store.addServer(
+          'https://manual.example',
+          443,
+          username: 'u',
+          password: 'p',
+        ),
+        throwsFormatException,
+      );
+      expect(
+        () => store.addServer(
+          'manual.example',
+          0,
+          username: 'u',
+          password: 'p',
+        ),
+        throwsFormatException,
+      );
+      expect(
+        () => store.addServer(
+          'manual.example',
+          443,
+          username: '',
+          password: 'p',
+        ),
+        throwsFormatException,
+      );
+    },
+  );
+
   test('rejects URL-like and malformed manual server entries', () async {
     final store = SstpServerStore(serverService: _FakeServerService([]));
     expect(

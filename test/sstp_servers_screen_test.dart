@@ -33,6 +33,8 @@ class FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   final List<String> removedGroups = <String>[];
   final List<(String, String, String, String)> addedGroups =
       <(String, String, String, String)>[];
+  final List<(String, int, String, String)> addedServers =
+      <(String, int, String, String)>[];
 
   @override
   bool get isConnected => connected;
@@ -123,6 +125,31 @@ class FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   }
 
   @override
+  Future<void> addSstpServer(
+    String host,
+    int port, {
+    required String username,
+    required String password,
+  }) async {
+    addedServers.add((host, port, username, password));
+    groups.add(
+      SstpServerGroup(
+        id: 'manual-${groups.length}',
+        name: '$host:$port',
+        servers: <VpnServer>[
+          VpnServer(
+            address: host,
+            port: port,
+            username: username,
+            password: password,
+          ),
+        ],
+      ),
+    );
+    notifyListeners();
+  }
+
+  @override
   noSuchMethod(Invocation invocation) {
     final name = invocation.memberName;
     if (name == #errorMessage) return null;
@@ -163,6 +190,13 @@ Future<void> pumpScreen(WidgetTester tester, FakeVpnProvider provider) async {
     ),
   );
   await tester.pump();
+}
+
+Future<void> openAddMenu(WidgetTester tester, String entry) async {
+  await tester.tap(find.byTooltip('Add SSTP entry'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(entry).last);
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -279,8 +313,7 @@ void main() {
     final provider = FakeVpnProvider();
     await pumpScreen(tester, provider);
 
-    await tester.tap(find.text('Add group'));
-    await tester.pumpAndSettle();
+    await openAddMenu(tester, 'Add group');
     await tester.tap(find.text('Add').last);
     await tester.pumpAndSettle();
     expect(provider.addedGroups, isEmpty);
@@ -291,8 +324,7 @@ void main() {
   testWidgets('adding a valid group safely closes the dialog', (tester) async {
     final provider = FakeVpnProvider();
     await pumpScreen(tester, provider);
-    await tester.tap(find.text('Add group'));
-    await tester.pumpAndSettle();
+    await openAddMenu(tester, 'Add group');
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), 'Office');
     await tester.enterText(fields.at(1), 'office.example:443');
@@ -304,6 +336,34 @@ void main() {
     expect(find.text('Office (1)'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'adding a standalone server captures all four connection fields',
+    (tester) async {
+      final provider = FakeVpnProvider();
+      await pumpScreen(tester, provider);
+      await openAddMenu(tester, 'Add server');
+
+      final fields = find.byType(TextFormField);
+      expect(fields, findsNWidgets(4));
+      await tester.enterText(fields.at(0), 'manual.example');
+      await tester.enterText(fields.at(1), '8443');
+      await tester.enterText(fields.at(2), 'alice');
+      await tester.enterText(fields.at(3), 'secret');
+      await tester.tap(find.text('Add server').last);
+      await tester.pumpAndSettle();
+
+      expect(provider.addedServers, [
+        ('manual.example', 8443, 'alice', 'secret'),
+      ]);
+      expect(find.text('manual.example:8443 (1)'), findsOneWidget);
+      expect(find.byTooltip('Delete server'), findsOneWidget);
+      await tester.tap(find.byTooltip('Expand').last);
+      await tester.pumpAndSettle();
+      expect(find.text('manual.example:8443'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('connected state blocks group and server selection', (
     tester,

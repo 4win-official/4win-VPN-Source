@@ -145,6 +145,39 @@ void main() {
     },
   );
 
+  test(
+    'manual server is listed, testable, selectable, and used as SSTP target',
+    () async {
+      await provider.addSstpServer(
+        'manual.example',
+        8443,
+        username: 'alice',
+        password: 'secret',
+      );
+      expect(provider.sstpGroups, hasLength(2));
+      expect(provider.sstpGroups.first.id, 'default');
+      final manualGroup = provider.sstpGroups.last;
+      final target = manualGroup.servers.single;
+      expect(target.fullAddress, 'manual.example:8443');
+      expect(target.username, 'alice');
+      expect(target.password, 'secret');
+
+      fake.results[target.fullAddress] = 8;
+      await provider.testSstpServer(manualGroup.id, target);
+      expect(target.ping, 8);
+      provider.selectServer(target);
+      fake.results.remove(target.fullAddress);
+      fake.tested.clear();
+      await provider.connect();
+
+      expect(provider.selectedServer, same(target));
+      expect(fake.tested, hasLength(1));
+      expect(fake.tested.single, hasLength(1));
+      expect(fake.tested.single.single.fullAddress, target.fullAddress);
+      expect(provider.status, VpnConnectionStatus.error);
+    },
+  );
+
   test('retains unreachable servers and allows retesting them', () async {
     await provider.testAllServers();
     final down = provider.servers.firstWhere(

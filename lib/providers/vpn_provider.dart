@@ -123,6 +123,12 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     String username = 'vpn',
     String password = 'vpn',
   }) => _addSstpGroup(name, content, username: username, password: password);
+  Future<void> addSstpServer(
+    String host,
+    int port, {
+    required String username,
+    required String password,
+  }) => _addSstpServer(host, port, username: username, password: password);
   Future<void> removeSstpGroup(String id) => _removeSstpGroup(id);
   Future<void> selectSstpGroup(String id) => _selectSstpGroup(id);
   final VpnService _vpnService = VpnService();

@@ -95,11 +95,16 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
 
   Future<void> _confirmDelete(SstpServerGroup group) async {
     if (group.isDefault || _busy) return;
+    final isSingleServer = _isSingleServerEntry(group);
     final yes = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete group?'),
-        content: Text('Delete "${group.name}" and its servers?'),
+        title: Text(isSingleServer ? 'Delete server?' : 'Delete group?'),
+        content: Text(
+          isSingleServer
+              ? 'Delete "${group.servers.single.fullAddress}"?'
+              : 'Delete "${group.name}" and its servers?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -140,6 +145,23 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
     );
   }
 
+  Future<void> _addServer() async {
+    if (_busy) return;
+    final result = await showDialog<(String, int, String, String)?>(
+      context: context,
+      builder: (_) => const _SstpServerDialog(),
+    );
+    if (!mounted || result == null) return;
+    await _run(
+      () => context.read<VpnProvider>().addSstpServer(
+        result.$1,
+        result.$2,
+        username: result.$3,
+        password: result.$4,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
@@ -159,6 +181,27 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
                   ? null
                   : () => _run(() => p.loadServers(forceRefresh: true)),
               icon: const Icon(Icons.refresh),
+            ),
+          ),
+          Consumer<VpnProvider>(
+            builder: (_, p, __) => PopupMenuButton<String>(
+              tooltip: 'Add SSTP entry',
+              enabled:
+                  !p.sstpGroupTesting &&
+                  !p.sstpRefreshing &&
+                  !p.isConnected &&
+                  !p.isConnecting,
+              onSelected: (value) {
+                if (value == 'server') {
+                  _addServer();
+                } else {
+                  _addGroup();
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'server', child: Text('Add server')),
+                PopupMenuItem(value: 'group', child: Text('Add group')),
+              ],
             ),
           ),
         ],
@@ -197,19 +240,6 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
             ),
           );
         },
-      ),
-      floatingActionButton: Consumer<VpnProvider>(
-        builder: (_, p, __) => FloatingActionButton.extended(
-          onPressed:
-              p.sstpGroupTesting ||
-                  p.sstpRefreshing ||
-                  p.isConnected ||
-                  p.isConnecting
-              ? null
-              : _addGroup,
-          icon: const Icon(Icons.add),
-          label: const Text('Add group'),
-        ),
       ),
     );
   }
@@ -315,7 +345,9 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
                 ),
               if (!g.isDefault)
                 IconButton(
-                  tooltip: 'Delete group',
+                  tooltip: _isSingleServerEntry(g)
+                      ? 'Delete server'
+                      : 'Delete group',
                   onPressed: busy ? null : () => _confirmDelete(g),
                   icon: const Icon(
                     Icons.delete_outline,
@@ -415,6 +447,12 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
           widget.initialSelection?.group == group.id) &&
       widget.initialSelection?.serverId == server.fullAddress;
 
+  bool _isSingleServerEntry(SstpServerGroup group) =>
+      !group.isDefault &&
+      group.subscriptionUrl == null &&
+      group.servers.length == 1 &&
+      group.name == group.servers.single.fullAddress;
+
   bool _same(VpnServer a, VpnServer? b) => identical(a, b);
 
   Widget _empty(bool dark, Color accent) => Center(
@@ -439,7 +477,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 32),
           child: Text(
-            'Add a group or refresh the default group to load servers.',
+            'Add a server or group, or refresh the default group to load servers.',
             textAlign: TextAlign.center,
           ),
         ),
@@ -520,6 +558,100 @@ class _SstpGroupDialogState extends State<_SstpGroupDialog> {
           password.text,
         )),
         child: const Text('Add'),
+      ),
+    ],
+  );
+}
+
+class _SstpServerDialog extends StatefulWidget {
+  const _SstpServerDialog();
+
+  @override
+  State<_SstpServerDialog> createState() => _SstpServerDialogState();
+}
+
+class _SstpServerDialogState extends State<_SstpServerDialog> {
+  final formKey = GlobalKey<FormState>();
+  final host = TextEditingController();
+  final port = TextEditingController(text: '443');
+  final username = TextEditingController();
+  final password = TextEditingController();
+
+  @override
+  void dispose() {
+    host.dispose();
+    port.dispose();
+    username.dispose();
+    password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Add SSTP server'),
+    content: SingleChildScrollView(
+      child: Form(
+        key: formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: host,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(labelText: 'Host'),
+              validator: (value) => value?.trim().isNotEmpty == true
+                  ? null
+                  : 'Enter a host.',
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: port,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Port'),
+              validator: (value) {
+                final parsed = int.tryParse(value?.trim() ?? '');
+                return parsed != null && parsed >= 1 && parsed <= 65535
+                    ? null
+                    : 'Enter a port from 1 to 65535.';
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: username,
+              decoration: const InputDecoration(labelText: 'Username'),
+              validator: (value) => value?.trim().isNotEmpty == true
+                  ? null
+                  : 'Enter a username.',
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: password,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Password'),
+              validator: (value) => value?.trim().isNotEmpty == true
+                  ? null
+                  : 'Enter a password.',
+            ),
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (!formKey.currentState!.validate()) return;
+          Navigator.pop(context, (
+            host.text.trim(),
+            int.parse(port.text.trim()),
+            username.text.trim(),
+            password.text,
+          ));
+        },
+        child: const Text('Add server'),
       ),
     ],
   );

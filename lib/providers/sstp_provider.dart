@@ -161,6 +161,29 @@ extension _SstpProviderLogic on VpnProvider {
     }
   }
 
+  Future<void> _addSstpServer(
+    String host,
+    int port, {
+    required String username,
+    required String password,
+  }) async {
+    _checkSstpEditable();
+    _isLoadingServers = true;
+    notifyListeners();
+    try {
+      _sstpGroups = await _sstpStore.addServer(
+        host,
+        port,
+        username: username,
+        password: password,
+      );
+      _syncSstpServers();
+    } finally {
+      _isLoadingServers = false;
+      if (!_mixDisposed) notifyListeners();
+    }
+  }
+
   Future<void> _removeSstpGroup(String id) async {
     _checkSstpEditable();
     _isLoadingServers = true;

@@ -116,6 +116,42 @@ class SstpServerStore {
     return _withDefault(await _fetchDefault(), groups);
   }
 
+  Future<List<SstpServerGroup>> addServer(
+    String host,
+    int port, {
+    required String username,
+    required String password,
+  }) async {
+    final rawHost = host.trim();
+    if (port < 1 || port > 65535) {
+      throw FormatException('Port must be between 1 and 65535.');
+    }
+    if (username.trim().isEmpty || password.isEmpty) {
+      throw FormatException('Username and password are required.');
+    }
+    final normalizedHost = rawHost.contains(':') && !rawHost.startsWith('[')
+        ? '[$rawHost]'
+        : rawHost;
+    final parsed = _parseServerLine('$normalizedHost:$port');
+    if (parsed == null) throw FormatException('Enter a valid server host.');
+    final server = VpnServer(
+      address: parsed.$1,
+      port: parsed.$2,
+      username: username.trim(),
+      password: password,
+    );
+    final groups = await _loadCustomGroups();
+    groups.add(
+      SstpServerGroup(
+        id: _newId(),
+        name: server.fullAddress,
+        servers: <VpnServer>[server],
+      ),
+    );
+    await _saveCustomGroups(groups);
+    return _withDefault(await _fetchDefault(), groups);
+  }
+
   Future<List<SstpServerGroup>> deleteGroup(String id) async {
     if (id == SstpServerGroup.defaultId) {
       throw StateError('The built-in server group cannot be deleted.');
