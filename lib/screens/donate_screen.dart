@@ -7,7 +7,7 @@ class DonateScreen extends StatelessWidget {
 
   static const String walletAddress = 'UQC80Bix6-mEQALfi1xb-JEMauy44ZsVlTNgRdQ2urI4IEQ4';
   static const String telegramUrl = 'https://t.me/official_4win';
-  static const String githubUrl = 'https://github.com/4win-official';
+  static const String githubUrl = 'https://github.com/4win-official/4win-VPN-Source';
 
   Future<void> _copyToClipboard(BuildContext context, String text) async {
     await Clipboard.setData(ClipboardData(text: text));
