@@ -7,19 +7,16 @@ Finder _glassPaint() => find.byWidgetPredicate(
       widget is CustomPaint && widget.painter is GlassPowerButtonPainter,
 );
 
-Widget _host({required bool disableAnimations}) => MaterialApp(
-  home: MediaQuery(
-    data: MediaQueryData(disableAnimations: disableAnimations),
-    child: Scaffold(
-      body: Center(
-        child: SizedBox(
-          width: 200,
-          height: 200,
-          child: GlassPowerButtonSurface(
-            isDark: true,
-            tint: const Color(0xFF8CBDF4),
-            child: const Icon(Icons.power_settings_new, size: 80),
-          ),
+Widget _host() => const MaterialApp(
+  home: Scaffold(
+    body: Center(
+      child: SizedBox(
+        width: 200,
+        height: 200,
+        child: GlassPowerButtonSurface(
+          isDark: true,
+          tint: Color(0xFF8CBDF4),
+          child: Icon(Icons.power_settings_new, size: 80),
         ),
       ),
     ),
@@ -27,40 +24,43 @@ Widget _host({required bool disableAnimations}) => MaterialApp(
 );
 
 void main() {
-  testWidgets('glass caustic moves and honors reduced-motion preference', (
+  testWidgets('polished glass stays still and preserves the power control', (
     tester,
   ) async {
-    await tester.pumpWidget(_host(disableAnimations: false));
-    final first =
+    await tester.pumpWidget(_host());
+
+    final surface = find.byType(GlassPowerButtonSurface);
+    expect(tester.getSize(surface), const Size(200, 200));
+    expect(find.byIcon(Icons.power_settings_new), findsOneWidget);
+
+    final painter =
         tester.widget<CustomPaint>(_glassPaint()).painter!
             as GlassPowerButtonPainter;
-    final firstPhase = first.animation.value;
+    expect(painter.isDark, isTrue);
+    expect(painter.tint, const Color(0xFF8CBDF4));
     expect(
-      tester.getSize(find.byType(GlassPowerButtonSurface)),
-      const Size(200, 200),
+      painter.shouldRepaint(
+        const GlassPowerButtonPainter(isDark: true, tint: Color(0xFF8CBDF4)),
+      ),
+      isFalse,
+    );
+    expect(
+      painter.shouldRepaint(
+        const GlassPowerButtonPainter(isDark: false, tint: Color(0xFF8CBDF4)),
+      ),
+      isTrue,
+    );
+    expect(
+      painter.shouldRepaint(
+        const GlassPowerButtonPainter(isDark: true, tint: Color(0xFF00FF88)),
+      ),
+      isTrue,
     );
 
     await tester.pump(const Duration(seconds: 2));
-    final moving =
-        tester.widget<CustomPaint>(_glassPaint()).painter!
-            as GlassPowerButtonPainter;
-    expect(moving.animation.value, isNot(firstPhase));
-
-    await tester.pumpWidget(_host(disableAnimations: true));
-    await tester.pump();
-    final reduced =
-        tester.widget<CustomPaint>(_glassPaint()).painter!
-            as GlassPowerButtonPainter;
-    expect(reduced.animation.value, 0);
-
-    await tester.pump(const Duration(seconds: 2));
-    final stopped =
-        tester.widget<CustomPaint>(_glassPaint()).painter!
-            as GlassPowerButtonPainter;
-    expect(stopped.animation.value, 0);
+    expect(tester.binding.transientCallbackCount, 0);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
   });
 }

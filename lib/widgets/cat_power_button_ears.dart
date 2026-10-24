@@ -43,36 +43,57 @@ class _CatPowerButtonEarsPainter extends CustomPainter {
       ..color = outlineColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
     final inner = Paint()..color = const Color(0xFFD38E86);
 
+    // Broad, gently cupped ears with softly rounded tips blend into the button
+    // instead of reading as sharp triangular add-ons. Leave their lower edges
+    // unoutlined so the button's own circular rim remains continuous.
     final leftEar = Path()
-      ..moveTo(20, 63)
-      ..lineTo(30, 5)
-      ..quadraticBezierTo(32, -1, 37, 4)
-      ..lineTo(79, 63)
+      ..moveTo(14, 65)
+      ..cubicTo(22, 53, 22, 34, 28, 23)
+      ..cubicTo(31, 15, 35, 9, 40, 9)
+      ..cubicTo(46, 9, 49, 17, 53, 26)
+      ..cubicTo(61, 43, 73, 56, 86, 65)
       ..close();
     final rightEar = Path()
-      ..moveTo(121, 63)
-      ..lineTo(163, 4)
-      ..quadraticBezierTo(168, -1, 170, 5)
-      ..lineTo(180, 63)
+      ..moveTo(114, 65)
+      ..cubicTo(127, 56, 139, 43, 147, 26)
+      ..cubicTo(151, 17, 154, 9, 160, 9)
+      ..cubicTo(165, 9, 169, 15, 172, 23)
+      ..cubicTo(178, 34, 178, 53, 186, 65)
       ..close();
+    canvas.drawPath(leftEar, fur);
+    canvas.drawPath(rightEar, fur);
 
-    for (final ear in [leftEar, rightEar]) {
-      canvas.drawPath(ear, fur);
-      canvas.drawPath(ear, outline);
-    }
+    final leftContour = Path()
+      ..moveTo(14, 65)
+      ..cubicTo(22, 53, 22, 34, 28, 23)
+      ..cubicTo(31, 15, 35, 9, 40, 9)
+      ..cubicTo(46, 9, 49, 17, 53, 26)
+      ..cubicTo(61, 43, 73, 56, 86, 65);
+    final rightContour = Path()
+      ..moveTo(114, 65)
+      ..cubicTo(127, 56, 139, 43, 147, 26)
+      ..cubicTo(151, 17, 154, 9, 160, 9)
+      ..cubicTo(165, 9, 169, 15, 172, 23)
+      ..cubicTo(178, 34, 178, 53, 186, 65);
+    canvas.drawPath(leftContour, outline);
+    canvas.drawPath(rightContour, outline);
 
+    // Muted, rounded inner patches follow the bent shape of the outer ears.
     final leftInnerEar = Path()
-      ..moveTo(37, 48)
-      ..lineTo(40, 18)
-      ..lineTo(61, 49)
+      ..moveTo(31, 51)
+      ..cubicTo(34, 42, 35, 31, 39, 24)
+      ..cubicTo(45, 31, 52, 43, 62, 53)
+      ..cubicTo(51, 50, 40, 49, 31, 51)
       ..close();
     final rightInnerEar = Path()
-      ..moveTo(139, 49)
-      ..lineTo(160, 18)
-      ..lineTo(163, 48)
+      ..moveTo(169, 51)
+      ..cubicTo(166, 42, 165, 31, 161, 24)
+      ..cubicTo(155, 31, 148, 43, 138, 53)
+      ..cubicTo(149, 50, 160, 49, 169, 51)
       ..close();
     canvas.drawPath(leftInnerEar, inner);
     canvas.drawPath(rightInnerEar, inner);
