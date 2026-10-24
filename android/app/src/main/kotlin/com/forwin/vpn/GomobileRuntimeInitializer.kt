@@ -4,7 +4,7 @@ import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
-import gi.Seq
+import android.util.Log
 
 /**
  * Initializes the RELOCATED Psiphon gomobile runtime before any Psiphon Java
@@ -21,9 +21,14 @@ import gi.Seq
  */
 class GomobileRuntimeInitializer : ContentProvider() {
     override fun onCreate(): Boolean {
-        try {
-            Seq.setContext(context?.applicationContext)
-        } catch (_: Throwable) {
+        val appContext = context?.applicationContext ?: return true
+        val failure = PsiphonNativeRuntime.initialize(appContext)
+        if (failure != null) {
+            Log.e(
+                "GomobileRuntimeInitializer",
+                "Psiphon native runtime initialization failed: ${PsiphonNativeRuntime.describe(failure)}",
+                failure,
+            )
         }
         return true
     }

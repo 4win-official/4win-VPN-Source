@@ -47,6 +47,26 @@ class PsiphonStartupContractTest(unittest.TestCase):
         self.assertIn('vpnInterface?.close()', failure.split('} else {', 1)[1])
         self.assertIn('lastStatusText = "Psiphon failed:', failure)
 
+    def test_automatic_reconnect_does_not_reuse_a_persisted_manual_target(self):
+        service = (NATIVE / "PsiphonVpnService.kt").read_text()
+        reconnect = service.split("ACTION_RECONNECT -> {", 1)[1].split("null -> if", 1)[0]
+        self.assertIn("PsiphonReconnectSelection.targetServerId(", reconnect)
+        helper = (NATIVE / "PsiphonReconnectSelection.kt").read_text()
+        self.assertIn("if (hasActiveConnectIntent)", helper)
+        self.assertIn("activeTargetServerId", helper)
+        self.assertIn("persistedTargetServerId", helper)
+
+    def test_native_runtime_initialization_failure_is_preserved_and_reported(self):
+        service = (NATIVE / "PsiphonVpnService.kt").read_text()
+        initializer = (NATIVE / "GomobileRuntimeInitializer.kt").read_text()
+        runtime = (NATIVE / "PsiphonNativeRuntime.kt").read_text()
+        startup = service.split("private fun initializePsiphonTunnel(", 1)[1].split("/** Runs [block]", 1)[0]
+        self.assertIn("PsiphonNativeRuntime.initialize(appContext)", initializer)
+        self.assertIn("initializationFailure = error", runtime)
+        self.assertIn("PsiphonNativeRuntime.requireInitialized()", startup)
+        self.assertIn("PsiphonNativeRuntime.describe(t)", service)
+        self.assertNotIn("catch (_: Throwable)", initializer)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,6 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import ca.psiphon.PsiphonTunnel
-import gi.Seq
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -242,16 +241,11 @@ class PsiphonVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        try {
-            // gi.Seq = the build-time-relocated Psiphon bridge (go → gi).
-            // Its static initializer loads libpsiphon-gojni.so only, so this
-            // process never sees Xray's libgojni.so. The explicit load below
-            // is a no-op safeguard (System.loadLibrary is idempotent).
-            Seq.setContext(applicationContext)
-            System.loadLibrary(PSIPHON_NATIVE_LIBRARY)
+        val runtimeFailure = PsiphonNativeRuntime.initialize(applicationContext)
+        if (runtimeFailure == null) {
             Log.d(TAG, "Psiphon native runtime loaded and gomobile context initialized")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Psiphon native runtime initialization failed", t)
+        } else {
+            Log.e(TAG, "Psiphon native runtime initialization failed: ${PsiphonNativeRuntime.describe(runtimeFailure)}", runtimeFailure)
         }
 
         // Listen for the :psiphonbridge process reporting whether the actual
@@ -374,8 +368,11 @@ class PsiphonVpnService : VpnService() {
                 val reconnectIntent = activeConnectIntent?.let { Intent(it).apply { action = ACTION_CONNECT } }
                 currentRegion = reconnectIntent?.getStringExtra(EXTRA_EGRESS_REGION)
                     ?: prefs.getString("region", currentRegion) ?: currentRegion
-                currentTargetServerId = reconnectIntent?.getStringExtra(EXTRA_TARGET_SERVER_ID)?.takeIf { it.isNotBlank() }
-                    ?: prefs.getString("target_server_id", null)?.takeIf { it.isNotBlank() }
+                currentTargetServerId = PsiphonReconnectSelection.targetServerId(
+                    hasActiveConnectIntent = reconnectIntent != null,
+                    activeTargetServerId = reconnectIntent?.getStringExtra(EXTRA_TARGET_SERVER_ID),
+                    persistedTargetServerId = prefs.getString("target_server_id", null),
+                )
                 prefs.edit().putBoolean("wanted", true).apply()
                 // Keep this foreground service alive while teardown and restart are serialized.
                 try { showNotification("Reconnecting to Psiphon...", true) } catch (_: Throwable) {}
@@ -484,7 +481,8 @@ class PsiphonVpnService : VpnService() {
             showNotification(lastStatusText, true)
             sendStatus()
         } catch (t: Throwable) {
-            plog("startup failed: ${t.message ?: "unknown error"}")
+            val failure = PsiphonNativeRuntime.describe(t)
+            plog("startup failed: $failure")
             Log.e(TAG, "Psiphon startup failed", t)
             activeSession = null
             sessionStartedAtElapsed = 0L
@@ -507,14 +505,14 @@ class PsiphonVpnService : VpnService() {
             if (KillSwitch.isEnabled(applicationContext) && vpnInterface != null) {
                 // Kill switch: keep the TUN up as a blackhole so no traffic
                 // can leak, and stay alive for the next reconnect attempt.
-                enterBlackhole("startup failed: ${t.message ?: "unknown error"}")
+                enterBlackhole("startup failed: $failure")
             } else {
                 isServiceRunning = false
                 try {
                     vpnInterface?.close()
                 } catch (_: Throwable) {}
                 vpnInterface = null
-                lastStatusText = "Psiphon failed: ${t.message ?: "unknown error"}"
+                lastStatusText = "Psiphon failed: $failure"
                 try {
                     showNotification(lastStatusText, false)
                 } catch (_: Throwable) {}
@@ -684,6 +682,7 @@ class PsiphonVpnService : VpnService() {
     }
 
     private fun initializePsiphonTunnel(region: String) {
+        PsiphonNativeRuntime.requireInitialized()
         val session = activeSession ?: throw IllegalStateException("Missing Psiphon session")
         val bootstrap = assets.open("mix_psiphon_bootstrap.json").bufferedReader().use {
             JSONObject(it.readText())
