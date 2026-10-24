@@ -738,9 +738,9 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    private fun measureFreshWarpDelay(requestId: String): Int {
+    private fun measureFreshWarpDelay(requestId: String? = null): Long {
         if (!XrayVpnService.isServiceRunning ||
-            !runCatching { NativeCore.isReady() }.getOrDefault(false)) return -1
+            !runCatching { NativeCore.isReady() }.getOrDefault(false)) return -1L
         var connection: HttpURLConnection? = null
         return try {
             val start = System.nanoTime()
@@ -753,19 +753,21 @@ class MainActivity: FlutterActivity() {
                 setRequestProperty("Cache-Control", "no-cache, no-store")
                 setRequestProperty("Pragma", "no-cache")
             }
-            activeDelayConnections[requestId] = connection
-            if (!activeDelayProbes.containsKey(requestId)) {
-                activeDelayConnections.remove(requestId)
-                connection.disconnect()
-                return -1
+            if (requestId != null) {
+                activeDelayConnections[requestId] = connection
+                if (!activeDelayProbes.containsKey(requestId)) {
+                    activeDelayConnections.remove(requestId)
+                    connection.disconnect()
+                    return -1L
+                }
             }
             val code = connection.responseCode
-            val elapsed = ((System.nanoTime() - start) / 1_000_000L).toInt()
-            if (code in 200..399) elapsed else -1
+            val elapsed = (System.nanoTime() - start) / 1_000_000L
+            if (code in 200..399) elapsed else -1L
         } catch (_: Exception) {
-            -1
+            -1L
         } finally {
-            activeDelayConnections.remove(requestId)
+            requestId?.let { activeDelayConnections.remove(it) }
             connection?.disconnect()
         }
     }
