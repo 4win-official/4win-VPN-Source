@@ -26,18 +26,14 @@ class UpdateInfo {
 
 /// سرویس بررسی و دانلود آپدیت از طریق GitHub Releases
 ///
-/// ریپوی ریلیزها: 4win-official/4win-VPN  (دقت: این با ریپوی سورس فرق داره)
+/// ریپوی بررسی نسخه‌ها: 4win-official/4win-VPN-Source.
 /// تگ‌ها به شکل v1.4.2 هستند.
 class UpdateService {
-  // مهم: ریپوی ریلیزها 4win-VPN است نه 4win-VPN-Source
-  static const String _owner = '4win-official';
-  static const String _repo = '4win-VPN';
-
-  static const String _latestApiUrl =
-      'https://api.github.com/repos/$_owner/$_repo/releases/latest';
+  static const String latestReleaseApiUrl =
+      'https://api.github.com/repos/4win-official/4win-VPN-Source/releases/latest';
 
   static const String releasesPageUrl =
-      'https://github.com/$_owner/$_repo/releases';
+      'https://github.com/4win-official/4win-VPN-Source/releases';
 
   /// گرفتن نسخه فعلی اپ (مثلا "1.4.4")
   Future<String> getCurrentVersion() async {
@@ -57,7 +53,7 @@ class UpdateService {
       final currentVersion = await getCurrentVersion();
 
       final response = await http.get(
-        Uri.parse(_latestApiUrl),
+        Uri.parse(latestReleaseApiUrl),
         headers: {
           'Accept': 'application/vnd.github+json',
           'User-Agent': '4win-VPN-App',
