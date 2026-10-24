@@ -323,16 +323,14 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
               ),
               if (selected) Icon(Icons.check_circle, color: accent, size: 21),
               IconButton(
-                tooltip: 'Test group latency',
-                onPressed: busy
-                    ? null
-                    : () => _run(() => p.testSstpGroup(g.id)),
+                tooltip: testing ? 'Stop test' : 'Test group latency',
+                onPressed: testing
+                    ? p.cancelSstpTest
+                    : busy
+                        ? null
+                        : () => _run(() => p.testSstpGroup(g.id)),
                 icon: testing
-                    ? SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: FourWinLoader(strokeWidth: 1.8, color: accent),
-                      )
+                    ? const Icon(Icons.close, color: Colors.redAccent, size: 20)
                     : const Icon(Icons.speed, size: 21),
               ),
               if (g.isDefault || g.subscriptionUrl != null)
@@ -412,20 +410,16 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         children: [
           IconButton(
             tooltip: 'Test TCP latency',
-            onPressed:
-                testing ||
-                    p.sstpGroupTesting ||
-                    p.sstpRefreshing ||
-                    p.isConnected ||
-                    p.isConnecting
-                ? null
-                : () => _run(() => p.testSstpServer(group.id, s)),
+            onPressed: testing
+                ? p.cancelSstpTest
+                : p.sstpGroupTesting ||
+                      p.sstpRefreshing ||
+                      p.isConnected ||
+                      p.isConnecting
+                    ? null
+                    : () => _run(() => p.testSstpServer(group.id, s)),
             icon: testing
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: FourWinLoader(strokeWidth: 1.8, color: accent),
-                  )
+                ? const Icon(Icons.close, color: Colors.redAccent, size: 20)
                 : const Icon(Icons.speed, size: 20),
           ),
           if (selected) Icon(Icons.check_circle, color: accent),

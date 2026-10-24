@@ -1,11 +1,14 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'probe_cancellation.dart';
 
 /// Thin wrapper over the native Xray MethodChannel (`com.forwin.vpn/xray`).
 /// Bridges to [XrayVpnService] which runs the real Xray core (libv2ray).
 class XrayConnection {
   static const platform = MethodChannel('com.forwin.vpn/xray');
+  static int _nextDelayProbeId = 0;
 
   static Future<int> connectMixPlan(Map<String, dynamic> plan) async {
     try {
@@ -130,18 +133,36 @@ class XrayConnection {
   static Future<int> measureDelay(
     String configJson, {
     String url = 'https://www.google.com/generate_204',
+    ProbeCancellation? cancellation,
   }) async {
+    final requestId = 'delay-${++_nextDelayProbeId}';
+    final token = cancellation;
+    if (token?.isCancelled == true) return -1;
+    final cancelNative = token?.onCancel(() {
+      unawaited(platform.invokeMethod<bool>('cancelMeasureDelay', {
+        'requestId': requestId,
+      }).catchError((_) => false));
+    });
     try {
-      final result = await platform.invokeMethod('measureDelay', {
+      final probe = platform.invokeMethod<dynamic>('measureDelay', {
         'configJson': configJson,
         'url': url,
+        'requestId': requestId,
       });
+      final result = token == null
+          ? await probe
+          : await Future.any<dynamic>([
+              probe,
+              token.whenCancelled.then((_) => -1),
+            ]);
       if (result is int) return result;
       if (result is num) return result.toInt();
       return -1;
     } catch (e) {
       if (kDebugMode) debugPrint('❌ Xray measureDelay error: $e');
       return -1;
+    } finally {
+      cancelNative?.call();
     }
   }
 

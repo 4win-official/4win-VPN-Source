@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
 import '../models/psiphon_server.dart';
+import 'probe_cancellation.dart';
 
 /// Dart bridge to the native Psiphon VPN service (`com.forwin.vpn/psiphon`).
 ///
@@ -203,7 +204,12 @@ class PsiphonService {
 
   /// TCP connect time only: no Psiphon authentication, VPN delay or ICMP measurement.
   /// Uses normal app routing and never bypasses a VPN or kill switch.
-  Future<int?> testServerLatency(PsiphonServer server) async {
+  Future<int?> testServerLatency(
+    PsiphonServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
+    final token = cancellation ?? ProbeCancellation();
+    if (token.isCancelled) return null;
     final address = InternetAddress.tryParse(server.ipAddress);
     final port = server.port;
     if (address == null || port == null || port < 1 || port > 65535) {
@@ -212,11 +218,13 @@ class PsiphonService {
     Socket? socket;
     final stopwatch = Stopwatch()..start();
     try {
-      socket = await Socket.connect(
-        address,
+      socket = await connectProbeSocket(
+        server.ipAddress,
         port,
+        cancellation: token,
         timeout: const Duration(seconds: 3),
       );
+      if (token.isCancelled) return null;
       return stopwatch.elapsedMilliseconds;
     } catch (_) {
       return null;

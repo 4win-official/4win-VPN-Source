@@ -30,6 +30,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 class MainActivity: FlutterActivity() {
     private val DNS_CHANNEL = "com.forwin.vpn/dns"
@@ -46,6 +47,8 @@ class MainActivity: FlutterActivity() {
     private val VPN_REQUEST_CODE = 100
     private val XRAY_REQUEST_CODE = 101
     private var catMeowPlayer: MediaPlayer? = null
+    private val activeDelayProbes = ConcurrentHashMap<String, Pair<Thread, MethodChannel.Result>>()
+    private val activeDelayConnections = ConcurrentHashMap<String, HttpURLConnection>()
 
     // Holds an .ovpn file that the user opened/shared into the app (via VIEW or
     // SEND intents) until the Flutter side pulls it with getPendingOvpnImport.
@@ -655,20 +658,30 @@ class MainActivity: FlutterActivity() {
                     val configJson = call.argument<String>("configJson") ?: ""
                     val url = call.argument<String>("url")
                         ?: "https://www.google.com/generate_204"
+                    val requestId = call.argument<String>("requestId")
+                        ?: "legacy-${android.os.SystemClock.elapsedRealtimeNanos()}"
                     if (configJson.contains("__APP_FILES__")) {
                         // WARP is already running in Aether. Use a fresh
                         // request through the active VPN instead of returning
                         // the connect-time RTT stored by the native core.
-                        Thread {
-                            val delay = measureFreshWarpDelay()
-                            runOnUiThread { result.success(delay) }
-                        }.start()
+                        startCancelableDelayProbe(requestId, result) {
+                            measureFreshWarpDelay(requestId)
+                        }
                         return@setMethodCallHandler
                     }
-                    Thread {
-                        val delay = measureXrayDelay(configJson, url)
-                        runOnUiThread { result.success(delay) }
-                    }.start()
+                    startCancelableDelayProbe(requestId, result) {
+                        measureXrayDelay(configJson, url)
+                    }
+                }
+                "cancelMeasureDelay" -> {
+                    val requestId = call.argument<String>("requestId")
+                    val pending = requestId?.let { activeDelayProbes.remove(it) }
+                    requestId?.let { activeDelayConnections.remove(it)?.disconnect() }
+                    if (pending != null) {
+                        pending.first.interrupt()
+                        runOnUiThread { pending.second.success(-1L) }
+                    }
+                    result.success(pending != null)
                 }
                 "measureMixDelay" -> {
                     // Never use Activity HTTP here: Mix excludes our UID from
@@ -725,7 +738,7 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    private fun measureFreshWarpDelay(): Int {
+    private fun measureFreshWarpDelay(requestId: String): Int {
         if (!XrayVpnService.isServiceRunning ||
             !runCatching { NativeCore.isReady() }.getOrDefault(false)) return -1
         var connection: HttpURLConnection? = null
@@ -740,12 +753,19 @@ class MainActivity: FlutterActivity() {
                 setRequestProperty("Cache-Control", "no-cache, no-store")
                 setRequestProperty("Pragma", "no-cache")
             }
+            activeDelayConnections[requestId] = connection
+            if (!activeDelayProbes.containsKey(requestId)) {
+                activeDelayConnections.remove(requestId)
+                connection.disconnect()
+                return -1
+            }
             val code = connection.responseCode
             val elapsed = ((System.nanoTime() - start) / 1_000_000L).toInt()
             if (code in 200..399) elapsed else -1
         } catch (_: Exception) {
             -1
         } finally {
+            activeDelayConnections.remove(requestId)
             connection?.disconnect()
         }
     }
@@ -932,6 +952,29 @@ class MainActivity: FlutterActivity() {
             android.util.Log.e("MainActivity", "measureDelay failed: ${t.message}")
             -1L
         }
+    }
+
+    private fun startCancelableDelayProbe(
+        requestId: String,
+        result: MethodChannel.Result,
+        probe: () -> Long,
+    ) {
+        val worker = Thread {
+            val delay = try {
+                probe()
+            } catch (_: InterruptedException) {
+                -1L
+            } catch (_: Throwable) {
+                -1L
+            }
+            val pending = activeDelayProbes.remove(requestId)
+            if (pending != null) runOnUiThread { pending.second.success(delay) }
+        }.apply {
+            isDaemon = true
+            name = "xray-delay-$requestId"
+        }
+        activeDelayProbes[requestId] = worker to result
+        worker.start()
     }
 
     /** Reads the text content behind a content:// or file:// URI. */

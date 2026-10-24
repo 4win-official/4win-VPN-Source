@@ -9,6 +9,7 @@ import '../providers/vpn_provider.dart';
 import '../widgets/four_win_loader.dart';
 import '../models/openvpn_config.dart';
 import '../services/openvpn_service.dart';
+import '../services/probe_cancellation.dart';
 
 class OpenVpnConfigsScreen extends StatefulWidget {
   /// When opened as a result of the user tapping/sharing an `.ovpn` file, these
@@ -32,6 +33,15 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
   List<OpenVpnConfig> _configs = [];
   bool _isLoading = true;
   String? _selectedConfigName;
+  final Map<String, ProbeCancellation> _pingTests = {};
+
+  @override
+  void dispose() {
+    for (final cancellation in _pingTests.values.toSet()) {
+      cancellation.cancel();
+    }
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -502,8 +512,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     unawaited(vpnProvider.selectOpenVpnConfig(config));
   }
 
-  /// تست ping به سرور OpenVPN (استفاده از Socket)
-  Future<void> _testPing(OpenVpnConfig config) async {
+  Future<void> _testPingWithCancellation(OpenVpnConfig config) async {
     if (config.serverAddress == null || config.serverAddress!.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -513,23 +522,16 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       return;
     }
 
-    // نمایش دیالوگ loading
+    final active = _pingTests[config.name];
+    if (active != null) {
+      active.cancel();
+      return;
+    }
     if (!mounted) return;
-    
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            FourWinLoader(),
-            SizedBox(height: 16),
-            Text('Testing connection...'),
-          ],
-        ),
-      ),
-    );
+
+    final cancellation = ProbeCancellation();
+    _pingTests[config.name] = cancellation;
+    setState(() {});
 
     try {
       final serverAddress = config.serverAddress!;
@@ -542,9 +544,10 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       Socket? socket;
       
       try {
-        socket = await Socket.connect(
+        socket = await connectProbeSocket(
           serverAddress,
           serverPort,
+          cancellation: cancellation,
           timeout: const Duration(seconds: 5),
         );
         
@@ -552,8 +555,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         final pingMs = stopwatch.elapsedMilliseconds;
         
         // ✅ اتصال موفق
-        if (mounted) {
-          Navigator.pop(context); // بستن loading dialog
+        if (mounted && !cancellation.isCancelled) {
           
           showDialog(
             context: context,
@@ -621,8 +623,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         stopwatch.stop();
         
         // ❌ اتصال ناموفق
-        if (mounted) {
-          Navigator.pop(context); // بستن loading dialog
+        if (mounted && !cancellation.isCancelled) {
           
           showDialog(
             context: context,
@@ -690,9 +691,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       } on TimeoutException {
         stopwatch.stop();
         
-        if (mounted) {
-          Navigator.pop(context);
-          
+        if (mounted && !cancellation.isCancelled) {
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
@@ -739,13 +738,17 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       }
       
     } catch (e) {
-      if (mounted) {
-        Navigator.pop(context);
-        
+      if (mounted && !cancellation.isCancelled) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('❌ Test failed: $e')),
         );
       }
+    } finally {
+      if (identical(_pingTests[config.name], cancellation)) {
+        _pingTests.remove(config.name);
+        if (mounted) setState(() {});
+      }
+      cancellation.cancel();
     }
   }
 
@@ -883,11 +886,20 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                                 ),
                               ),
                             const SizedBox(width: 8),
-                            // 🔧 دکمه Ping Test
+                            // A running probe can be stopped without affecting selection.
                             IconButton(
-                              icon: const Icon(Icons.speed, color: Colors.blue),
-                              onPressed: () => _testPing(config),
-                              tooltip: 'Test Ping',
+                              icon: Icon(
+                                _pingTests.containsKey(config.name)
+                                    ? Icons.close
+                                    : Icons.speed,
+                                color: _pingTests.containsKey(config.name)
+                                    ? Colors.redAccent
+                                    : Colors.blue,
+                              ),
+                              onPressed: () => _testPingWithCancellation(config),
+                              tooltip: _pingTests.containsKey(config.name)
+                                  ? 'Stop test'
+                                  : 'Test Ping',
                             ),
                             IconButton(
                               icon: const Icon(Icons.delete, color: Colors.red),

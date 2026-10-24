@@ -238,6 +238,8 @@ extension _SstpProviderLogic on VpnProvider {
   }
 
   Future<List<VpnServer>> _performSstpTest() async {
+    final cancellation = ProbeCancellation();
+    _sstpTestCancellation = cancellation;
     final group = _sstpGroup(_sstpTargetGroup);
     final targets = _sstpManualSelection
         ? [if (_selectedServer != null) _selectedServer!]
@@ -254,14 +256,15 @@ extension _SstpProviderLogic on VpnProvider {
     try {
       final reachable = await _serverService.testServersInParallel(
         targets,
+        cancellation: cancellation,
         onProgress: (tested, total) {
-          if (_mixDisposed) return;
+          if (_mixDisposed || cancellation.isCancelled) return;
           _sstpTestedCount = tested;
           _sstpTestTotal = total;
           notifyListeners();
         },
       );
-      if (_mixDisposed) return [];
+      if (_mixDisposed || cancellation.isCancelled) return [];
       // Keep unreachable entries in the list so they can be tested again.
       for (final server in targets) {
         final matches = reachable.where(
@@ -286,6 +289,7 @@ extension _SstpProviderLogic on VpnProvider {
       }
       return sorted;
     } catch (_) {
+      if (cancellation.isCancelled) return [];
       for (final server in targets) {
         server.ping = -1;
       }
@@ -294,6 +298,9 @@ extension _SstpProviderLogic on VpnProvider {
     } finally {
       for (final server in targets) {
         _sstpTestingServers.remove(server.fullAddress);
+      }
+      if (identical(_sstpTestCancellation, cancellation)) {
+        _sstpTestCancellation = null;
       }
       _sstpGroupTesting = false;
       if (!_mixDisposed) notifyListeners();
@@ -309,6 +316,8 @@ extension _SstpProviderLogic on VpnProvider {
     final key = server.fullAddress;
     if (_sstpTestingServers.contains(key)) return;
     _sstpTestingServers.add(key);
+    final cancellation = ProbeCancellation();
+    _sstpTestCancellation = cancellation;
     _sstpGroupTesting = true;
     _sstpTestedCount = 0;
     _sstpTestTotal = 1;
@@ -318,23 +327,29 @@ extension _SstpProviderLogic on VpnProvider {
     try {
       final reachable = await _serverService.testServersInParallel(
         [server],
+        cancellation: cancellation,
         onProgress: (tested, total) {
-          if (_mixDisposed) return;
+          if (_mixDisposed || cancellation.isCancelled) return;
           _sstpTestedCount = tested;
           _sstpTestTotal = total;
           notifyListeners();
         },
       );
+      if (cancellation.isCancelled) return;
       server.ping = reachable.isEmpty ? -1 : reachable.first.ping;
       if (server.ping == -1) {
         _sstpTestError = 'SSTP server ${server.fullAddress} is unreachable.';
       }
     } catch (_) {
+      if (cancellation.isCancelled) return;
       server.ping = -1;
       _sstpTestError = 'Could not test SSTP server ${server.fullAddress}.';
       rethrow;
     } finally {
       _sstpTestingServers.remove(key);
+      if (identical(_sstpTestCancellation, cancellation)) {
+        _sstpTestCancellation = null;
+      }
       _sstpGroupTesting = false;
       _sstpTestedCount = 1;
       if (!_mixDisposed) notifyListeners();
@@ -346,6 +361,8 @@ extension _SstpProviderLogic on VpnProvider {
     if (group == null) throw ArgumentError('SSTP group not found.');
     if (_sstpLocked || _sstpGroupTesting || _isLoadingServers) return;
     _sstpGroupTesting = true;
+    final cancellation = ProbeCancellation();
+    _sstpTestCancellation = cancellation;
     _sstpTestedCount = 0;
     _sstpTestTotal = group.servers.length;
     _sstpTestError = null;
@@ -357,12 +374,15 @@ extension _SstpProviderLogic on VpnProvider {
     try {
       final reachable = await _serverService.testServersInParallel(
         group.servers,
+        cancellation: cancellation,
         onProgress: (tested, total) {
+          if (cancellation.isCancelled) return;
           _sstpTestedCount = tested;
           _sstpTestTotal = total;
           if (!_mixDisposed) notifyListeners();
         },
       );
+      if (cancellation.isCancelled) return;
       for (final server in group.servers) {
         final matches = reachable.where(
           (candidate) =>
@@ -376,6 +396,7 @@ extension _SstpProviderLogic on VpnProvider {
         _sstpTestError = 'No reachable SSTP servers in this group.';
       }
     } catch (_) {
+      if (cancellation.isCancelled) return;
       for (final server in group.servers) {
         server.ping = -1;
       }
@@ -384,6 +405,9 @@ extension _SstpProviderLogic on VpnProvider {
     } finally {
       for (final server in group.servers) {
         _sstpTestingServers.remove(server.fullAddress);
+      }
+      if (identical(_sstpTestCancellation, cancellation)) {
+        _sstpTestCancellation = null;
       }
       _sstpGroupTesting = false;
       if (!_mixDisposed) notifyListeners();

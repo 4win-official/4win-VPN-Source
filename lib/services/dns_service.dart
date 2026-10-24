@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/dns_server.dart';
+import 'probe_cancellation.dart';
 
 class DnsService {
   static const String customDnsKey = 'custom_dns_servers';
@@ -28,21 +29,33 @@ class DnsService {
   /// اندازه می‌گیره. این روش حتی وقتی VPN دایرکت DNS فعاله هم کار می‌کنه چون
   /// از پروتکل واقعی DNS استفاده می‌کنه (مثل کاری که خود اپ موقع DNS resolution
   /// انجام می‌ده). اگر UDP پاسخ نداد، به‌عنوان fallback از TCP Socket استفاده می‌کنه.
-  Future<int?> testDnsConnectivity(DnsServer server) async {
+  Future<int?> testDnsConnectivity(
+    DnsServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
+    final token = cancellation ?? ProbeCancellation();
+    if (token.isCancelled) return null;
     // روش 1: پینگ واقعی DNS با UDP query
-    final udpPing = await _pingDnsUdp(server.primaryDns);
+    final udpPing = await _pingDnsUdp(server.primaryDns, token);
+    if (token.isCancelled) return null;
     if (udpPing != null) return udpPing;
 
     // روش 2 (fallback): تست TCP روی پورت‌های رایج DNS
     const List<int> portsToTry = [53, 443, 853, 80];
     for (final port in portsToTry) {
       try {
+        if (token.isCancelled) return null;
         final stopwatch = Stopwatch()..start();
-        final socket = await Socket.connect(
+        final socket = await connectProbeSocket(
           server.primaryDns,
           port,
+          cancellation: token,
           timeout: const Duration(seconds: 3),
         );
+        if (token.isCancelled) {
+          socket.destroy();
+          return null;
+        }
         stopwatch.stop();
         await socket.close();
         final ping = stopwatch.elapsedMilliseconds;
@@ -57,13 +70,16 @@ class DnsService {
   }
 
   /// ارسال یک DNS query واقعی روی UDP و اندازه‌گیری زمان پاسخ (میلی‌ثانیه)
-  Future<int?> _pingDnsUdp(String ip) async {
+  Future<int?> _pingDnsUdp(String ip, ProbeCancellation cancellation) async {
     RawDatagramSocket? socket;
+    void Function()? removeCancelListener;
     try {
+      cancellation.throwIfCancelled();
       final InternetAddress address = InternetAddress(ip);
       final query = _buildDnsQuery('google.com');
 
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      removeCancelListener = cancellation.onCancel(socket.close);
       final completer = Completer<int?>();
       final stopwatch = Stopwatch()..start();
 
@@ -79,16 +95,23 @@ class DnsService {
 
       socket.send(query, address, 53);
 
-      final result = await completer.future.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => null,
-      );
+      final result = await Future.any<int?>([
+        completer.future.timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => null,
+        ),
+        cancellation.whenCancelled.then((_) => null),
+      ]);
+      removeCancelListener.call();
+      removeCancelListener = null;
+      if (cancellation.isCancelled) return null;
 
       if (result != null && result < 2000) return result;
       return null;
     } catch (_) {
       return null;
     } finally {
+      removeCancelListener?.call();
       socket?.close();
     }
   }
@@ -114,15 +137,21 @@ class DnsService {
   Future<List<DnsServer>> testDnsServersInParallel(
     List<DnsServer> servers, {
     Function(int tested, int total)? onProgress,
+    ProbeCancellation? cancellation,
   }) async {
+    final token = cancellation ?? ProbeCancellation();
     const int batchSize = 100; // تست 100 تا 100 تا
     final testedServers = <DnsServer>[];
     int tested = 0;
 
     for (int i = 0; i < servers.length; i += batchSize) {
+      if (token.isCancelled) return List<DnsServer>.of(testedServers);
       final batch = servers.skip(i).take(batchSize).toList();
-      final futures = batch.map((server) => testDnsConnectivity(server));
+      final futures = batch.map(
+        (server) => testDnsConnectivity(server, cancellation: token),
+      );
       final results = await Future.wait(futures);
+      if (token.isCancelled) return List<DnsServer>.of(testedServers);
 
       for (int j = 0; j < batch.length; j++) {
         final server = batch[j];

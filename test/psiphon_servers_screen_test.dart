@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vpn_swift/models/psiphon_server.dart';
 import 'package:vpn_swift/screens/psiphon_servers_screen.dart';
 import 'package:vpn_swift/services/psiphon_service.dart';
+import 'package:vpn_swift/services/probe_cancellation.dart';
 import 'package:vpn_swift/widgets/psiphon_server_list_status.dart';
 
 class FakePsiphonService extends PsiphonService {
@@ -34,7 +35,10 @@ class FakePsiphonService extends PsiphonService {
   }
 
   @override
-  Future<int?> testServerLatency(PsiphonServer server) async {
+  Future<int?> testServerLatency(
+    PsiphonServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
     pingCalls++;
     activePings++;
     maxActivePings = maxActivePings < activePings
@@ -81,7 +85,10 @@ class ControlledPsiphonService extends PsiphonService {
   }
 
   @override
-  Future<int?> testServerLatency(PsiphonServer server) {
+  Future<int?> testServerLatency(
+    PsiphonServer server, {
+    ProbeCancellation? cancellation,
+  }) {
     active++;
     if (active > maximum) maximum = active;
     final result = Completer<int?>();
@@ -92,7 +99,10 @@ class ControlledPsiphonService extends PsiphonService {
 
 class FailedPsiphonService extends FakePsiphonService {
   @override
-  Future<int?> testServerLatency(PsiphonServer server) async {
+  Future<int?> testServerLatency(
+    PsiphonServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
     pingCalls++;
     return null;
   }
@@ -149,7 +159,7 @@ void main() {
     await tester.tap(find.byTooltip('Test TCP latency').first);
     await tester.pump();
     expect(find.textContaining('Testing TCP reachability'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byTooltip('Stop test'), findsOneWidget);
 
     service.pending.single.complete(null);
     await tester.pumpAndSettle();
@@ -157,6 +167,27 @@ void main() {
       find.textContaining('TCP connection timed out or failed'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('stopping an individual Psiphon test ignores a late result', (
+    tester,
+  ) async {
+    final service = ControlledPsiphonService();
+    await tester.pumpWidget(
+      MaterialApp(home: PsiphonServersScreen(service: service)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Test TCP latency').first);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Stop test').first);
+    await tester.pump();
+    service.pending.single.complete(55);
+    await tester.pumpAndSettle();
+
+    expect(service.pending, hasLength(1));
+    expect(find.textContaining('55 ms TCP connect'), findsNothing);
+    expect(find.byTooltip('Test TCP latency').first, findsOneWidget);
   });
 
   testWidgets('shows a failed probe instead of silently clearing the result', (
@@ -175,7 +206,7 @@ void main() {
     );
   });
 
-  testWidgets('rapid test-all taps never start more than four probes', (
+  testWidgets('stopping test-all prevents later batches and discards pending results', (
     tester,
   ) async {
     final service = ControlledPsiphonService();
@@ -183,23 +214,23 @@ void main() {
       MaterialApp(home: PsiphonServersScreen(service: service)),
     );
     await tester.pumpAndSettle();
-    final testAll = find.text('Test all (max 4 at a time)');
-    await tester.tap(testAll);
-    await tester.tap(testAll);
+    await tester.tap(find.text('Test all (max 4 at a time)'));
     await tester.pump();
     expect(service.pending.length, 4);
     expect(service.active, 4);
-    for (final result in service.pending.toList()) {
-      result.complete(12);
-    }
+
+    await tester.tap(find.text('Stop testing'));
     await tester.pump();
-    expect(service.pending.length, 8);
-    for (final result in service.pending.skip(4)) {
-      result.complete(12);
+    for (final result in service.pending.toList()) {
+      result.complete(42);
     }
     await tester.pumpAndSettle();
+
     expect(service.maximum, 4);
     expect(service.active, 0);
+    expect(service.pending, hasLength(4));
+    expect(find.textContaining('42 ms TCP connect'), findsNothing);
+    expect(find.text('Test all (max 4 at a time)'), findsOneWidget);
   });
 
   testWidgets(

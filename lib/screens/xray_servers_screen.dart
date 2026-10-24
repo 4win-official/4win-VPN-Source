@@ -529,16 +529,10 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           ),
           Consumer<VpnProvider>(
             builder: (context, provider, _) => IconButton(
-              icon: provider.xrayGroupTesting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: FourWinLoader(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.speed),
-              tooltip: 'Test all groups',
+              icon: Icon(provider.xrayGroupTesting ? Icons.close : Icons.speed),
+              tooltip: provider.xrayGroupTesting ? 'Stop all tests' : 'Test all groups',
               onPressed: provider.xrayGroupTesting
-                  ? null
+                  ? () => provider.cancelXrayTests()
                   : () {
                       provider.testAllXrayGroups();
                       _toast('Testing all servers…');
@@ -842,6 +836,15 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               icon: Icon(Icons.delete_outline, color: Colors.redAccent),
               onPressed: () => _confirmDeleteGroup(groupKey, title),
             ),
+            if (testing || tcpTesting)
+              IconButton(
+                tooltip: tcpTesting ? 'Stop TCP tests' : 'Stop URL tests',
+                icon: const Icon(Icons.close, color: Colors.redAccent),
+                onPressed: () => provider.cancelXrayTests(
+                  group: groupKey,
+                  tcp: tcpTesting,
+                ),
+              ),
             PopupMenuButton<String>(
               tooltip: 'More group actions',
               icon: Icon(Icons.more_vert, color: accent),
@@ -873,33 +876,21 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   ),
                 ),
                 PopupMenuItem(
-                  value: 'url_ping',
-                  enabled: !testing,
+                  value: testing ? 'stop_url' : 'url_ping',
+                  enabled: true,
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: testing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: FourWinLoader(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.speed),
-                    title: const Text('URL ping all'),
+                    leading: Icon(testing ? Icons.close : Icons.speed),
+                    title: Text(testing ? 'Stop URL tests' : 'URL ping all'),
                   ),
                 ),
                 PopupMenuItem(
-                  value: 'tcp_ping',
-                  enabled: !tcpTesting,
+                  value: tcpTesting ? 'stop_tcp' : 'tcp_ping',
+                  enabled: true,
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: tcpTesting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: FourWinLoader(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.cable),
-                    title: const Text('TCP ping all'),
+                    leading: Icon(tcpTesting ? Icons.close : Icons.cable),
+                    title: Text(tcpTesting ? 'Stop TCP tests' : 'TCP ping all'),
                   ),
                 ),
               ],
@@ -917,8 +908,14 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   case 'url_ping':
                     provider.testXrayServers(servers);
                     break;
+                  case 'stop_url':
+                    provider.cancelXrayTests(group: groupKey);
+                    break;
                   case 'tcp_ping':
                     provider.testXrayTcpServers(servers);
+                    break;
+                  case 'stop_tcp':
+                    provider.cancelXrayTests(group: groupKey, tcp: true);
                     break;
                 }
               },
@@ -1054,6 +1051,19 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             visualDensity: VisualDensity.compact,
             onPressed: () => _copyOneServer(s),
           ),
+          if (testing || tcpTesting)
+            IconButton(
+              tooltip: 'Stop test',
+              icon: const Icon(Icons.close, color: Colors.redAccent),
+              visualDensity: VisualDensity.compact,
+              onPressed: () {
+                if (testing) provider.cancelXrayServerTest(s.id);
+                if (tcpTesting) {
+                  provider.cancelXrayServerTest(s.id, tcp: true);
+                }
+              },
+            )
+          else
           PopupMenuButton<String>(
             tooltip: 'More server actions',
             icon: Icon(Icons.more_vert, color: accent),

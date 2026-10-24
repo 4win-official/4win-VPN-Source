@@ -313,14 +313,14 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
           ),
           Consumer<VpnProvider>(
             builder: (context, p, _) => IconButton(
-              icon: p.proxyGroupTesting
-                  ? const SizedBox(width: 18, height: 18, child: FourWinLoader(strokeWidth: 2))
-                  : const Icon(Icons.speed),
-              tooltip: 'Test all',
-              onPressed: p.proxyGroupTesting ? null : () {
-                p.testAllProxyGroups();
-                _toast('Testing all proxies…');
-              },
+              icon: Icon(p.proxyGroupTesting ? Icons.close : Icons.speed),
+              tooltip: p.proxyGroupTesting ? 'Stop all tests' : 'Test all',
+              onPressed: p.proxyGroupTesting
+                  ? p.cancelProxyTests
+                  : () {
+                      p.testAllProxyGroups();
+                      _toast('Testing all proxies…');
+                    },
             ),
           ),
           IconButton(icon: const Icon(Icons.add), tooltip: 'Add proxy', onPressed: _showAddDialog),
@@ -381,7 +381,18 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                         if (locked && key != ProxyServerService.userLinksGroup)
                           IconButton(icon: const Icon(Icons.refresh), tooltip: 'Update group', onPressed: () => _refreshOneGroup(provider, key, title)),
                         IconButton(icon: Icon(Icons.copy_all, color: accent), tooltip: 'Export group', onPressed: () => _exportServers(servers, title)),
-                        IconButton(icon: Icon(Icons.speed, color: accent), tooltip: 'Test group', onPressed: provider.proxyGroupTesting ? null : () => provider.testProxyServers(servers)),
+                        IconButton(
+                          icon: Icon(
+                            provider.proxyGroupTestingFor(key) ? Icons.close : Icons.speed,
+                            color: provider.proxyGroupTestingFor(key) ? Colors.redAccent : accent,
+                          ),
+                          tooltip: provider.proxyGroupTestingFor(key) ? 'Stop group test' : 'Test group',
+                          onPressed: provider.proxyGroupTestingFor(key)
+                              ? () => provider.cancelProxyTests(group: key)
+                              : provider.proxyGroupTesting
+                                  ? null
+                                  : () => provider.testProxyServers(servers),
+                        ),
                         IconButton(icon: Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down), onPressed: () => setState(() => expanded ? _expandedGroups.remove(key) : _expandedGroups.add(key)),),
                       ],
                     ),
@@ -426,8 +437,24 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(icon: Icon(Icons.copy, color: accent, size: 18), tooltip: 'Copy link', onPressed: () async { await Clipboard.setData(ClipboardData(text: s.exportLink)); _toast('Link copied'); }),
-          IconButton(icon: testing ? const SizedBox(width: 18, height: 18, child: FourWinLoader(strokeWidth: 2)) : Icon(Icons.network_ping, color: accent, size: 20), tooltip: 'Ping test', onPressed: testing ? null : () => provider.pingProxyServer(s)),
-          IconButton(icon: Icon(Icons.public, color: accent, size: 20), tooltip: 'Open-site test', onPressed: testing ? null : () => provider.openSiteTestProxyServer(s)),
+          if (testing)
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.redAccent, size: 20),
+              tooltip: 'Stop test',
+              onPressed: () => provider.cancelProxyServerTest(s.id),
+            )
+          else ...[
+            IconButton(
+              icon: Icon(Icons.network_ping, color: accent, size: 20),
+              tooltip: 'Ping test',
+              onPressed: () => provider.pingProxyServer(s),
+            ),
+            IconButton(
+              icon: Icon(Icons.public, color: accent, size: 20),
+              tooltip: 'Open-site test',
+              onPressed: () => provider.openSiteTestProxyServer(s),
+            ),
+          ],
           Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked, color: selected ? accent : Colors.grey),
           if (s.group.isEmpty || s.group == ProxyServerService.userLinksGroup)
             IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent), onPressed: () => provider.removeProxyServer(s.id)),

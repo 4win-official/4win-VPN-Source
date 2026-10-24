@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_swift/models/vpn_server.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/services/server_service.dart';
+import 'package:vpn_swift/services/probe_cancellation.dart';
 
 class FakeServerService extends ServerService {
   FakeServerService(
@@ -28,6 +29,7 @@ class FakeServerService extends ServerService {
   Future<List<VpnServer>> testServersInParallel(
     List<VpnServer> targets, {
     Function(int tested, int total)? onProgress,
+    ProbeCancellation? cancellation,
   }) async {
     tested.add(List<VpnServer>.of(targets));
     if (throwOnTest) throw StateError('test failed');
@@ -252,6 +254,47 @@ void main() {
       expect(target.ping, -1);
     },
   );
+
+  test('stopping an individual SSTP test discards its pending result', () async {
+    final target = provider.servers.first..ping = 71;
+    final pending = Completer<List<VpnServer>>();
+    fake.pending = pending;
+    final operation = provider.testSstpServer('default', target);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(provider.isSstpServerTesting(target), isTrue);
+    provider.cancelSstpTest();
+    pending.complete(<VpnServer>[target.copyWith(ping: 3)]);
+    await operation;
+
+    expect(target.ping, isNull);
+    expect(provider.isSstpServerTesting(target), isFalse);
+    expect(provider.sstpGroupTesting, isFalse);
+  });
+
+  test('stopping a bulk SSTP test ignores late server results', () async {
+    await provider.addSstpGroup(
+      'Cancelable group',
+      'one.example:443\ntwo.example:443',
+    );
+    final group = provider.sstpGroups.firstWhere(
+      (candidate) => candidate.name == 'Cancelable group',
+    );
+    final pending = Completer<List<VpnServer>>();
+    fake.pending = pending;
+    final operation = provider.testSstpGroup(group.id);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(provider.sstpGroupTesting, isTrue);
+    expect(group.servers, everyElement(predicate<VpnServer>((s) => s.ping == null)));
+    provider.cancelSstpTest();
+    pending.complete(group.servers.map((s) => s.copyWith(ping: 4)).toList());
+    await operation;
+
+    expect(group.servers, everyElement(predicate<VpnServer>((s) => s.ping == null)));
+    expect(provider.sstpGroupTesting, isFalse);
+    expect(group.servers.where(provider.isSstpServerTesting), isEmpty);
+  });
 
   test(
     'probe failure records a test error and keeps the server unreachable',

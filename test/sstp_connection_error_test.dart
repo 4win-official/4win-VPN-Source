@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_swift/models/vpn_server.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/services/server_service.dart';
+import 'package:vpn_swift/services/probe_cancellation.dart';
 
 class _Servers extends ServerService {
   Completer<List<VpnServer>>? pending;
@@ -24,6 +25,7 @@ class _Servers extends ServerService {
   Future<List<VpnServer>> testServersInParallel(
     List<VpnServer> servers, {
     Function(int tested, int total)? onProgress,
+    ProbeCancellation? cancellation,
   }) async => pending != null
       ? pending!.future
       : servers.map((server) => server.copyWith(ping: 12)).toList();

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import '../models/vpn_server.dart';
+import 'probe_cancellation.dart';
 
 class ServerService {
   // لینک سرور - محرمانه (هرگز به کاربر نمایش داده نمی‌شود)
@@ -145,7 +146,12 @@ class ServerService {
   ///  • accept ANY successful handshake as reachable (no low-latency cutoff),
   ///  • retry a couple of times so a single transient drop doesn't reject a
   ///    working server.
-  Future<int?> testServerConnectivity(VpnServer server) async {
+  Future<int?> testServerConnectivity(
+    VpnServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
+    final token = cancellation ?? ProbeCancellation();
+    if (token.isCancelled) return null;
     final bool deepScan = await isDeepScanEnabled();
 
     // Generous timeout so slow-accepting SSTP servers still pass. Deep Scan
@@ -156,7 +162,9 @@ class ServerService {
 
     int? bestPing;
     for (int attempt = 0; attempt < maxAttempts; attempt++) {
-      final ping = await _singleConnectivityTest(server, connectTimeout);
+      if (token.isCancelled) return null;
+      final ping = await _singleConnectivityTest(server, connectTimeout, token);
+      if (token.isCancelled) return null;
       if (ping != null) {
         if (bestPing == null || ping < bestPing) bestPing = ping;
         // First successful handshake is enough — the server is reachable.
@@ -176,14 +184,16 @@ class ServerService {
   Future<int?> _singleConnectivityTest(
     VpnServer server,
     Duration connectTimeout,
+    ProbeCancellation cancellation,
   ) async {
     Socket? socket;
     try {
       final stopwatch = Stopwatch()..start();
 
-      socket = await Socket.connect(
+      socket = await connectProbeSocket(
         server.address,
         server.port,
+        cancellation: cancellation,
         timeout: connectTimeout,
       );
 
@@ -205,8 +215,10 @@ class ServerService {
   /// Test servers in parallel batches and remove unreachable ones
   Future<List<VpnServer>> testServersInParallel(
     List<VpnServer> servers,
-    {Function(int tested, int total)? onProgress}
+    {Function(int tested, int total)? onProgress,
+    ProbeCancellation? cancellation}
   ) async {
+    final token = cancellation ?? ProbeCancellation();
     final reachableServers = <VpnServer>[];
     final totalServers = servers.length;
     int testedCount = 0;
@@ -220,6 +232,7 @@ class ServerService {
 
     // تقسیم سرورها به batch ها
     for (int i = 0; i < servers.length; i += batchSize) {
+      if (token.isCancelled) break;
       final int end = (i + batchSize < servers.length) 
           ? i + batchSize 
           : servers.length;
@@ -228,8 +241,9 @@ class ServerService {
       
       // تست همزمان این batch
       final results = await Future.wait(
-        batch.map((server) => testServerConnectivity(server)),
+        batch.map((server) => testServerConnectivity(server, cancellation: token)),
       );
+      if (token.isCancelled) break;
 
       // اضافه کردن سرورهای قابل دسترس
       for (int j = 0; j < batch.length; j++) {

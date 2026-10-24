@@ -29,6 +29,7 @@ import '../services/warp_service.dart';
 import '../services/psiphon_service.dart';
 import '../services/retry_policy.dart';
 import '../services/connection_logger.dart';
+import '../services/probe_cancellation.dart';
 import '../models/mix_strategy.dart';
 import '../models/mix_diagnostics.dart';
 import '../models/mix_block_exception.dart';
@@ -100,6 +101,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   int _sstpTestedCount = 0;
   int _sstpTestTotal = 0;
   int _sstpConnectGen = 0;
+  ProbeCancellation? _sstpTestCancellation;
   Future<void>? _sstpLoadOperation;
   Future<List<VpnServer>>? _sstpTestOperation;
   Future<bool>? _sstpNativeOperation;
@@ -116,6 +118,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   Future<void> testSstpServer(String groupId, VpnServer server) =>
       _testSstpServer(groupId, server);
   Future<void> testSstpGroup(String groupId) => _testSstpGroup(groupId);
+  void cancelSstpTest() => _sstpTestCancellation?.cancel();
   Future<void> refreshSstpGroup(String id) => _refreshSstpGroup(id);
   Future<void> addSstpGroup(
     String name,
@@ -200,17 +203,40 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   // ids of servers currently being delay-tested (for spinner UI)
   final Set<String> _xrayTestingIds = {};
   Set<String> get xrayTestingIds => _xrayTestingIds;
+  final Map<String, ProbeCancellation> _xrayDelayProbeTokens = {};
   // Server ids currently running a direct TCP connect test.
   final Set<String> _xrayTcpTestingIds = {};
   Set<String> get xrayTcpTestingIds => _xrayTcpTestingIds;
+  final Map<String, ProbeCancellation> _xrayTcpProbeTokens = {};
   // group names currently running a delay test (per-group spinner)
   final Set<String> _xrayTestingGroups = {};
   final Set<String> _xrayTcpTestingGroups = {};
+  final Map<String, ProbeCancellation> _xrayDelayGroupTokens = {};
+  final Map<String, ProbeCancellation> _xrayTcpGroupTokens = {};
   bool xrayGroupTestingFor(String group) => _xrayTestingGroups.contains(group);
   bool xrayGroupTcpTestingFor(String group) =>
       _xrayTcpTestingGroups.contains(group);
   bool _xrayGroupTesting = false;
   bool get xrayGroupTesting => _xrayGroupTesting;
+  void cancelXrayServerTest(String id, {bool tcp = false}) {
+    (tcp ? _xrayTcpProbeTokens[id] : _xrayDelayProbeTokens[id])?.cancel();
+  }
+
+  void cancelXrayTests({String? group, bool tcp = false}) {
+    final runs = tcp ? _xrayTcpGroupTokens : _xrayDelayGroupTokens;
+    if (group != null) {
+      runs[group]?.cancel();
+      return;
+    }
+    for (final token in runs.values.toSet()) {
+      token.cancel();
+    }
+    for (final token in (tcp ? _xrayTcpProbeTokens : _xrayDelayProbeTokens)
+        .values
+        .toSet()) {
+      token.cancel();
+    }
+  }
   bool _xrayRefreshing = false;
   bool get xrayRefreshing => _xrayRefreshing;
 
@@ -240,11 +266,27 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   bool proxyGroupSelectedFor(String group) => _selectedProxyGroup == group;
   final Set<String> _proxyTestingIds = {};
   Set<String> get proxyTestingIds => _proxyTestingIds;
+  final Map<String, ProbeCancellation> _proxyProbeTokens = {};
   final Set<String> _proxyTestingGroups = {};
+  final Map<String, ProbeCancellation> _proxyGroupRunTokens = {};
   bool proxyGroupTestingFor(String group) =>
       _proxyTestingGroups.contains(group);
   bool _proxyGroupTesting = false;
   bool get proxyGroupTesting => _proxyGroupTesting;
+  void cancelProxyServerTest(String id) => _proxyProbeTokens[id]?.cancel();
+
+  void cancelProxyTests({String? group}) {
+    if (group != null) {
+      _proxyGroupRunTokens[group]?.cancel();
+      return;
+    }
+    for (final token in _proxyGroupRunTokens.values.toSet()) {
+      token.cancel();
+    }
+    for (final token in _proxyProbeTokens.values.toSet()) {
+      token.cancel();
+    }
+  }
   bool _proxyRefreshing = false;
   bool get proxyRefreshing => _proxyRefreshing;
   int _proxyConnectGen = 0;
@@ -2119,54 +2161,88 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
   /// Real-delay test (v2rayNG style) for a single server. Returns ms or -1.
   /// Persists the measured ping and updates the in-memory list.
-  Future<int> measureXrayDelay(XrayServer server) async {
+  Future<int> measureXrayDelay(
+    XrayServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
+    if (_xrayDelayProbeTokens.containsKey(server.id)) return -1;
+    final token = cancellation ?? ProbeCancellation();
+    if (token.isCancelled) return -1;
+    _xrayDelayProbeTokens[server.id] = token;
     _xrayTestingIds.add(server.id);
     notifyListeners();
     try {
       final config = await _buildDelayConfig(server);
+      if (token.isCancelled) return -1;
       final testUrl = await getXrayTestUrl();
-      final delay = await XrayConnection.measureDelay(config, url: testUrl);
-      await _xrayService.updatePing(server.id, delay >= 0 ? delay : -1);
-      _applyPing(server.id, delay >= 0 ? delay : -1);
+      if (token.isCancelled) return -1;
+      final delay = await XrayConnection.measureDelay(
+        config,
+        url: testUrl,
+        cancellation: token,
+      );
+      if (token.isCancelled) return -1;
+      final result = delay >= 0 ? delay : -1;
+      await _xrayService.updatePing(server.id, result);
+      if (token.isCancelled) return -1;
+      _applyPing(server.id, result);
       return delay;
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ measureXrayDelay: $e');
       return -1;
     } finally {
-      _xrayTestingIds.remove(server.id);
-      notifyListeners();
+      if (identical(_xrayDelayProbeTokens[server.id], token)) {
+        _xrayDelayProbeTokens.remove(server.id);
+        _xrayTestingIds.remove(server.id);
+        notifyListeners();
+      }
+      token.cancel();
     }
   }
 
   /// Measures only the TCP connection latency to the server endpoint.
   /// This does not build an Xray config and does not use the HTTP test URL.
-  Future<int> measureXrayTcpPing(XrayServer server) async {
-    if (_xrayTcpTestingIds.contains(server.id)) return -1;
+  Future<int> measureXrayTcpPing(
+    XrayServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
+    if (_xrayTcpProbeTokens.containsKey(server.id)) return -1;
+    final token = cancellation ?? ProbeCancellation();
+    if (token.isCancelled) return -1;
+    _xrayTcpProbeTokens[server.id] = token;
     _xrayTcpTestingIds.add(server.id);
     notifyListeners();
-    Socket? socket;
     var delay = -1;
     try {
       final stopwatch = Stopwatch()..start();
-      socket = await Socket.connect(
+      final socket = await connectProbeSocket(
         server.address,
         server.port,
+        cancellation: token,
         timeout: const Duration(seconds: 6),
       );
       stopwatch.stop();
       delay = stopwatch.elapsedMilliseconds;
+      socket.destroy();
+      if (token.isCancelled) return -1;
       await _xrayService.updatePing(server.id, delay);
+      if (token.isCancelled) return -1;
       _applyPing(server.id, delay);
       return delay;
     } catch (e) {
+      if (token.isCancelled) return -1;
       if (kDebugMode) debugPrint('⚠️ measureXrayTcpPing: $e');
       await _xrayService.updatePing(server.id, -1);
+      if (token.isCancelled) return -1;
       _applyPing(server.id, -1);
       return -1;
     } finally {
-      socket?.destroy();
-      _xrayTcpTestingIds.remove(server.id);
-      notifyListeners();
+      if (identical(_xrayTcpProbeTokens[server.id], token)) {
+        _xrayTcpProbeTokens.remove(server.id);
+        _xrayTcpTestingIds.remove(server.id);
+        notifyListeners();
+      }
+      token.cancel();
     }
   }
 
@@ -2175,12 +2251,25 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     if (servers.isEmpty) return;
     final groups = servers.map((s) => s.group).toSet();
     if (groups.any(_xrayTcpTestingGroups.contains)) return;
+    final run = ProbeCancellation();
     _xrayTcpTestingGroups.addAll(groups);
+    for (final group in groups) {
+      _xrayTcpGroupTokens[group] = run;
+    }
     notifyListeners();
     try {
-      await Future.wait(servers.map(measureXrayTcpPing));
+      await Future.wait(servers.map((server) async {
+        if (run.isCancelled) return;
+        final child = ProbeCancellation().linkedTo(run);
+        await measureXrayTcpPing(server, cancellation: child);
+      }));
     } finally {
       _xrayTcpTestingGroups.removeAll(groups);
+      for (final group in groups) {
+        if (identical(_xrayTcpGroupTokens[group], run)) {
+          _xrayTcpGroupTokens.remove(group);
+        }
+      }
       notifyListeners();
     }
   }
@@ -2207,12 +2296,16 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     // same group when its button is tapped repeatedly.
     if (groups.any(_xrayTestingGroups.contains)) return;
     _xrayGroupTesting = true;
+    final run = ProbeCancellation();
     // Snapshot the connect token so a delay-test launched by a group connect
     // stops as soon as the user cancels (disconnect bumps _xrayConnectGen).
     final int testGen = _xrayConnectGen;
     // Mark only the group(s) these servers belong to as "testing" so the
     // spinner shows on the tapped group only, not every group.
     _xrayTestingGroups.addAll(groups);
+    for (final group in groups) {
+      _xrayDelayGroupTokens[group] = run;
+    }
     notifyListeners();
     try {
       final batchSize = await getXrayConcurrentTests();
@@ -2237,10 +2330,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         for (var i = 0; i < servers.length; i += batchSize) {
           // Abort the whole test if the user cancelled the connect meanwhile.
           if (testGen != _xrayConnectGen) {
-            if (kDebugMode)
+            run.cancel();
+            if (kDebugMode) {
               debugPrint('🚫 group delay-test aborted (cancelled)');
+            }
             return;
           }
+          if (run.isCancelled) return;
           final batch = servers.sublist(
             i,
             (i + batchSize).clamp(0, servers.length),
@@ -2251,20 +2347,30 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           notifyListeners();
           await Future.wait(
             batch.map((s) async {
+              final child = ProbeCancellation().linkedTo(run);
+              _xrayDelayProbeTokens[s.id] = child;
               try {
                 final config = await _buildDelayConfig(s);
-                final delay = await XrayConnection.measureDelay(
-                  config,
-                  url: testUrl,
-                );
-                mergeBest(s.id, delay >= 0 ? delay : -1);
+                if (child.isCancelled) return;
+                final delay = await XrayConnection.measureDelay(config,
+                    url: testUrl, cancellation: child);
+                if (!run.isCancelled && !child.isCancelled) {
+                  mergeBest(s.id, delay >= 0 ? delay : -1);
+                }
               } catch (_) {
-                mergeBest(s.id, -1);
+                if (!run.isCancelled && !child.isCancelled) {
+                  mergeBest(s.id, -1);
+                }
               } finally {
-                _xrayTestingIds.remove(s.id);
+                if (identical(_xrayDelayProbeTokens[s.id], child)) {
+                  _xrayDelayProbeTokens.remove(s.id);
+                  _xrayTestingIds.remove(s.id);
+                }
+                child.cancel();
               }
             }),
           );
+          if (run.isCancelled) return;
           // Another group may finish and sort the shared list while this job
           // is running, so resolve ids against the current list every batch.
           final currentIndexById = <String, int>{};
@@ -2283,9 +2389,17 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           notifyListeners();
         }
       }
-      await _sortXrayByPing();
+      if (!run.isCancelled) {
+        await _xrayService.updatePings(results);
+        if (!run.isCancelled) await _sortXrayByPing();
+      }
     } finally {
       _xrayTestingGroups.removeAll(groups);
+      for (final group in groups) {
+        if (identical(_xrayDelayGroupTokens[group], run)) {
+          _xrayDelayGroupTokens.remove(group);
+        }
+      }
       _xrayGroupTesting = _xrayTestingGroups.isNotEmpty;
       notifyListeners();
     }
@@ -2546,28 +2660,43 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// TEST TYPE 1 — plain PING test. Measures the TCP connect latency to the
   /// proxy's host:port directly (a normal reachability/ping check). Returns ms
   /// or -1 on failure. Persists the result.
-  Future<int> pingProxyServer(ProxyServer server) async {
+  Future<int> pingProxyServer(
+    ProxyServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
+    if (_proxyProbeTokens.containsKey(server.id)) return -1;
+    final token = cancellation ?? ProbeCancellation();
+    if (token.isCancelled) return -1;
+    _proxyProbeTokens[server.id] = token;
     _proxyTestingIds.add(server.id);
     notifyListeners();
     final sw = Stopwatch()..start();
     int result = -1;
     try {
-      final socket = await Socket.connect(
+      final socket = await connectProbeSocket(
         server.address,
         server.port,
+        cancellation: token,
         timeout: const Duration(seconds: 5),
       );
       sw.stop();
       result = sw.elapsedMilliseconds;
       socket.destroy();
     } catch (e) {
+      if (token.isCancelled) return -1;
       result = -1;
       if (kDebugMode) debugPrint('⚠️ pingProxyServer: $e');
     } finally {
-      await _proxyService.updatePing(server.id, result);
-      _applyProxyPing(server.id, result);
-      _proxyTestingIds.remove(server.id);
-      notifyListeners();
+      if (!token.isCancelled && identical(_proxyProbeTokens[server.id], token)) {
+        await _proxyService.updatePing(server.id, result);
+        if (!token.isCancelled) _applyProxyPing(server.id, result);
+      }
+      if (identical(_proxyProbeTokens[server.id], token)) {
+        _proxyProbeTokens.remove(server.id);
+        _proxyTestingIds.remove(server.id);
+        notifyListeners();
+      }
+      token.cancel();
     }
     return result;
   }
@@ -2576,22 +2705,42 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// (via the Xray core's measureOutboundDelay) to the configured test site,
   /// proving the proxy actually works for browsing. Returns ms or -1. Persists
   /// the result (overwriting the ping value with the real-connectivity delay).
-  Future<int> openSiteTestProxyServer(ProxyServer server) async {
+  Future<int> openSiteTestProxyServer(
+    ProxyServer server, {
+    ProbeCancellation? cancellation,
+  }) async {
+    if (_proxyProbeTokens.containsKey(server.id)) return -1;
+    final token = cancellation ?? ProbeCancellation();
+    if (token.isCancelled) return -1;
+    _proxyProbeTokens[server.id] = token;
     _proxyTestingIds.add(server.id);
     notifyListeners();
     int delay = -1;
     try {
       final config = XrayConfigBuilder.buildProxyServerDelayTest(server);
       final testUrl = await getProxyTestUrl();
-      delay = await XrayConnection.measureDelay(config, url: testUrl);
+      if (token.isCancelled) return -1;
+      delay = await XrayConnection.measureDelay(
+        config,
+        url: testUrl,
+        cancellation: token,
+      );
     } catch (e) {
+      if (token.isCancelled) return -1;
       if (kDebugMode) debugPrint('⚠️ openSiteTestProxyServer: $e');
       delay = -1;
     } finally {
-      await _proxyService.updatePing(server.id, delay >= 0 ? delay : -1);
-      _applyProxyPing(server.id, delay >= 0 ? delay : -1);
-      _proxyTestingIds.remove(server.id);
-      notifyListeners();
+      if (!token.isCancelled && identical(_proxyProbeTokens[server.id], token)) {
+        final result = delay >= 0 ? delay : -1;
+        await _proxyService.updatePing(server.id, result);
+        if (!token.isCancelled) _applyProxyPing(server.id, result);
+      }
+      if (identical(_proxyProbeTokens[server.id], token)) {
+        _proxyProbeTokens.remove(server.id);
+        _proxyTestingIds.remove(server.id);
+        notifyListeners();
+      }
+      token.cancel();
     }
     return delay;
   }
@@ -2601,10 +2750,14 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// proxy). Keeps the lowest positive delay.
   Future<void> testProxyServers(List<ProxyServer> servers) async {
     if (servers.isEmpty || _proxyGroupTesting) return;
+    final run = ProbeCancellation();
     _proxyGroupTesting = true;
     final int testGen = _proxyConnectGen;
     final groups = servers.map((s) => s.group).toSet();
     _proxyTestingGroups.addAll(groups);
+    for (final group in groups) {
+      _proxyGroupRunTokens[group] = run;
+    }
     notifyListeners();
     try {
       final testUrl = await getProxyTestUrl();
@@ -2615,7 +2768,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         indexById[_proxyServers[i].id] = i;
       }
       for (var i = 0; i < servers.length; i += batchSize) {
-        if (testGen != _proxyConnectGen) return;
+        if (testGen != _proxyConnectGen) {
+          run.cancel();
+          return;
+        }
+        if (run.isCancelled) return;
         final batch = servers.sublist(
           i,
           (i + batchSize).clamp(0, servers.length),
@@ -2626,35 +2783,53 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         notifyListeners();
         await Future.wait(
           batch.map((s) async {
+            final child = ProbeCancellation().linkedTo(run);
+            _proxyProbeTokens[s.id] = child;
             try {
               final config = XrayConfigBuilder.buildProxyServerDelayTest(s);
+              if (child.isCancelled) return;
               final delay = await XrayConnection.measureDelay(
                 config,
                 url: testUrl,
+                cancellation: child,
               );
-              results[s.id] = delay >= 0 ? delay : -1;
+              if (!run.isCancelled && !child.isCancelled) {
+                results[s.id] = delay >= 0 ? delay : -1;
+              }
             } catch (_) {
-              results[s.id] = -1;
+              if (!run.isCancelled && !child.isCancelled) results[s.id] = -1;
             } finally {
-              _proxyTestingIds.remove(s.id);
+              if (identical(_proxyProbeTokens[s.id], child)) {
+                _proxyProbeTokens.remove(s.id);
+                _proxyTestingIds.remove(s.id);
+              }
+              child.cancel();
             }
           }),
         );
+        if (run.isCancelled) return;
         for (final s in batch) {
           final idx = indexById[s.id];
-          if (idx != null && idx < _proxyServers.length) {
+          if (results.containsKey(s.id) && idx != null && idx < _proxyServers.length) {
             _proxyServers[idx] = _proxyServers[idx].copyWith(
               ping: results[s.id],
             );
           }
         }
         notifyListeners();
+        if (run.isCancelled) return;
       }
+      if (run.isCancelled) return;
       await _proxyService.updatePings(results);
-      await _sortProxyByPing();
+      if (!run.isCancelled) await _sortProxyByPing();
     } finally {
-      _proxyGroupTesting = false;
       _proxyTestingGroups.removeAll(groups);
+      for (final group in groups) {
+        if (identical(_proxyGroupRunTokens[group], run)) {
+          _proxyGroupRunTokens.remove(group);
+        }
+      }
+      _proxyGroupTesting = _proxyTestingGroups.isNotEmpty;
       notifyListeners();
     }
   }
@@ -3386,9 +3561,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   /// تست همه DNS servers
-  Future<List<DnsServer>> testAllDnsServers(List<DnsServer> servers) async {
+  Future<List<DnsServer>> testAllDnsServers(
+    List<DnsServer> servers, {
+    ProbeCancellation? cancellation,
+  }) async {
     return await _dnsService.testDnsServersInParallel(
       servers,
+      cancellation: cancellation,
       onProgress: (tested, total) {
         if (kDebugMode) {
           debugPrint('Testing DNS $tested/$total...');

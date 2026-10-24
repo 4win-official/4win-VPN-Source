@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/dns_server.dart';
 import '../providers/vpn_provider.dart';
 import '../widgets/four_win_loader.dart';
+import '../services/probe_cancellation.dart';
 
 class DnsServersScreen extends StatefulWidget {
   const DnsServersScreen({super.key});
@@ -13,6 +14,7 @@ class DnsServersScreen extends StatefulWidget {
 
 class _DnsServersScreenState extends State<DnsServersScreen> {
   bool _isTesting = false;
+  ProbeCancellation? _testCancellation;
   List<DnsServer> _dnsServers = [];
 
   @override
@@ -30,17 +32,26 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
   }
 
   Future<void> _testDnsServers() async {
+    if (_isTesting) return;
+    final cancellation = ProbeCancellation();
+    _testCancellation = cancellation;
     setState(() {
       _isTesting = true;
     });
 
     final provider = Provider.of<VpnProvider>(context, listen: false);
-    final testedServers = await provider.testAllDnsServers(_dnsServers);
-
-    setState(() {
-      _dnsServers = testedServers;
-      _isTesting = false;
-    });
+    try {
+      final testedServers = await provider.testAllDnsServers(
+        _dnsServers,
+        cancellation: cancellation,
+      );
+      if (mounted && !cancellation.isCancelled) {
+        setState(() => _dnsServers = testedServers);
+      }
+    } finally {
+      if (identical(_testCancellation, cancellation)) _testCancellation = null;
+      if (mounted) setState(() => _isTesting = false);
+    }
   }
 
   void _showAddCustomDnsDialog() {
@@ -167,10 +178,15 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
         actions: [
           IconButton(
             icon: Icon(
-              Icons.refresh,
-              color: isDark ? Colors.white70 : Colors.black87,
+              _isTesting ? Icons.close : Icons.refresh,
+              color: _isTesting
+                  ? Colors.redAccent
+                  : (isDark ? Colors.white70 : Colors.black87),
             ),
-            onPressed: _isTesting ? null : _testDnsServers,
+            tooltip: _isTesting ? 'Stop testing' : 'Test all servers',
+            onPressed: _isTesting
+                ? () => _testCancellation?.cancel()
+                : _testDnsServers,
           ),
           IconButton(
             icon: Icon(
@@ -193,6 +209,12 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                     style: TextStyle(
                       color: isDark ? Colors.white70 : Colors.black54,
                     ),
+                  ),
+                  const SizedBox(height: 20),
+                  OutlinedButton.icon(
+                    onPressed: () => _testCancellation?.cancel(),
+                    icon: const Icon(Icons.close),
+                    label: const Text('Stop testing'),
                   ),
                 ],
               ),

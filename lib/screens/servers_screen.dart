@@ -12,6 +12,7 @@ class ServersScreen extends StatefulWidget {
 
 class _ServersScreenState extends State<ServersScreen> {
   bool _isTestingServers = false;
+  int _testRun = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -34,18 +35,10 @@ class _ServersScreenState extends State<ServersScreen> {
         ),
         actions: [
           if (_isTestingServers)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: FourWinLoader(
-                    strokeWidth: 2,
-                    color: Colors.black54,
-                  ),
-                ),
-              ),
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.redAccent),
+              tooltip: 'Stop test',
+              onPressed: _stopFindingBestServer,
             )
           else
             IconButton(
@@ -188,6 +181,8 @@ class _ServersScreenState extends State<ServersScreen> {
   }
 
   Future<void> _findBestServer(BuildContext context) async {
+    if (_isTestingServers) return;
+    final run = ++_testRun;
     setState(() {
       _isTestingServers = true;
     });
@@ -198,7 +193,7 @@ class _ServersScreenState extends State<ServersScreen> {
     
     await provider.findBestServer();
 
-    if (!mounted) return;
+    if (!mounted || run != _testRun) return;
     
     setState(() {
       _isTestingServers = false;
@@ -217,5 +212,12 @@ class _ServersScreenState extends State<ServersScreen> {
       
       navigator.pop();
     }
+  }
+
+  void _stopFindingBestServer() {
+    if (!_isTestingServers) return;
+    _testRun++;
+    Provider.of<VpnProvider>(context, listen: false).cancelSstpTest();
+    setState(() => _isTestingServers = false);
   }
 }

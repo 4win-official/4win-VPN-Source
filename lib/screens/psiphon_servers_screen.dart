@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/psiphon_server.dart';
 import '../providers/vpn_provider.dart';
 import '../services/psiphon_service.dart';
+import '../services/probe_cancellation.dart';
 
 class PsiphonServersScreen extends StatefulWidget {
   final PsiphonService? service;
@@ -25,6 +26,8 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
   final Map<String, String> _probeErrors = {};
   final Set<String> _testing = {};
   final Map<String, int> _probeRuns = {};
+  final Map<String, ProbeCancellation> _probeTokens = {};
+  ProbeCancellation? _batchCancellation;
   int _nextProbeRun = 0;
   bool _loading = true;
   bool _refreshing = false;
@@ -45,6 +48,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
 
   @override
   void dispose() {
+    _cancelProbes();
     _generation++;
     _searchController.dispose();
     super.dispose();
@@ -56,6 +60,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
       return;
     }
     _initialLoadStarted = true;
+    _cancelProbes();
     final generation = ++_generation;
     _batchTesting = false;
     _testing.clear();
@@ -94,6 +99,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
 
   Future<void> _refresh() async {
     if (_refreshing) return;
+    _cancelProbes();
     final generation = ++_generation;
     _batchTesting = false;
     _testing.clear();
@@ -169,15 +175,20 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
     }
     final generation = _generation;
     final run = ++_nextProbeRun;
+    final token = ProbeCancellation();
     _probeRuns[server.id] = run;
+    _probeTokens[server.id] = token;
     setState(() {
       _testing.add(server.id);
       _latencies.remove(server.id);
       _probeErrors.remove(server.id);
     });
     try {
-      final latency = await _service.testServerLatency(server);
-      if (mounted && generation == _generation) {
+      final latency = await _service.testServerLatency(
+        server,
+        cancellation: token,
+      );
+      if (mounted && generation == _generation && !token.isCancelled) {
         setState(() {
           if (latency == null) {
             _latencies.remove(server.id);
@@ -189,7 +200,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
         });
       }
     } catch (_) {
-      if (mounted && generation == _generation) {
+      if (mounted && generation == _generation && !token.isCancelled) {
         setState(() {
           _latencies.remove(server.id);
           _probeErrors[server.id] = 'TCP connection test failed';
@@ -198,19 +209,41 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
     } finally {
       if (mounted && _probeRuns[server.id] == run) {
         _probeRuns.remove(server.id);
+        _probeTokens.remove(server.id);
         setState(() => _testing.remove(server.id));
       }
+      token.cancel();
+    }
+  }
+
+  void _cancelProbes() {
+    _batchCancellation?.cancel();
+    _batchCancellation = null;
+    for (final token in _probeTokens.values.toSet()) {
+      token.cancel();
+    }
+    _probeTokens.clear();
+  }
+
+  void _stopAllTests() {
+    _batchCancellation?.cancel();
+    for (final token in _probeTokens.values.toSet()) {
+      token.cancel();
     }
   }
 
   Future<void> _testAll() async {
     if (_batchTesting || _connecting || _testing.isNotEmpty) return;
+    final bulkToken = ProbeCancellation();
+    _batchCancellation = bulkToken;
     _batchTesting = true;
     final servers = _visibleServers;
     final generation = _generation;
     try {
       for (var i = 0; i < servers.length; i += 4) {
-        if (!mounted || generation != _generation) return;
+        if (!mounted || generation != _generation || bulkToken.isCancelled) {
+          return;
+        }
         final batch = servers
             .skip(i)
             .take(4)
@@ -218,8 +251,10 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
             .toList();
         await Future.wait(
           batch.map((s) async {
-            final run = ++_nextProbeRun;
-            _probeRuns[s.id] = run;
+            final runId = ++_nextProbeRun;
+            final token = ProbeCancellation().linkedTo(bulkToken);
+            _probeRuns[s.id] = runId;
+            _probeTokens[s.id] = token;
             if (mounted) {
               setState(() {
                 _testing.add(s.id);
@@ -228,8 +263,11 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
               });
             }
             try {
-              final latency = await _service.testServerLatency(s);
-              if (mounted && generation == _generation) {
+              final latency = await _service.testServerLatency(
+                s,
+                cancellation: token,
+              );
+              if (mounted && generation == _generation && !token.isCancelled) {
                 setState(() {
                   if (latency == null) {
                     _latencies.remove(s.id);
@@ -241,22 +279,26 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
                 });
               }
             } catch (_) {
-              if (mounted && generation == _generation) {
+              if (mounted && generation == _generation && !token.isCancelled) {
                 setState(() {
                   _latencies.remove(s.id);
                   _probeErrors[s.id] = 'TCP connection test failed';
                 });
               }
             } finally {
-              if (mounted && _probeRuns[s.id] == run) {
+              if (mounted && _probeRuns[s.id] == runId) {
                 _probeRuns.remove(s.id);
+                _probeTokens.remove(s.id);
                 setState(() => _testing.remove(s.id));
               }
+              token.cancel();
             }
           }),
         );
+        if (bulkToken.isCancelled) return;
       }
     } finally {
+      if (identical(_batchCancellation, bulkToken)) _batchCancellation = null;
       _batchTesting = false;
       if (mounted) setState(() {});
     }
@@ -373,11 +415,13 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _batchTesting || _testing.isNotEmpty
-                              ? null
-                              : _testAll,
-                          icon: const Icon(Icons.network_check),
-                          label: const Text('Test all (max 4 at a time)'),
+                          onPressed: _batchTesting
+                              ? _stopAllTests
+                              : _testing.isNotEmpty
+                                  ? null
+                                  : _testAll,
+                          icon: Icon(_batchTesting ? Icons.close : Icons.network_check),
+                          label: Text(_batchTesting ? 'Stop testing' : 'Test all (max 4 at a time)'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -445,16 +489,14 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
           spacing: 2,
           children: [
             IconButton(
-              onPressed: testing || server.port == null
-                  ? null
-                  : () => _test(server),
-              tooltip: 'Test TCP latency',
+              onPressed: testing
+                  ? () => _probeTokens[server.id]?.cancel()
+                  : server.port == null
+                      ? null
+                      : () => _test(server),
+              tooltip: testing ? 'Stop test' : 'Test TCP latency',
               icon: testing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                  ? const Icon(Icons.close, color: Colors.redAccent)
                   : const Icon(Icons.network_check),
             ),
             FilledButton(
