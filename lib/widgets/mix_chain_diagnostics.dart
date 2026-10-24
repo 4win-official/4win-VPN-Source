@@ -102,7 +102,7 @@ class MixChainGraph extends StatelessWidget {
   static String label(MixBlockState state) => switch (state) {
     MixBlockState.pending => 'Not reached',
     MixBlockState.starting => 'Starting',
-    MixBlockState.ready => 'Initialized',
+    MixBlockState.ready => 'Initialized only',
     MixBlockState.verified => 'WARP verified',
     MixBlockState.failed => 'Failed here',
     MixBlockState.unverified => 'Unknown',
@@ -111,7 +111,7 @@ class MixChainGraph extends StatelessWidget {
   static (IconData, Color) appearance(MixBlockState state) => switch (state) {
     MixBlockState.pending => (Icons.radio_button_unchecked, Colors.grey),
     MixBlockState.starting => (Icons.pending, Colors.blue),
-    MixBlockState.ready => (Icons.check_circle, Colors.green),
+    MixBlockState.ready => (Icons.settings_outlined, Colors.blueGrey),
     MixBlockState.verified => (Icons.verified, Colors.green),
     MixBlockState.failed => (Icons.cancel, Colors.red),
     MixBlockState.unverified => (Icons.help_outline, Colors.orange),

@@ -128,6 +128,39 @@ void main() {
   });
 
   testWidgets(
+    'initialized blocks are not green passes when the complete-chain probe fails',
+    (tester) async {
+      final diagnostics = MixDiagnostics.begin(chain(2), 'a').applyNative({
+        'attemptId': 'a',
+        'phase': 'Chain failed',
+        'error': 'Complete-chain test failed',
+        'blocks': [
+          {'index': 0, 'state': 'ready'},
+          {'index': 1, 'state': 'ready'},
+        ],
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: MixChainGraph(diagnostics: diagnostics)),
+        ),
+      );
+
+      expect(find.text('Initialized only'), findsNWidgets(2));
+      expect(find.text('Failure location unknown'), findsOneWidget);
+      expect(find.text('Failed here'), findsNothing);
+      expect(
+        MixChainGraph.appearance(MixBlockState.ready).$2,
+        Colors.blueGrey,
+      );
+      expect(
+        MixChainGraph.appearance(MixBlockState.verified).$2,
+        Colors.green,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'graph contains exact numbered connected blocks through block 50',
     (tester) async {
       final diagnostics = MixDiagnostics.begin(chain(50), 'a');
@@ -272,6 +305,7 @@ void main() {
       expect(find.byType(MixChainGraph), findsOneWidget);
       expect(find.text('1. Xray'), findsOneWidget);
       expect(find.text('2. WARP'), findsOneWidget);
+      expect(find.text('Initialized only'), findsOneWidget);
       expect(find.text('WARP verified'), findsOneWidget);
       expect(
         find.text('WARP reachable · exit IP 104.16.132.229'),
