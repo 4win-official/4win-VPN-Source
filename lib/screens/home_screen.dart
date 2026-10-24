@@ -16,7 +16,7 @@ import '../widgets/rain_button_surface.dart';
 import '../widgets/autumn_animation.dart';
 import '../widgets/day_night_animation.dart';
 import '../widgets/cat_scene.dart';
-import '../widgets/cat_power_button_ears.dart';
+import '../widgets/cat_power_button_surface.dart';
 import '../widgets/liquid_background.dart';
 import '../widgets/heart_burst.dart';
 import '../widgets/glass_power_button_surface.dart';
@@ -536,9 +536,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   );
                                 }
 
-                                final buttonContentColor = isSystemTheme
+                                final buttonContentColor = isCatTheme
+                                    ? const Color(0xFF18231E)
+                                    : isSystemTheme
                                     ? (isDark ? Colors.white : Colors.black87)
                                     : (isDark ? Colors.black87 : Colors.white);
+                                final powerControl = provider.isConnecting
+                                    ? FourWinLoader(
+                                        color: buttonContentColor,
+                                        strokeWidth: 3,
+                                      )
+                                    : Icon(
+                                        _getButtonIcon(provider.status),
+                                        size: 80,
+                                        color: buttonContentColor,
+                                      );
 
                                 // Standard centered layout:
                                 //  - The power button is the fixed visual anchor and sits
@@ -859,13 +871,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                 borderRadius: isPixelTheme
                                                     ? BorderRadius.zero
                                                     : null,
-                                                color: isSystemTheme
+                                                color:
+                                                    isSystemTheme || isCatTheme
                                                     ? Colors.transparent
                                                     : _getButtonColor(
                                                         provider.status,
                                                         isDark,
                                                       ),
-                                                gradient: isMascotTheme
+                                                gradient:
+                                                    isMascotTheme && !isCatTheme
                                                     ? LinearGradient(
                                                         begin:
                                                             Alignment.topLeft,
@@ -887,7 +901,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                         ],
                                                       )
                                                     : null,
-                                                border: isMascotTheme
+                                                border:
+                                                    isMascotTheme && !isCatTheme
                                                     ? Border.all(
                                                         color: isCatTheme
                                                             ? (isDark
@@ -1062,61 +1077,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                                       .status,
                                                                   isDark,
                                                                 ),
-                                                            child:
-                                                                provider
-                                                                    .isConnecting
-                                                                ? FourWinLoader(
-                                                                    color:
-                                                                        buttonContentColor,
-                                                                    strokeWidth:
-                                                                        3,
-                                                                  )
-                                                                : Icon(
-                                                                    _getButtonIcon(
-                                                                      provider
-                                                                          .status,
-                                                                    ),
-                                                                    size: 80,
-                                                                    color:
-                                                                        buttonContentColor,
-                                                                  ),
+                                                            child: powerControl,
                                                           )
-                                                        : provider.isConnecting
-                                                        ? FourWinLoader(
-                                                            color:
-                                                                buttonContentColor,
-                                                            strokeWidth: 3,
+                                                        : isCatTheme
+                                                        ? CatPowerButtonSurface(
+                                                            child: powerControl,
                                                           )
-                                                        : Icon(
-                                                            _getButtonIcon(
-                                                              provider.status,
-                                                            ),
-                                                            size: 80,
-                                                            color:
-                                                                buttonContentColor,
-                                                          ),
+                                                        : powerControl,
                                                   ),
                                                 ),
                                               ),
                                             ),
                                           ),
                                         ),
-                                        if (isCatTheme)
-                                          Positioned(
-                                            top: -31,
-                                            left: 0,
-                                            right: 0,
-                                            height: 66,
-                                            child: CatPowerButtonEars(
-                                              furColor: _getButtonColor(
-                                                provider.status,
-                                                isDark,
-                                              ),
-                                              outlineColor: isDark
-                                                  ? const Color(0xFFCDE8DC)
-                                                  : const Color(0xFFFFE6D3),
-                                            ),
-                                          ),
                                       ],
                                     ),
 
