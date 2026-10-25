@@ -52,9 +52,22 @@ void main() {
 
     final surface = find.byType(GlassPowerButtonSurface);
     expect(tester.getSize(surface), const Size(200, 200));
+    expect(
+      tester.getRect(find.byIcon(Icons.power_settings_new)).center,
+      tester.getRect(surface).center,
+      reason: 'the decorative lens must not move the power control',
+    );
     expect(find.byIcon(Icons.power_settings_new), findsOneWidget);
     expect(_glassPaint(), findsOneWidget);
     expect(_glowPaint(), findsOneWidget);
+    expect(
+      find.descendant(of: surface, matching: find.byType(ClipOval)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: surface, matching: find.byType(BackdropFilter)),
+      findsOneWidget,
+    );
 
     final painter =
         tester.widget<CustomPaint>(_glassPaint()).painter!
@@ -99,60 +112,96 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets(
-    'glass keeps the interior clear while retaining its upper-left rim catch',
-    (tester) async {
-      const size = Size(200, 200);
-      const painter = GlassPowerButtonPainter(
-        isDark: true,
-        tint: Color(0xFF8CBDF4),
-      );
-      final rendered = await tester.runAsync(
-        () => _renderPainter(painter, size),
-      );
-      expect(rendered, isNotNull);
+  testWidgets('dark sphere stays translucent with a soft, readable glass rim', (
+    tester,
+  ) async {
+    const size = Size(200, 200);
+    const painter = GlassPowerButtonPainter(
+      isDark: true,
+      tint: Color(0xFF8CBDF4),
+    );
+    final rendered = await tester.runAsync(() => _renderPainter(painter, size));
+    expect(rendered, isNotNull);
 
-      final pixels = rendered!;
-      int brightnessAt(int x, int y) {
-        final offset = (y * size.width.toInt() + x) * 4;
-        final red = pixels[offset];
-        final green = pixels[offset + 1];
-        final blue = pixels[offset + 2];
-        return red > green
-            ? (red > blue ? red : blue)
-            : (green > blue ? green : blue);
-      }
+    final pixels = rendered!;
+    int brightnessAt(int x, int y) {
+      final offset = (y * size.width.toInt() + x) * 4;
+      final red = pixels[offset];
+      final green = pixels[offset + 1];
+      final blue = pixels[offset + 2];
+      return red > green
+          ? (red > blue ? red : blue)
+          : (green > blue ? green : blue);
+    }
 
-      expect(
-        brightnessAt(100, 100),
-        lessThan(12),
-        reason: 'the clear lens must not become an opaque pale center',
-      );
+    expect(
+      brightnessAt(100, 100),
+      inInclusiveRange(12, 125),
+      reason: 'the center should read as shaded glass, not an opaque face',
+    );
 
-      expect(
-        brightnessAt(55, 50),
-        lessThan(20),
-        reason: 'the upper-left interior must not contain a broad white streak',
-      );
+    expect(
+      brightnessAt(55, 50),
+      lessThan(110),
+      reason: 'diffuse light must not become a hard white interior streak',
+    );
 
-      var brightestUpperLeftRim = 0;
-      for (var y = 0; y < 100; y++) {
-        for (var x = 0; x < 100; x++) {
-          final dx = x - 100;
-          final dy = y - 100;
-          final distance = (dx * dx + dy * dy).toDouble();
-          if (distance < 86 * 86 || distance > 100 * 100) continue;
-          final value = brightnessAt(x, y);
-          if (value > brightestUpperLeftRim) {
-            brightestUpperLeftRim = value;
-          }
+    var brightestUpperLeftRim = 0;
+    var brightRimPixels = 0;
+    var rimPixels = 0;
+    for (var y = 0; y < 200; y++) {
+      for (var x = 0; x < 200; x++) {
+        final dx = x - 100;
+        final dy = y - 100;
+        final distance = (dx * dx + dy * dy).toDouble();
+        if (distance < 86 * 86 || distance > 100 * 100) continue;
+        rimPixels++;
+        final value = brightnessAt(x, y);
+        if (value >= 110) brightRimPixels++;
+        if (x < 100 && y < 100 && value > brightestUpperLeftRim) {
+          brightestUpperLeftRim = value;
         }
       }
-      expect(
-        brightestUpperLeftRim,
-        greaterThan(220),
-        reason: 'the slim silver-white reflection on the rim should remain',
-      );
-    },
-  );
+    }
+    expect(
+      brightestUpperLeftRim,
+      greaterThan(130),
+      reason:
+          'a small upper-left reflection should make the glass edge readable',
+    );
+    expect(
+      brightRimPixels / rimPixels,
+      lessThan(0.40),
+      reason: 'the rim should not become a uniformly bright circular outline',
+    );
+  });
+
+  test('outer halo falls off before the expanded paint bounds', () async {
+    const size = Size(264, 264);
+    const painter = GlassPowerButtonGlowPainter(
+      isDark: true,
+      tint: Color(0xFF8CBDF4),
+    );
+    final rendered = await _renderPainter(painter, size);
+    int brightnessAt(int x, int y) {
+      final offset = (y * size.width.toInt() + x) * 4;
+      final red = rendered[offset];
+      final green = rendered[offset + 1];
+      final blue = rendered[offset + 2];
+      return red > green
+          ? (red > blue ? red : blue)
+          : (green > blue ? green : blue);
+    }
+
+    expect(
+      brightnessAt(252, 132),
+      greaterThanOrEqualTo(12),
+      reason: 'the halo should remain visible beyond the glass lip',
+    );
+    expect(
+      brightnessAt(132, 132),
+      lessThan(12),
+      reason: 'the glow painter should leave the center transparent',
+    );
+  });
 }
