@@ -5,7 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_swift/providers/theme_provider.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/screens/home_screen.dart';
+import 'package:vpn_swift/widgets/glass_power_button_surface.dart';
 import 'package:vpn_swift/widgets/liquid_background.dart';
+import 'package:vpn_swift/widgets/liquid_power_button_surface.dart';
 
 import 'home_rain_layer_test.dart' show FakeVpnProvider;
 
@@ -52,8 +54,19 @@ void main() {
         find.ancestor(of: liquid, matching: find.byType(RepaintBoundary)),
         findsWidgets,
       );
+      final liquidButton = find.byType(LiquidPowerButtonSurface);
+      expect(liquidButton, findsOneWidget);
+      expect(find.byType(GlassPowerButtonSurface), findsNothing);
+      expect(tester.getSize(liquidButton), const Size(200, 200));
+      final powerButton = find.byKey(const ValueKey('power-button'));
+      expect(tester.getRect(powerButton).size, const Size(200, 200));
       final power = find.byIcon(Icons.power_settings_new);
       final powerRect = tester.getRect(power);
+      final expectedPowerColor =
+          Theme.of(tester.element(power)).brightness == Brightness.dark
+          ? Colors.white
+          : Colors.black87;
+      expect(tester.widget<Icon>(power).color, expectedPowerColor);
       final protocolRect = tester.getRect(find.text('Xray').first);
       await tester.pump(const Duration(seconds: 3));
       expect(tester.getRect(power), powerRect);
@@ -63,12 +76,18 @@ void main() {
       await themes.toggleTheme();
       await tester.pump();
       expect(liquid, findsOneWidget);
+      expect(liquidButton, findsOneWidget);
       expect(tester.getRect(power), powerRect);
+      expect(tester.widget<Icon>(power).color, expectedPowerColor);
       for (final theme in AppTheme.values.where(
         (theme) => theme != AppTheme.liquidGlass,
       )) {
         await themes.setTheme(theme);
         await tester.pump();
+        expect(liquidButton, findsNothing);
+        if (theme == AppTheme.system) {
+          expect(find.byType(GlassPowerButtonSurface), findsOneWidget);
+        }
         expect(
           liquid,
           findsNothing,

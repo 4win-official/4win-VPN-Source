@@ -18,6 +18,7 @@ import '../widgets/day_night_animation.dart';
 import '../widgets/cat_scene.dart';
 import '../widgets/cat_power_button_surface.dart';
 import '../widgets/liquid_background.dart';
+import '../widgets/liquid_power_button_surface.dart';
 import '../widgets/heart_burst.dart';
 import '../widgets/glass_power_button_surface.dart';
 import '../widgets/protocol_selector_dialog.dart';
@@ -538,7 +539,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
                                 final buttonContentColor = isCatTheme
                                     ? const Color(0xFF18231E)
-                                    : isSystemTheme
+                                    : isSystemTheme || isLiquidGlassTheme
                                     ? (isDark ? Colors.white : Colors.black87)
                                     : (isDark ? Colors.black87 : Colors.white);
                                 final powerControl = provider.isConnecting
@@ -872,7 +873,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                     ? BorderRadius.zero
                                                     : null,
                                                 color:
-                                                    isSystemTheme || isCatTheme
+                                                    isSystemTheme ||
+                                                        isCatTheme ||
+                                                        isLiquidGlassTheme
                                                     ? Colors.transparent
                                                     : _getButtonColor(
                                                         provider.status,
@@ -982,6 +985,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                           ),
                                                         ),
                                                       ]
+                                                    : isLiquidGlassTheme
+                                                    ? const <BoxShadow>[]
                                                     : isSystemTheme
                                                     ? [
                                                         BoxShadow(
@@ -1068,7 +1073,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                     isDark,
                                                   ),
                                                   child: Center(
-                                                    child: isSystemTheme
+                                                    child: isLiquidGlassTheme
+                                                        ? LiquidPowerButtonSurface(
+                                                            isDark: isDark,
+                                                            tint:
+                                                                _getButtonColor(
+                                                                  provider
+                                                                      .status,
+                                                                  isDark,
+                                                                ),
+                                                            child: powerControl,
+                                                          )
+                                                        : isSystemTheme
                                                         ? GlassPowerButtonSurface(
                                                             isDark: isDark,
                                                             tint:
