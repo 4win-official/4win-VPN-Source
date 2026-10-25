@@ -67,6 +67,20 @@ class PsiphonStartupContractTest(unittest.TestCase):
         self.assertIn("PsiphonNativeRuntime.describe(t)", service)
         self.assertNotIn("catch (_: Throwable)", initializer)
 
+    def test_bridge_startup_cause_survives_cross_process_status_broadcast(self):
+        bridge = (NATIVE / "PsiphonTunBridgeService.kt").read_text()
+        service = (NATIVE / "PsiphonVpnService.kt").read_text()
+        self.assertIn('const val EXTRA_BRIDGE_ERROR = "bridge_error"', bridge)
+        self.assertIn("reportBridgeStatus(false, requestedSession, detail)", bridge)
+        self.assertIn("putExtra(EXTRA_BRIDGE_ERROR, error.take(600))", bridge)
+        self.assertIn(
+            "message.getStringExtra(PsiphonTunBridgeService.EXTRA_BRIDGE_ERROR)",
+            service,
+        )
+        self.assertIn("onBridgeStatus(success, session, error)", service)
+        self.assertIn('"Psiphon traffic bridge failed: $detail"', service)
+        self.assertIn('"traffic bridge failed to start"', service)
+
 
 if __name__ == "__main__":
     unittest.main()

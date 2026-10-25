@@ -50,6 +50,7 @@ class PsiphonTunBridgeService : Service() {
         // tunnel-core callback even if packet routing never started.
         const val ACTION_BRIDGE_STATUS = "com.forwin.vpn.PSIPHON_BRIDGE_STATUS"
         const val EXTRA_BRIDGE_SUCCESS = "bridge_success"
+        const val EXTRA_BRIDGE_ERROR = "bridge_error"
 
         private const val TAG = "PsiphonTunBridgeSvc"
         private const val CHANNEL_ID = "PsiphonBridgeChannel"
@@ -72,12 +73,17 @@ class PsiphonTunBridgeService : Service() {
         }
     }
 
-    private fun reportBridgeStatus(success: Boolean, session: String? = bridgeSession) {
+    private fun reportBridgeStatus(
+        success: Boolean,
+        session: String? = bridgeSession,
+        error: String? = null,
+    ) {
         try {
             val statusIntent = Intent(ACTION_BRIDGE_STATUS).apply {
                 setPackage(packageName)
                 putExtra(EXTRA_BRIDGE_SUCCESS, success)
                 if (!session.isNullOrBlank()) putExtra(EXTRA_BRIDGE_SESSION, session)
+                if (!success && !error.isNullOrBlank()) putExtra(EXTRA_BRIDGE_ERROR, error.take(600))
             }
             sendBroadcast(statusIntent)
         } catch (t: Throwable) {
@@ -166,8 +172,9 @@ class PsiphonTunBridgeService : Service() {
                     startBridge(intent)
                 } catch (t: Throwable) {
                     Log.e(TAG, "Failed to start foreground bridge", t)
-                    reportBridgeStatus(false, intent.getStringExtra(EXTRA_BRIDGE_SESSION))
-                    blog("bridge failed: foreground start failed: ${t.message}")
+                    val detail = PsiphonNativeRuntime.describe(t)
+                    reportBridgeStatus(false, intent.getStringExtra(EXTRA_BRIDGE_SESSION), detail)
+                    blog("bridge failed: foreground start failed: $detail")
                     stopSelf()
                 }
             }
@@ -206,7 +213,7 @@ class PsiphonTunBridgeService : Service() {
         } ?: run {
             Log.e(TAG, "Missing TUN fd")
             blog("bridge failed: missing TUN fd")
-            reportBridgeStatus(false, requestedSession)
+            reportBridgeStatus(false, requestedSession, "Missing TUN file descriptor")
             stopSelf()
             return
         }
@@ -215,7 +222,7 @@ class PsiphonTunBridgeService : Service() {
             Log.e(TAG, "Invalid SOCKS port: $port")
             blog("bridge failed: invalid SOCKS port $port")
             try { pfd.close() } catch (_: Throwable) {}
-            reportBridgeStatus(false, requestedSession)
+            reportBridgeStatus(false, requestedSession, "Invalid SOCKS port: $port")
             stopSelf()
             return
         }
@@ -232,11 +239,12 @@ class PsiphonTunBridgeService : Service() {
             startHeartbeat()
         } catch (t: Throwable) {
             Log.e(TAG, "Bridge startup failed", t)
-            blog("bridge startup failed: ${t.message}")
+            val detail = PsiphonNativeRuntime.describe(t)
+            blog("bridge startup failed: $detail")
             controllerStarted = false
             try { pfd.close() } catch (_: Throwable) {}
             tunPfd = null
-            reportBridgeStatus(false, requestedSession)
+            reportBridgeStatus(false, requestedSession, detail)
             stopSelf()
         }
     }

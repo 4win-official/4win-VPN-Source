@@ -152,6 +152,10 @@ class MixCoordinatorService : VpnService() {
         fun getMixDiagnostics(): Map<String, Any?> = diagnostics?.asMap()
             ?: mapOf("attemptId" to "", "phase" to "idle", "blocks" to emptyList<Map<String, Any?>>())
 
+        /** Expose only Psiphon's native startup detail; other protocol diagnostics stay unchanged. */
+        internal fun psiphonFailureDetail(protocol: String?, error: String?): String? =
+            if (protocol == "psiphon") error?.trim()?.takeIf { it.isNotEmpty() }?.take(600) else null
+
         @Synchronized fun connect(context: Context, plan: JSONObject): CompletableFuture<Long> {
             check(active == null || active!!.stopped.isDone) { "Previous Mix session is not stopped" }
             diagnostics = newDiagnostics(plan)
@@ -196,8 +200,13 @@ class MixCoordinatorService : VpnService() {
                 "ready" -> worker.ready.complete(intent.getBooleanExtra("supportsUdp", false))
                 "stopped" -> worker.stopped.complete(Unit)
                 "error" -> {
-                    diagnostics?.failed(worker.hop)
-                    val error = IllegalStateException("Stage ${worker.hop + 1}: ${intent.getStringExtra("error") ?: "engine failed"}")
+                    val reportedError = intent.getStringExtra("error")
+                    val protocol = current.plan.optJSONArray("hops")
+                        ?.optJSONObject(worker.hop)?.optString("protocol")
+                    val detail = psiphonFailureDetail(protocol, reportedError)
+                    if (detail == null) diagnostics?.failed(worker.hop)
+                    else diagnostics?.failed(worker.hop, detail)
+                    val error = IllegalStateException("Stage ${worker.hop + 1}: ${reportedError ?: "engine failed"}")
                     worker.ready.completeExceptionally(error)
                     if (current.connected.isDone && !current.cancelled.get()) fail(current, error)
                 }

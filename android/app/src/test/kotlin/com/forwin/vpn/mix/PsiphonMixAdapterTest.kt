@@ -28,4 +28,29 @@ class PsiphonMixAdapterTest {
         assertNull(PsiphonMixAdapter.packetStackFailure(false, ""))
         assertNull(PsiphonMixAdapter.packetStackFailure(true, "stale error"))
     }
+
+    @Test
+    fun startupFailureIncludesExceptionTypeAndUnderlyingNativeCause() {
+        val error = IllegalStateException(
+            "bridge initialization failed",
+            UnsatisfiedLinkError("native library not found"),
+        )
+        assertEquals(
+            "Psiphon packet tunnel failed: IllegalStateException: bridge initialization failed " +
+                "<- UnsatisfiedLinkError: native library not found",
+            PsiphonMixAdapter.startupFailure(error),
+        )
+    }
+
+    @Test
+    fun upstreamProxyFailureIncludesNativeMessageAndKeepsGenericFallback() {
+        assertEquals(
+            "Psiphon upstream proxy failed: connection refused",
+            PsiphonMixAdapter.upstreamFailure(" connection refused "),
+        )
+        assertEquals(
+            "Psiphon upstream proxy failed",
+            PsiphonMixAdapter.upstreamFailure(null),
+        )
+    }
 }

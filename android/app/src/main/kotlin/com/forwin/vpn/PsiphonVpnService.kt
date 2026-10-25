@@ -285,7 +285,8 @@ class PsiphonVpnService : VpnService() {
                         PsiphonTunBridgeService.EXTRA_BRIDGE_SUCCESS, false
                     )
                     val session = message.getStringExtra(PsiphonTunBridgeService.EXTRA_BRIDGE_SESSION)
-                    commands.execute { onBridgeStatus(success, session) }
+                    val error = message.getStringExtra(PsiphonTunBridgeService.EXTRA_BRIDGE_ERROR)
+                    commands.execute { onBridgeStatus(success, session, error) }
                 } catch (t: Throwable) {
                     try {
                         Log.w(TAG, "bridge status handling failed: ${t.message}")
@@ -627,7 +628,7 @@ class PsiphonVpnService : VpnService() {
     }
 
     /** Handles the :psiphonbridge TUN->SOCKS status report (background thread). */
-    private fun onBridgeStatus(success: Boolean, session: String?) {
+    private fun onBridgeStatus(success: Boolean, session: String?, error: String? = null) {
         var locked = false
         try {
             lifecycleLock.acquire()
@@ -651,17 +652,26 @@ class PsiphonVpnService : VpnService() {
             } else {
                 // Bridge failed to start: with kill switch on, hold the TUN as
                 // a blackhole; otherwise tear down so traffic flows normally.
-                if (killSwitchEnabled) {
-                    enterBlackhole("traffic bridge failed to start")
+                val detail = error?.trim()?.takeIf { it.isNotEmpty() }?.take(600)
+                val reason = if (detail == null) {
+                    "traffic bridge failed to start"
                 } else {
-                    lastStatusText = "Psiphon bridge failed to start"
+                    "traffic bridge failed to start: $detail"
+                }
+                if (killSwitchEnabled) {
+                    enterBlackhole(reason)
+                } else {
+                    lastStatusText = if (detail == null) "Psiphon bridge failed to start"
+                    else "Psiphon bridge failed to start: $detail"
                     plog(lastStatusText)
                     sendStatus()
                     // Release the lock before the full stop to avoid
                     // self-deadlock (stopPsiphon acquires the same semaphore).
                     lifecycleLock.release()
                     locked = false
-                    stopPsiphon(fullStop = true, finalStatus = "Psiphon traffic bridge failed")
+                    val finalStatus = if (detail == null) "Psiphon traffic bridge failed"
+                    else "Psiphon traffic bridge failed: $detail"
+                    stopPsiphon(fullStop = true, finalStatus = finalStatus)
                     return
                 }
             }

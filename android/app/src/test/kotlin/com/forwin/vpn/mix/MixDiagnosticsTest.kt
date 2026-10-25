@@ -47,4 +47,18 @@ class MixDiagnosticsTest {
         assertEquals("Chain failed", read(data)["phase"])
         assertEquals("Complete-chain test failed", read(data)["error"])
     }
+
+    @Test fun psiphonWorkerFailureDetailIsRetainedWithoutChangingOtherProtocols() {
+        val detail = "Psiphon packet tunnel failed: UnsatisfiedLinkError: native library not found"
+        assertEquals(detail, MixCoordinatorService.psiphonFailureDetail("psiphon", detail))
+        assertNull(MixCoordinatorService.psiphonFailureDetail("warp", detail))
+        assertNull(MixCoordinatorService.psiphonFailureDetail("psiphon", "  "))
+
+        val data = snapshot(1)
+        invoke(data, "failed", 0, detail)
+        invoke(data, "failed", 0, "Hop failed while starting")
+        assertEquals("failed", blocks(data)[0]["state"])
+        assertEquals(detail, blocks(data)[0]["detail"])
+        assertEquals(detail, read(data)["error"])
+    }
 }

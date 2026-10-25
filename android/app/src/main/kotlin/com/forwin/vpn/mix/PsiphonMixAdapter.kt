@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.os.ParcelFileDescriptor
 import ca.psiphon.PsiphonTunnel
+import com.forwin.vpn.PsiphonNativeRuntime
 import com.forwin.vpn.PsiphonServerList
 import gi.Seq
 import org.json.JSONObject
@@ -30,6 +31,15 @@ class PsiphonMixAdapter : MixAdapter {
          */
         internal fun packetStackFailure(ready: Boolean, error: String): String? =
             if (!ready && error.isNotBlank()) error else null
+
+        internal fun startupFailure(error: Throwable): String =
+            "Psiphon packet tunnel failed: ${PsiphonNativeRuntime.describe(error)}"
+
+        internal fun upstreamFailure(message: String?): String {
+            val detail = message?.trim()?.takeIf { it.isNotEmpty() }?.take(600)
+            return if (detail == null) "Psiphon upstream proxy failed"
+            else "Psiphon upstream proxy failed: $detail"
+        }
     }
     /** Guarded by the adapter callback lock, including startup reconnects. */
     internal class ConnectionState {
@@ -65,7 +75,7 @@ class PsiphonMixAdapter : MixAdapter {
         worker.execute {
             try { synchronized(nativeLock) { startNative(config, environment, token) } }
             catch (failure: Throwable) {
-                fail(token, environment, "Psiphon packet tunnel failed: ${failure.message ?: "initialization error"}")
+                fail(token, environment, startupFailure(failure))
             }
         }
     }
@@ -145,7 +155,7 @@ class PsiphonMixAdapter : MixAdapter {
             override fun onAvailableEgressRegions(regions: MutableList<String>?) = Unit
             override fun onSplitTunnelRegions(regions: MutableList<String>?) = Unit
             override fun onUpstreamProxyError(message: String?) {
-                fail(token, environment, "Psiphon upstream proxy failed")
+                fail(token, environment, upstreamFailure(message))
             }
             override fun onStartedWaitingForNetworkConnectivity() = Unit
             override fun onStoppedWaitingForNetworkConnectivity() = Unit
