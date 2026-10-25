@@ -182,4 +182,35 @@ void main() {
     expect(alphaAt(firstFrame, 4, 100), 0);
     expect(alphaAt(firstFrame, 4, 4), 0);
   });
+
+  testWidgets('the water animation wraps without a visible seam', (
+    tester,
+  ) async {
+    const size = Size(200, 200);
+    const tint = Color(0xFF8CBDF4);
+    final startFrame = await tester.runAsync(
+      () => _renderPainter(
+        LiquidPowerButtonPainter(
+          isDark: true,
+          tint: tint,
+          phase: const AlwaysStoppedAnimation<double>(0.0),
+        ),
+        size,
+      ),
+    );
+    final endFrame = await tester.runAsync(
+      () => _renderPainter(
+        LiquidPowerButtonPainter(
+          isDark: true,
+          tint: tint,
+          phase: const AlwaysStoppedAnimation<double>(1.0),
+        ),
+        size,
+      ),
+    );
+
+    expect(startFrame, isNotNull);
+    expect(endFrame, isNotNull);
+    expect(_differentPixelCount(startFrame!, endFrame!), 0);
+  });
 }

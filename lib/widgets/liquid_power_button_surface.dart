@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// A graphic, animated water circle used only by the Liquid theme.
+/// A dimensional, animated water circle used only by the Liquid theme.
 ///
 /// This is decorative: the supplied icon or loader remains centered, while the
 /// home screen continues to own the power button's size and gesture handling.
@@ -32,7 +32,7 @@ class _LiquidPowerButtonSurfaceState extends State<LiquidPowerButtonSurface>
     super.initState();
     _phase = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 3600),
+      duration: const Duration(milliseconds: 5200),
     )..repeat();
   }
 
@@ -89,7 +89,10 @@ class LiquidPowerButtonClipper extends CustomClipper<Path> {
   bool shouldReclip(covariant LiquidPowerButtonClipper oldClipper) => false;
 }
 
-/// Paints bold, moving water shapes without glass reflections or light streaks.
+/// Paints a recessed, spherical button with gently moving water.
+///
+/// Depth comes from broad color gradients and the shaded inner rim rather than
+/// bright reflections, glass streaks, cartoon bubbles, or decorative glints.
 class LiquidPowerButtonPainter extends CustomPainter {
   LiquidPowerButtonPainter({
     required this.isDark,
@@ -107,9 +110,13 @@ class LiquidPowerButtonPainter extends CustomPainter {
 
     final circle = _circlePath(size);
     final bounds = circle.getBounds();
-    final angle = phase.value * math.pi * 2;
     final center = bounds.center;
     final radius = bounds.width / 2;
+
+    // Modulo makes the endpoint exactly the starting phase. The wave's temporal
+    // harmonics are whole cycles, so repeat() cannot expose a reset discontinuity.
+    final cycle = phase.value % 1.0;
+    final phaseRadians = cycle * math.pi * 2;
 
     canvas.save();
     canvas.clipPath(circle, doAntiAlias: true);
@@ -117,92 +124,125 @@ class LiquidPowerButtonPainter extends CustomPainter {
     canvas.drawPath(
       circle,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        ..shader = RadialGradient(
+          center: const Alignment(-0.34, -0.42),
+          radius: 1.18,
           colors: isDark
-              ? const [Color(0xFF082443), Color(0xFF0A3855)]
-              : const [Color(0xFFBDEEF0), Color(0xFF8BDCE8)],
+              ? const [
+                  Color(0xFF345263),
+                  Color(0xFF183343),
+                  Color(0xFF091824),
+                ]
+              : const [
+                  Color(0xFFE6F0F1),
+                  Color(0xFFB7CDD1),
+                  Color(0xFF78949C),
+                ],
+          stops: const [0.0, 0.58, 1.0],
         ).createShader(bounds),
     );
 
-    // The rear wave sits higher; the bright foreground wave moves at a
-    // different speed so the water reads as layered graphic shapes.
-    final rearWave = _wavePath(
-      bounds,
-      level: 0.655,
-      amplitude: 0.042,
-      angle: angle * 0.78 + 1.1,
+    // A recessed dark well gives the water a clear, physical container.
+    final wellRadius = radius * 0.855;
+    final wellBounds = Rect.fromCircle(center: center, radius: wellRadius);
+    final wellPath = Path()..addOval(wellBounds);
+    canvas.drawPath(
+      wellPath,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-0.12, -0.25),
+          radius: 1.12,
+          colors: isDark
+              ? const [
+                  Color(0xFF102B3B),
+                  Color(0xFF091E2B),
+                  Color(0xFF06141F),
+                ]
+              : const [
+                  Color(0xFF355965),
+                  Color(0xFF1E3E4A),
+                  Color(0xFF122B36),
+                ],
+          stops: const [0.0, 0.62, 1.0],
+        ).createShader(wellBounds),
+    );
+
+    canvas.save();
+    canvas.clipPath(wellPath, doAntiAlias: true);
+
+    final waterPath = _waterPath(
+      wellBounds,
+      level: 0.585,
+      amplitude: 0.027,
+      phase: phaseRadians,
     );
     canvas.drawPath(
-      rearWave,
+      waterPath,
       Paint()
         ..shader = LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: isDark
-              ? const [Color(0xFF2785FF), Color(0xFF344CC7)]
-              : const [Color(0xFF2386F4), Color(0xFF3858D4)],
-        ).createShader(bounds),
+              ? const [
+                  Color(0xFF32C3C9),
+                  Color(0xFF168EAE),
+                  Color(0xFF10538A),
+                ]
+              : const [
+                  Color(0xFF43CED0),
+                  Color(0xFF1499BC),
+                  Color(0xFF2459A0),
+                ],
+          stops: const [0.0, 0.52, 1.0],
+        ).createShader(wellBounds),
     );
 
-    final frontWave = _wavePath(
-      bounds,
-      level: 0.595,
-      amplitude: 0.052,
-      angle: angle * 1.18,
-    );
-    canvas.drawPath(
-      frontWave,
+    // A low-contrast radial falloff models the curved water volume without
+    // adding any bright streaks or specular marks to its surface.
+    canvas.save();
+    canvas.clipPath(waterPath, doAntiAlias: true);
+    canvas.drawRect(
+      wellBounds,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: isDark
-              ? const [Color(0xFF08D9C5), Color(0xFF078BCB)]
-              : const [Color(0xFF05CDB7), Color(0xFF087FC5)],
-        ).createShader(bounds),
+        ..shader = RadialGradient(
+          center: const Alignment(0.0, -0.16),
+          radius: 1.02,
+          colors: [
+            Colors.transparent,
+            (isDark ? const Color(0xFF031923) : const Color(0xFF123744))
+                .withValues(alpha: isDark ? 0.27 : 0.22),
+          ],
+          stops: const [0.46, 1.0],
+        ).createShader(wellBounds),
     );
+    canvas.restore();
+    canvas.restore();
 
-    _drawBubbles(canvas, bounds, angle);
-
-    // A simple colored outline keeps the vector badge crisp; it is not a
-    // highlight or reflective rim.
-    canvas.drawPath(
-      circle,
+    // Muted structural edges create a machined, inset look; neither ring is a
+    // highlight, and both remain subdued in light and dark themes.
+    canvas.drawCircle(
+      center,
+      wellRadius,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(2.0, radius * 0.045)
-        ..color = isDark
-            ? Color.lerp(tint, const Color(0xFF2DD8DC), 0.32)!
-                .withValues(alpha: 0.88)
-            : Color.lerp(tint, const Color(0xFF11698D), 0.22)!
-                .withValues(alpha: 0.9),
+        ..strokeWidth = math.max(1.5, radius * 0.022)
+        ..color = (isDark ? const Color(0xFF06131D) : const Color(0xFF34545E))
+            .withValues(alpha: 0.72),
+    );
+    canvas.drawCircle(
+      center,
+      radius * 0.972,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1.5, radius * 0.018)
+        ..color = Color.lerp(
+          tint,
+          isDark ? const Color(0xFF315A6A) : const Color(0xFF66848B),
+          0.58,
+        )!.withValues(alpha: 0.76),
     );
 
     canvas.restore();
-  }
-
-  void _drawBubbles(Canvas canvas, Rect bounds, double angle) {
-    const bubbles = <(double, double, double, double)>[
-      (0.31, 0.91, 0.035, 0.00),
-      (0.68, 0.84, 0.024, 0.34),
-      (0.48, 0.96, 0.020, 0.66),
-      (0.78, 0.98, 0.031, 0.82),
-    ];
-    final color = isDark ? const Color(0xFF8EF5E8) : const Color(0xFFDBFFFA);
-    for (final (x, y, relativeRadius, offset) in bubbles) {
-      final bob = math.sin(angle + offset * math.pi * 2) * 0.025;
-      final bubbleCenter = Offset(
-        bounds.left + bounds.width * x,
-        bounds.top + bounds.height * (y + bob),
-      );
-      canvas.drawCircle(
-        bubbleCenter,
-        bounds.width * relativeRadius,
-        Paint()..color = color.withValues(alpha: isDark ? 0.62 : 0.72),
-      );
-    }
   }
 
   @override
@@ -248,31 +288,36 @@ Path _circlePath(Size size) {
     );
 }
 
-Path _wavePath(
+Path _waterPath(
   Rect bounds, {
   required double level,
   required double amplitude,
-  required double angle,
+  required double phase,
 }) {
-  const segmentCount = 64;
-  const wavelengthCount = 1.32;
+  const segmentCount = 96;
+  const primaryWavelengths = 1.18;
+  const secondaryWavelengths = 2.36;
   final path = Path();
+
   for (var i = 0; i <= segmentCount; i++) {
     final progress = i / segmentCount;
     final x = bounds.left + bounds.width * progress;
+    final primary = math.sin(
+      progress * primaryWavelengths * math.pi * 2 + phase,
+    );
+    final secondary = math.sin(
+      progress * secondaryWavelengths * math.pi * 2 - phase * 2 + 0.72,
+    );
     final y = bounds.top +
-        bounds.height *
-            (level +
-                amplitude *
-                    math.sin(
-                      progress * wavelengthCount * math.pi * 2 + angle,
-                    ));
+        bounds.height * (level + amplitude * (primary * 0.76 + secondary * 0.24));
+
     if (i == 0) {
       path.moveTo(x, y);
     } else {
       path.lineTo(x, y);
     }
   }
+
   path
     ..lineTo(bounds.right, bounds.bottom)
     ..lineTo(bounds.left, bounds.bottom)
