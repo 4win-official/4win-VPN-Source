@@ -6,6 +6,7 @@ import 'screens/loading_screen.dart';
 import 'screens/openvpn_configs_screen.dart';
 import 'services/ovpn_import_service.dart';
 import 'services/connection_logger.dart';
+import 'widgets/pixelation_filter.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 bool _homeReady = false;
@@ -89,6 +90,13 @@ class _MyAppState extends State<MyApp> {
             darkTheme: themeProvider.darkTheme,
             themeMode:
                 themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+            builder: (context, child) {
+              final navigator = child ?? const SizedBox.shrink();
+              if (themeProvider.selectedTheme == AppTheme.pixel) {
+                return PixelationFilter(child: navigator);
+              }
+              return navigator;
+            },
             home: const LoadingScreen(),
           );
         },

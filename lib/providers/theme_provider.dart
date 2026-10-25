@@ -161,6 +161,7 @@ class ThemeProvider with ChangeNotifier {
       seedColor: _seedColor,
       brightness: Brightness.light,
     ),
+    fontFamily: _selectedTheme == AppTheme.pixel ? 'monospace' : null,
     useMaterial3: true,
     scaffoldBackgroundColor: _selectedTheme == AppTheme.cat
         ? const Color(0xFFFFF8EE)
@@ -179,6 +180,7 @@ class ThemeProvider with ChangeNotifier {
       seedColor: _seedColor,
       brightness: Brightness.dark,
     ),
+    fontFamily: _selectedTheme == AppTheme.pixel ? 'monospace' : null,
     useMaterial3: true,
     scaffoldBackgroundColor: _selectedTheme == AppTheme.cat
         ? const Color(0xFF15252B)
