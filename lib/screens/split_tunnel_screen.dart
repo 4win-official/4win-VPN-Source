@@ -74,7 +74,34 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Split Tunneling')),
       body: _loading
-          ? const Center(child: FourWinLoader())
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const FourWinLoader(
+                      size: 52,
+                      semanticsLabel: 'Loading installed apps',
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Loading installed apps…',
+                      style: Theme.of(context).textTheme.titleMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Please wait while the app list is prepared.',
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            )
           : Column(
               children: [
                 Padding(
