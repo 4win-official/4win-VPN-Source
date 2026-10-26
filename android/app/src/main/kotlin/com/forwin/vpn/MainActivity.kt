@@ -8,6 +8,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.media.MediaPlayer
 import android.net.TrafficStats
 import android.net.Uri
@@ -39,6 +43,11 @@ class MainActivity: FlutterActivity() {
     private var pendingPsiphonPermission: MethodChannel.Result? = null
     private val XRAY_CHANNEL = "com.forwin.vpn/xray"
     private val IMPORT_CHANNEL = "com.forwin.vpn/import"
+    private val UPDATE_METHOD_CHANNEL = "com.forwin.vpn/update_notifications"
+    private val UPDATE_INTENT_EXTRA = "com.forwin.vpn.EXTRA_OPEN_UPDATE"
+    private val UPDATE_CHANNEL_ID = "available_updates"
+    private val UPDATE_NOTIFICATION_ID = 1949
+    private val UPDATE_PENDING_INTENT_REQUEST = 1950
     private val OPENVPN_CHANNEL = "com.forwin.vpn/openvpn"
     private val APPS_CHANNEL = "com.forwin.vpn/apps"
     private val VPN_STATE_CHANNEL = "com.forwin.vpn/vpn_state"
@@ -54,6 +63,8 @@ class MainActivity: FlutterActivity() {
     // SEND intents) until the Flutter side pulls it with getPendingOvpnImport.
     private var pendingOvpnName: String? = null
     private var pendingOvpnContent: String? = null
+    private var updateNotificationChannel: MethodChannel? = null
+    private var pendingUpdateNotification: Map<String, Any?>? = null
     // The import MethodChannel, kept so we can proactively notify Flutter when a
     // new file arrives while the app is already running (onNewIntent).
     private var importChannel: MethodChannel? = null
@@ -116,6 +127,30 @@ class MainActivity: FlutterActivity() {
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val updateChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            UPDATE_METHOD_CHANNEL
+        )
+        updateNotificationChannel = updateChannel
+        updateChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "showUpdateNotification" -> {
+                    try {
+                        val arguments = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                        result.success(showUpdateNotification(arguments))
+                    } catch (error: Throwable) {
+                        result.error("UPDATE_NOTIFICATION_FAILED", "Unable to show update notification", error.message)
+                    }
+                }
+                "cancelUpdateNotification" -> {
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    manager.cancel(UPDATE_NOTIFICATION_ID)
+                    result.success(null)
+                }
+                "consumePendingUpdate" -> result.success(consumePendingUpdate())
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.forwin.vpn/cat_audio"
@@ -869,10 +904,119 @@ class MainActivity: FlutterActivity() {
         }
     }
 
+    private fun showUpdateNotification(arguments: Map<*, *>): Boolean {
+        val latestVersion = arguments["latestVersion"] as? String ?: return false
+        if (!getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                .getBoolean("flutter.update_notifications_enabled", false)
+        ) return false
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return false
+
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!manager.areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    UPDATE_CHANNEL_ID,
+                    "App updates",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                ).apply {
+                    description = "Notifications when a new 4win VPN version is available"
+                }
+            )
+        }
+
+        val openUpdateIntent = Intent(this, MainActivity::class.java).apply {
+            action = "com.forwin.vpn.ACTION_OPEN_UPDATE"
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(UPDATE_INTENT_EXTRA, true)
+            putExtra("update_latest_version", latestVersion)
+            putExtra("update_tag_name", arguments["tagName"] as? String)
+            putExtra("update_current_version", arguments["currentVersion"] as? String)
+            putExtra("update_release_url", arguments["releaseUrl"] as? String)
+            putExtra("update_apk_url", arguments["apkDownloadUrl"] as? String)
+            putExtra("update_release_notes", arguments["releaseNotes"] as? String)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            UPDATE_PENDING_INTENT_REQUEST,
+            openUpdateIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val message = "Version $latestVersion is ready to install."
+        val notification = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, UPDATE_CHANNEL_ID)
+        } else {
+            Notification.Builder(this)
+        })
+            .setSmallIcon(R.drawable.ic_stat_vpn)
+            .setContentTitle("Update available")
+            .setContentText(message)
+            .setStyle(Notification.BigTextStyle().bigText(message))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_RECOMMENDATION)
+            .addAction(
+                Notification.Action.Builder(
+                    android.R.drawable.stat_sys_download_done,
+                    "Update",
+                    pendingIntent
+                ).build()
+            )
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            notification.setPriority(Notification.PRIORITY_DEFAULT)
+        }
+        manager.notify(UPDATE_NOTIFICATION_ID, notification.build())
+        return true
+    }
+
+    private fun updatePayloadFromIntent(incoming: Intent): Map<String, Any?>? {
+        if (!incoming.getBooleanExtra(UPDATE_INTENT_EXTRA, false)) return null
+        val latestVersion = incoming.getStringExtra("update_latest_version")
+            ?.takeIf { it.isNotBlank() } ?: return null
+        return mapOf(
+            "latestVersion" to latestVersion,
+            "tagName" to incoming.getStringExtra("update_tag_name"),
+            "currentVersion" to incoming.getStringExtra("update_current_version"),
+            "releaseUrl" to incoming.getStringExtra("update_release_url"),
+            "apkDownloadUrl" to incoming.getStringExtra("update_apk_url"),
+            "releaseNotes" to incoming.getStringExtra("update_release_notes")
+        )
+    }
+
+    private fun clearUpdateIntent(incoming: Intent?) {
+        incoming?.removeExtra(UPDATE_INTENT_EXTRA)
+        incoming?.removeExtra("update_latest_version")
+        incoming?.removeExtra("update_tag_name")
+        incoming?.removeExtra("update_current_version")
+        incoming?.removeExtra("update_release_url")
+        incoming?.removeExtra("update_apk_url")
+        incoming?.removeExtra("update_release_notes")
+    }
+
+    private fun consumePendingUpdate(): Map<String, Any?>? {
+        val pending = pendingUpdateNotification
+        val payload = pending ?: intent?.let { updatePayloadFromIntent(it) }
+        if (payload != null) {
+            pendingUpdateNotification = null
+            clearUpdateIntent(intent)
+        }
+        return payload
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // App already running and a new .ovpn was opened/shared.
         setIntent(intent)
+        pendingUpdateNotification = updatePayloadFromIntent(intent)
+        if (pendingUpdateNotification != null) {
+            runOnUiThread {
+                updateNotificationChannel?.invokeMethod("onUpdateNotificationSelected", null)
+            }
+        }
         if (handleIncomingIntent(intent)) {
             // Tell Flutter to come pull it.
             runOnUiThread {

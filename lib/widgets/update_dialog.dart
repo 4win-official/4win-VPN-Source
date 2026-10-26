@@ -6,11 +6,13 @@ import '../services/update_service.dart';
 class UpdateDialog extends StatefulWidget {
   final UpdateInfo updateInfo;
   final String currentVersion;
+  final bool autoDownload;
 
   const UpdateDialog({
     super.key,
     required this.updateInfo,
     required this.currentVersion,
+    this.autoDownload = false,
   });
 
   /// نمایش دیالوگ آپدیت
@@ -18,6 +20,7 @@ class UpdateDialog extends StatefulWidget {
     BuildContext context, {
     required UpdateInfo updateInfo,
     required String currentVersion,
+    bool autoDownload = false,
   }) {
     return showDialog(
       context: context,
@@ -25,6 +28,7 @@ class UpdateDialog extends StatefulWidget {
       builder: (_) => UpdateDialog(
         updateInfo: updateInfo,
         currentVersion: currentVersion,
+        autoDownload: autoDownload,
       ),
     );
   }
@@ -38,6 +42,16 @@ class _UpdateDialogState extends State<UpdateDialog> {
   bool _isDownloading = false;
   double _progress = 0.0;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.autoDownload) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startDownload();
+      });
+    }
+  }
 
   Future<void> _startDownload() async {
     final apkUrl = widget.updateInfo.apkDownloadUrl;

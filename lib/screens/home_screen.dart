@@ -36,6 +36,7 @@ import 'sstp_servers_screen.dart';
 import 'proxy_servers_screen.dart';
 import 'secret_text_screen.dart';
 import '../services/update_service.dart';
+import '../services/update_notification_service.dart';
 import '../widgets/update_dialog.dart';
 import '../widgets/psiphon_server_list_status.dart';
 
@@ -52,6 +53,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   );
 
   final UpdateService _updateService = UpdateService();
+  final UpdateNotificationService _updateNotifications =
+      UpdateNotificationService();
   final GlobalKey _powerButtonKey = GlobalKey();
 
   // Pink-theme heart burst: incremented each time the VPN transitions to
@@ -63,6 +66,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _updateNotifications.setUpdateSelectedHandler(
+      _handleUpdateNotificationSelected,
+    );
     // بررسی خودکار آپدیت هنگام ورود به اپ + نمایش راهنما در اولین اجرا
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // Prompt for OpenVPN credentials at connect time when the config needs
@@ -72,7 +78,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             _promptOpenVpnCredentials;
       }
       await _maybeShowGuide();
-      await _checkForUpdate();
+      await _maybeAskForUpdateNotificationConsent();
+      final pendingUpdate = await _updateNotifications.consumePendingUpdate();
+      if (pendingUpdate != null) {
+        await _openUpdateDialog(
+          pendingUpdate.updateInfo,
+          currentVersion: pendingUpdate.currentVersion,
+          autoDownload: true,
+        );
+      } else {
+        await _checkForUpdate();
+      }
     });
   }
 
@@ -173,6 +189,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _maybeAskForUpdateNotificationConsent() async {
+    if (!Platform.isAndroid ||
+        !await _updateNotifications.shouldPromptForConsent() ||
+        !mounted) {
+      return;
+    }
+
+    final wantsNotifications = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Update notifications'),
+        content: const Text(
+          'Would you like to receive a notification when a new version is available?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Not now'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Yes, notify me'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+
+    await _updateNotifications.markConsentPrompted();
+    if (wantsNotifications == true) {
+      await _updateNotifications.enableNotificationsAfterConsent();
+    }
+  }
+
   /// بررسی خودکار آپدیت از طریق GitHub Releases و نمایش دیالوگ در صورت وجود نسخه جدید
   Future<void> _checkForUpdate() async {
     try {
@@ -181,6 +232,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
 
       final currentVersion = await _updateService.getCurrentVersion();
+      if (!mounted) return;
+
+      await _updateNotifications.showAvailableUpdate(
+        updateInfo: updateInfo,
+        currentVersion: currentVersion,
+      );
       if (!mounted) return;
 
       await UpdateDialog.show(
@@ -193,8 +250,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _handleUpdateNotificationSelected() async {
+    final pendingUpdate = await _updateNotifications.consumePendingUpdate();
+    if (pendingUpdate == null || !mounted) return;
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      Navigator.of(
+        context,
+        rootNavigator: true,
+      ).popUntil((route) => route.isFirst);
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
+    }
+    await _openUpdateDialog(
+      pendingUpdate.updateInfo,
+      currentVersion: pendingUpdate.currentVersion,
+      autoDownload: true,
+    );
+  }
+
+  Future<void> _openUpdateDialog(
+    UpdateInfo updateInfo, {
+    String currentVersion = '',
+    bool autoDownload = false,
+  }) async {
+    final version = currentVersion.isNotEmpty
+        ? currentVersion
+        : await _updateService.getCurrentVersion();
+    if (!mounted) return;
+    await UpdateDialog.show(
+      context,
+      updateInfo: updateInfo,
+      currentVersion: version,
+      autoDownload: autoDownload,
+    );
+  }
+
   @override
   void dispose() {
+    _updateNotifications.setUpdateSelectedHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

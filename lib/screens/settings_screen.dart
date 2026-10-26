@@ -6,6 +6,7 @@ import '../widgets/four_win_loader.dart';
 import '../models/dns_server.dart';
 import '../services/psiphon_service.dart';
 import '../services/update_service.dart';
+import '../services/update_notification_service.dart';
 import '../widgets/update_dialog.dart';
 import '../widgets/psiphon_server_list_status.dart';
 import 'slowdns_configs_screen.dart';
@@ -68,7 +69,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // Update check (moved here from the home screen).
   final UpdateService _updateService = UpdateService();
+  final UpdateNotificationService _updateNotificationService =
+      UpdateNotificationService();
   bool _checkingUpdate = false;
+  bool _updateNotificationsEnabled = false;
 
   @override
   void initState() {
@@ -86,6 +90,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final currentVersion = await _updateService.getCurrentVersion();
       if (!mounted) return;
       if (updateInfo != null) {
+        await _updateNotificationService.showAvailableUpdate(
+          updateInfo: updateInfo,
+          currentVersion: currentVersion,
+        );
+        if (!mounted) return;
         await UpdateDialog.show(
           context,
           updateInfo: updateInfo,
@@ -131,8 +140,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final updateNotificationsEnabled =
+        await _updateNotificationService.areNotificationsEnabled();
     setState(() {
       _dnsController.text = prefs.getString('custom_dns') ?? '8.8.8.8';
+      _updateNotificationsEnabled = updateNotificationsEnabled;
       _concurrentTests = prefs.getInt('concurrent_tests') ?? 100;
       _parallelConnection = prefs.getBool('parallel_connection') ?? false;
       _killSwitch = prefs.getBool('kill_switch') ?? false;
@@ -1932,6 +1944,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           color: isDark ? Colors.white70 : Colors.black54,
                           fontSize: 13,
                         ),
+                      ),
+                      const SizedBox(height: 12),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Update notifications'),
+                        subtitle: const Text(
+                          'Notify me when a new version is available',
+                        ),
+                        value: _updateNotificationsEnabled,
+                        activeTrackColor: isDark
+                            ? const Color(0xFF00FF88)
+                            : Colors.blue,
+                        onChanged: (enabled) async {
+                          if (enabled) {
+                            final granted = await _updateNotificationService
+                                .enableNotificationsAfterConsent();
+                            if (!mounted) return;
+                            setState(
+                              () => _updateNotificationsEnabled = granted,
+                            );
+                            if (!granted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Notification permission is required to receive update alerts.',
+                                  ),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          } else {
+                            await _updateNotificationService
+                                .disableNotifications();
+                            if (mounted) {
+                              setState(
+                                () => _updateNotificationsEnabled = false,
+                              );
+                            }
+                          }
+                        },
                       ),
                       const SizedBox(height: 12),
                       SizedBox(
