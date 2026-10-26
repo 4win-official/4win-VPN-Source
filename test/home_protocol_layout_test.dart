@@ -6,6 +6,7 @@ import 'package:vpn_swift/models/mix_strategy.dart';
 import 'package:vpn_swift/models/proxy_server.dart';
 import 'package:vpn_swift/models/sstp_server_group.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
+import 'package:vpn_swift/screens/dns_scanner_screen.dart';
 import 'package:vpn_swift/widgets/mix_chain_diagnostics.dart';
 import 'package:vpn_swift/widgets/psiphon_server_list_status.dart';
 
@@ -176,4 +177,22 @@ void main() {
       },
     );
   }
+
+  testWidgets('Slow DNS Resolver Scanner opens discovery directly', (
+    tester,
+  ) async {
+    final provider = _LayoutProvider()..protocol = 'slowdns';
+    await pumpHome(tester, provider);
+
+    expect(find.text('Slow DNS Configs'), findsOneWidget);
+    await tester.tap(find.text('Resolver Scanner'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byType(DnsScannerScreen), findsOneWidget);
+    expect(find.text('DNS resolver discovery'), findsOneWidget);
+    expect(find.text('Slow DNS Configs'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

@@ -28,6 +28,7 @@ import 'theme_selection_screen.dart';
 import 'settings_screen.dart';
 import 'guide_screen.dart';
 import 'dns_servers_screen.dart';
+import 'dns_scanner_screen.dart';
 import 'openvpn_configs_screen.dart';
 import 'slowdns_configs_screen.dart';
 import 'xray_servers_screen.dart';
@@ -1451,11 +1452,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     );
                                   }
 
-                                  // Slow DNS: Show DNS Scanner and Configs buttons
+                                  // Slow DNS: open resolver discovery directly,
+                                  // with configuration management kept separate.
                                   if (provider.selectedProtocol == 'slowdns') {
                                     return Column(
                                       children: [
-                                        // DNS Scanner button
                                         SizedBox(
                                           width: double.infinity,
                                           child: ElevatedButton.icon(
@@ -1464,13 +1465,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                 context,
                                                 MaterialPageRoute(
                                                   builder: (context) =>
-                                                      const SlowDnsConfigsScreen(),
+                                                      const DnsScannerScreen(),
                                                 ),
                                               );
                                             },
                                             icon: const Icon(Icons.radar),
                                             label: const Text(
-                                              'DNS Scanner & Configs',
+                                              'Resolver Scanner',
                                               style: TextStyle(fontSize: 16),
                                             ),
                                             style: ElevatedButton.styleFrom(
@@ -1484,6 +1485,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                     BorderRadius.circular(12),
                                               ),
                                             ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: OutlinedButton.icon(
+                                            onPressed: () {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      const SlowDnsConfigsScreen(),
+                                                ),
+                                              );
+                                            },
+                                            icon: const Icon(Icons.settings),
+                                            label: const Text('Slow DNS Configs'),
                                           ),
                                         ),
                                       ],
