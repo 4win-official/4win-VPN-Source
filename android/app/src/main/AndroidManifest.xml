@@ -532,6 +532,46 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- Explicit visibility for supported bank apps in the split-tunneling picker. -->
+        <package android:name="com.isc.bminew" />
+        <package android:name="com.isc.bsinew" />
+        <package android:name="mob.banking.android.pasargad" />
+        <package android:name="com.adpdigital.mbs.ayande" />
+        <package android:name="com.pmb.mobile" />
+        <package android:name="com.bmelat.mobile" />
+        <package android:name="com.bpm.sekeh" />
+        <package android:name="com.refahbank.dpi.android" />
+        <package android:name="com.refah.superapp" />
+        <package android:name="com.parsmobapp" />
+        <package android:name="com.ada.mbank.mehr" />
+        <package android:name="com.rahand.qkids" />
+        <package android:name="com.rahand.qbank" />
+        <package android:name="com.tosan.dara.sina" />
+        <package android:name="com.tosan.dara.sepah" />
+        <package android:name="ir.stts.bjt" />
+        <package android:name="com.maskanmobilebank" />
+        <package android:name="com.bki.mobilebanking.android" />
+        <package android:name="com.citydi.hplus" />
+        <package android:name="ir.mobillet.app" />
+        <package android:name="mob.banking.android.resalat" />
+        <package android:name="ir.stsepehr.hamrahcard" />
+        <package android:name="com.farazpardazan.enbank" />
+        <package android:name="ir.tes.sarmayeh" />
+        <package android:name="co.nilin.faraznative" />
+        <package android:name="com.tosan.dara.day" />
+        <package android:name="digital.neobank" />
+        <package android:name="ir.omidbank" />
+        <package android:name="com.gostaresh.mobilebank.boilerplate" />
+        <package android:name="com.samanpr.blu" />
+        <package android:name="co.redbank.app" />
+        <package android:name="app.rbmain.a" />
+        <package android:name="ir.sep.sesoot" />
+        <package android:name="mobi.mmdt.ott" />
+        <package android:name="mobi.mmdt.ottplus" />
+        <package android:name="ir.eitaa.messenger" />
+        <package android:name="ir.resaneh1.iptv" />
+        <package android:name="com.app.shadplus" />
+        <package android:name="com.bestapps.shadimadareswebbrowser" />
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />

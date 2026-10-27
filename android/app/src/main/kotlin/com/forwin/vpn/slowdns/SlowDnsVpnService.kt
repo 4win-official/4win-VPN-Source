@@ -11,6 +11,7 @@ import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import com.forwin.vpn.R
 import com.forwin.vpn.LiveTrafficNotification
+import com.forwin.vpn.SplitTunnel
 import com.forwin.vpn.VpnStateBroadcast
 import go.Seq
 import libv2ray.CoreCallbackHandler
@@ -230,20 +231,7 @@ class SlowDnsVpnService : VpnService() {
 
     /** App-UID exclusion also covers the dnstt child process; no socket can loop. */
     private fun applySplitTunnel(builder: Builder) {
-        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val mode = prefs.getString("flutter.split_tunnel_mode", "off") ?: "off"
-        val packages = (prefs.getString("flutter.split_tunnel_apps", "") ?: "")
-            .split(',').map { it.trim() }.filter { it.isNotEmpty() && it != packageName }.distinct()
-        if (mode == "include") {
-            var allowed = 0
-            for (pkg in packages) {
-                if (runCatching { builder.addAllowedApplication(pkg) }.isSuccess) allowed++
-            }
-            check(allowed > 0) { "Select at least one installed app other than this VPN in split-tunnel include mode." }
-        } else {
-            builder.addDisallowedApplication(packageName)
-            if (mode == "exclude") packages.forEach { runCatching { builder.addDisallowedApplication(it) } }
-        }
+        SplitTunnel.apply(applicationContext, builder, packageName)
     }
 
     private fun failClosed(s: Session, failure: Throwable) {
