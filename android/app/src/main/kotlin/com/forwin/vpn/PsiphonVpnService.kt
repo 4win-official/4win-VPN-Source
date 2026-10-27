@@ -506,9 +506,13 @@ class PsiphonVpnService : VpnService() {
             try { previousTun?.close() } catch (_: Throwable) {}
             plog("Android TUN established fd=${tun.fd}")
 
-            initializePsiphonTunnel(region)
+            // Publish startup state before calling the SDK. Its callbacks may
+            // run before startTunneling() returns; setting this afterwards
+            // could overwrite newer callback status and hide startup progress.
             tunnelRunning = true
             lastStatusText = "Psiphon is starting..."
+            sendStatus()
+            initializePsiphonTunnel(region)
             showNotification(lastStatusText, true)
             sendStatus()
         } catch (t: Throwable) {

@@ -47,6 +47,16 @@ class PsiphonStartupContractTest(unittest.TestCase):
         self.assertIn('vpnInterface?.close()', failure.split('} else {', 1)[1])
         self.assertIn('lastStatusText = "Psiphon failed:', failure)
 
+    def test_startup_state_is_published_before_sdk_can_emit_callbacks(self):
+        service = (NATIVE / "PsiphonVpnService.kt").read_text()
+        startup = service.split("private fun startPsiphon(", 1)[1].split("private fun stopPsiphon(", 1)[0]
+        starting_status = startup.index('lastStatusText = "Psiphon is starting..."')
+        running_state = startup.index("tunnelRunning = true")
+        sdk_start = startup.index("initializePsiphonTunnel(region)")
+        self.assertLess(starting_status, sdk_start)
+        self.assertLess(running_state, sdk_start)
+        self.assertNotIn('lastStatusText = "Psiphon is starting..."', startup[sdk_start:])
+
     def test_automatic_reconnect_does_not_reuse_a_persisted_manual_target(self):
         service = (NATIVE / "PsiphonVpnService.kt").read_text()
         reconnect = service.split("ACTION_RECONNECT -> {", 1)[1].split("null -> if", 1)[0]
