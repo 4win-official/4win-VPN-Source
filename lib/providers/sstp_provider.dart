@@ -426,12 +426,22 @@ extension _SstpProviderLogic on VpnProvider {
       final candidates = await _testSstpTarget();
       if (cancelled()) return;
       if (candidates.isEmpty) {
+        _setProtocolStep(
+          0,
+          ConnectionStepState.failed,
+          detail: _errorMessage ?? 'No target passed the SSTP TCP reachability test.',
+        );
         _status = VpnConnectionStatus.error;
         _errorMessage ??=
             'No reachable SSTP servers. Refresh or choose another group.';
         notifyListeners();
         return;
       }
+      _setProtocolStep(
+        0,
+        ConnectionStepState.complete,
+        detail: 'SSTP server TCP port responded; this does not prove a tunnel.',
+      );
       final prefs = await SharedPreferences.getInstance();
       if (cancelled()) return;
       final chosenDns = (prefs.getString('custom_dns') ?? '8.8.8.8').trim();
@@ -446,19 +456,39 @@ extension _SstpProviderLogic on VpnProvider {
         manualMtu = (1280 + (first.clamp(1, 6) - 1) * 20).clamp(1280, 1500);
         mtuMode = 'manual';
       }
+      _setProtocolStep(
+        1,
+        ConnectionStepState.running,
+        detail: 'Requesting Android VPN permission.',
+      );
       final granted = await _vpnService.requestPermission();
       if (cancelled()) return;
       if (!granted) {
+        _setProtocolStep(
+          1,
+          ConnectionStepState.failed,
+          detail: 'Android VPN permission was not granted.',
+        );
         _status = VpnConnectionStatus.error;
         _errorMessage = 'VPN permission denied';
         notifyListeners();
         return;
       }
+      _setProtocolStep(
+        1,
+        ConnectionStepState.complete,
+        detail: 'Android VPN permission was granted.',
+      );
       for (final server in candidates) {
         _selectedServer = server;
         notifyListeners();
         for (final dns in dnsCandidates) {
           if (cancelled()) return;
+          _setProtocolStep(
+            2,
+            ConnectionStepState.running,
+            detail: 'Waiting for the SSTP engine to report its session state.',
+          );
           final operation = _vpnService.connect(
             server,
             dns: dns,

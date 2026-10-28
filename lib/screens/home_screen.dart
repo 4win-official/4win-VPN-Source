@@ -1,4 +1,5 @@
 import '../widgets/mix_chain_diagnostics.dart';
+import '../widgets/protocol_chain_diagnostics.dart';
 import 'mix_strategies_screen.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -1341,8 +1342,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 horizontal: 24,
                                 vertical: 12,
                               ),
-                              child: Consumer<VpnProvider>(
-                                builder: (context, provider, _) {
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Consumer<VpnProvider>(
+                                    builder: (context, provider, _) {
+                                      final diagnostics =
+                                          provider.protocolDiagnostics;
+                                      if (provider.selectedProtocol == 'mix' ||
+                                          diagnostics == null ||
+                                          diagnostics.protocol !=
+                                              provider.selectedProtocol) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return Padding(
+                                        padding: const EdgeInsets.only(bottom: 8),
+                                        child: ProtocolChainDiagnostics(
+                                          diagnostics: diagnostics,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  Consumer<VpnProvider>(
+                                    builder: (context, provider, _) {
                                   if (provider.selectedProtocol == 'mix') {
                                     return Column(
                                       mainAxisSize: MainAxisSize.min,
@@ -1871,7 +1893,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   }
 
                                   return const SizedBox.shrink();
-                                },
+                                    },
+                                  ),
+                                ],
                               ),
                             ),
                           ),

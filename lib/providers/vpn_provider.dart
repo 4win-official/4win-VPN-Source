@@ -32,6 +32,7 @@ import '../services/connection_logger.dart';
 import '../services/probe_cancellation.dart';
 import '../models/mix_strategy.dart';
 import '../models/mix_diagnostics.dart';
+import '../models/protocol_diagnostics.dart';
 import '../models/mix_block_exception.dart';
 import '../services/mix_strategy_store.dart';
 import '../services/mix_config_builder.dart';
@@ -80,6 +81,8 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   Timer? _mixDiagnosticsTimer;
   MixDiagnostics? _mixDiagnostics;
   MixDiagnostics? get mixDiagnostics => _mixDiagnostics;
+  ProtocolDiagnostics? _protocolDiagnostics;
+  ProtocolDiagnostics? get protocolDiagnostics => _protocolDiagnostics;
   bool _mixDisposed = false;
   Future<void>? _mixDisconnectOperation;
   List<MixStrategy> get mixStrategies => List.unmodifiable(_mixStrategies);
@@ -395,9 +398,109 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     }
   }
 
+  void _beginProtocolDiagnostics(String protocol) {
+    _protocolDiagnostics = ProtocolDiagnostics.begin(
+      protocol: protocol,
+      attemptId: '${DateTime.now().microsecondsSinceEpoch}-${++_protocolAttempt}',
+      proxyMode: false,
+    ).updateStep(0, ConnectionStepState.running, detail: 'Preparing this connection attempt.');
+  }
+
+  int _protocolAttempt = 0;
+
+  void _setProtocolDiagnosticsMode(bool proxyMode) {
+    final current = _protocolDiagnostics;
+    if (current == null ||
+        current.protocol != _selectedProtocol ||
+        current.proxyMode == proxyMode) {
+      return;
+    }
+    final next = ProtocolDiagnostics.begin(
+      protocol: current.protocol,
+      attemptId: current.attemptId,
+      proxyMode: proxyMode,
+    );
+    final first = current.steps.isNotEmpty ? current.steps.first : null;
+    _protocolDiagnostics = first != null &&
+            next.steps.isNotEmpty &&
+            first.title == next.steps.first.title
+        ? next.updateStep(0, first.state, detail: first.detail)
+        : next.updateStep(
+            0,
+            ConnectionStepState.running,
+            detail: 'Preparing this connection attempt.',
+          );
+  }
+
+  void _setProtocolStep(
+    int index,
+    ConnectionStepState state, {
+    String? detail,
+    bool notify = true,
+  }) {
+    final current = _protocolDiagnostics;
+    if (current == null ||
+        current.protocol != _selectedProtocol ||
+        index < 0 ||
+        index >= current.steps.length) {
+      return;
+    }
+    final existing = current.steps[index];
+    if (existing.state == state && existing.detail == detail) return;
+    _protocolDiagnostics = current.updateStep(index, state, detail: detail);
+    if (notify && !_mixDisposed) notifyListeners();
+  }
+
+  void _recordProtocolReachabilityProbe({
+    required bool succeeded,
+    required String detail,
+  }) {
+    final diagnostics = _protocolDiagnostics;
+    if (diagnostics == null ||
+        diagnostics.protocol != _selectedProtocol ||
+        _status != VpnConnectionStatus.connected ||
+        diagnostics.steps.isEmpty) {
+      return;
+    }
+    _setProtocolStep(
+      diagnostics.steps.length - 1,
+      succeeded ? ConnectionStepState.complete : ConnectionStepState.unverified,
+      detail: detail,
+      notify: false,
+    );
+  }
+
+  void _finishProtocolDiagnostics(
+    ConnectionAttemptOutcome outcome, {
+    String? message,
+  }) {
+    final current = _protocolDiagnostics;
+    if (current == null || current.protocol != _selectedProtocol) return;
+    _protocolDiagnostics = current.updateOutcome(outcome, message: message);
+  }
+
+  void _syncProtocolDiagnosticsWithStatus() {
+    final current = _protocolDiagnostics;
+    if (current == null ||
+        current.protocol != _selectedProtocol ||
+        current.outcome != ConnectionAttemptOutcome.connecting) {
+      return;
+    }
+    if (_status == VpnConnectionStatus.error) {
+      _protocolDiagnostics = current.failCurrent(
+        _errorMessage ?? 'The connection attempt failed.',
+      );
+    } else if (_status == VpnConnectionStatus.connected) {
+      _protocolDiagnostics = current.updateOutcome(
+        ConnectionAttemptOutcome.connected,
+      );
+    }
+  }
+
   @override
   void notifyListeners() {
     _syncErrorAutoClear();
+    _syncProtocolDiagnosticsWithStatus();
     super.notifyListeners();
   }
 
@@ -519,6 +622,16 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       _status = status;
 
       if (status == VpnConnectionStatus.connected) {
+        _setProtocolStep(
+          2,
+          ConnectionStepState.complete,
+          detail: 'SSTP engine reported the negotiated session connected.',
+        );
+        _setProtocolStep(
+          3,
+          ConnectionStepState.complete,
+          detail: 'Received the native SSTP connected callback.',
+        );
         _errorMessage = null;
         _connectedServer = _vpnService.connectedServer;
         _startDurationTimer();
@@ -867,6 +980,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _currentPing = null;
         _pingFailed = true;
       }
+      _recordProtocolReachabilityProbe(
+        succeeded: !_pingFailed,
+        detail: _pingFailed
+            ? 'The latest HTTP-through-Xray probe failed; this alone does not '
+              'prove the tunnel is down.'
+            : 'A real HTTP delay probe through the Xray config succeeded.',
+      );
       notifyListeners();
       return;
     }
@@ -927,6 +1047,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _currentPing = null;
         _pingFailed = true;
       }
+      _recordProtocolReachabilityProbe(
+        succeeded: !_pingFailed,
+        detail: _pingFailed
+            ? 'The latest HTTP-through-proxy probe failed; this alone does not '
+              'prove the engine is down.'
+            : 'A real HTTP-through-proxy probe succeeded.',
+      );
       notifyListeners();
       return;
     }
@@ -950,6 +1077,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _currentPing = null;
         _pingFailed = true;
       }
+      _recordProtocolReachabilityProbe(
+        succeeded: _currentPing != null,
+        detail: _currentPing != null
+            ? 'The selected DNS server responded to a native or fallback connectivity probe.'
+            : 'The latest DNS-server probe failed; the DNS VPN interface is not '
+              'independently verified.',
+      );
       notifyListeners();
       return;
     }
@@ -1053,6 +1187,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     _nativeSessionRestored = false;
     final sstpToken = _selectedProtocol == 'sstp' ? ++_sstpConnectGen : null;
     if (_selectedProtocol == 'sstp') _errorMessage = null;
+    if (_selectedProtocol != 'mix') {
+      _beginProtocolDiagnostics(_selectedProtocol);
+    }
     // ⚡ CRITICAL: Set to connecting immediately so user sees feedback
     _status = VpnConnectionStatus.connecting;
     notifyListeners();
@@ -1077,6 +1214,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     if (_mixDisposed || revision != _vpnStateRevision) return;
     final proxyMode =
         (modePrefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+    _setProtocolDiagnosticsMode(proxyMode);
     // Xray, the dedicated Proxy protocol AND WARP all run the Xray core and
     // can serve a local proxy without a system tunnel; every other protocol
     // is an IP-layer VPN and cannot run in connection-mode "proxy".
@@ -1084,6 +1222,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _selectedProtocol != 'xray' &&
         _selectedProtocol != 'proxy' &&
         _selectedProtocol != 'warp') {
+      _protocolDiagnostics = _protocolDiagnostics?.failModeValidation(
+        'This protocol requires VPN mode; local Proxy mode is not available.',
+      );
       _status = VpnConnectionStatus.error;
       _errorMessage =
           'Proxy mode only supports Xray. Switch to the Xray protocol, '
@@ -1218,6 +1359,16 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
               'Psiphon could not start. Approve VPN permission, then retry.';
           break;
         }
+        _setProtocolStep(
+          0,
+          ConnectionStepState.complete,
+          detail: 'Native Psiphon service start request was accepted.',
+        );
+        _setProtocolStep(
+          1,
+          ConnectionStepState.running,
+          detail: 'Waiting for native core and TUN bridge confirmation.',
+        );
 
         var terminalFailure = false;
         for (var i = 0; i < 180; i++) {
@@ -1227,6 +1378,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           if (cancelled()) return;
           if (connected) {
             _psiphonFailCount = 0;
+            _setProtocolStep(
+              1,
+              ConnectionStepState.complete,
+              detail: 'Native status confirms the Psiphon core and traffic bridge are active.',
+            );
             _status = VpnConnectionStatus.connected;
             _connectedServer = null;
             _errorMessage = null;
@@ -1538,6 +1694,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       }
       return;
     }
+    _setProtocolStep(
+      0,
+      ConnectionStepState.complete,
+      detail: 'Selected DNS server ${_selectedDnsServer!.primaryDns}.',
+    );
 
     try {
       // Set status to connecting
@@ -1545,21 +1706,62 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       notifyListeners();
 
       // Request VPN permission
+      _setProtocolStep(
+        1,
+        ConnectionStepState.running,
+        detail: 'Requesting Android VPN permission.',
+      );
       final permissionGranted = await DnsVpnConnection.requestPermission();
       if (cancelled()) return;
 
       if (!permissionGranted) {
+        _setProtocolStep(
+          1,
+          ConnectionStepState.failed,
+          detail: 'Android VPN permission was not granted.',
+        );
+        _finishProtocolDiagnostics(
+          ConnectionAttemptOutcome.failed,
+          message: 'Android VPN permission was not granted.',
+        );
         _status = VpnConnectionStatus.disconnected;
         notifyListeners();
         return;
       }
+      _setProtocolStep(
+        1,
+        ConnectionStepState.complete,
+        detail: 'Android VPN permission was granted.',
+      );
 
       // Connect using selected DNS server
-      await DnsVpnConnection.connect(
+      _setProtocolStep(
+        2,
+        ConnectionStepState.running,
+        detail: 'Sending the DNS VPN service start request.',
+      );
+      final serviceStartAccepted = await DnsVpnConnection.connect(
         primaryDns: _selectedDnsServer!.primaryDns,
         secondaryDns: _selectedDnsServer!.secondaryDns ?? '8.8.4.4',
       );
       if (cancelled()) return;
+      if (serviceStartAccepted) {
+        _setProtocolStep(
+          2,
+          ConnectionStepState.complete,
+          detail: 'The native request was acknowledged; interface activity is not confirmed here.',
+        );
+      } else {
+        _setProtocolStep(
+          2,
+          ConnectionStepState.failed,
+          detail: 'The native DNS VPN start request returned false.',
+        );
+        _finishProtocolDiagnostics(
+          ConnectionAttemptOutcome.failed,
+          message: 'The DNS VPN service did not acknowledge the start request.',
+        );
+      }
 
       // Update status to connected
       _status = VpnConnectionStatus.connected;
@@ -1579,6 +1781,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         debugPrint('⚠️ Failed to connect DNS: $e');
       }
       if (cancelled()) return;
+      _setProtocolStep(2, ConnectionStepState.failed, detail: e.toString());
+      _finishProtocolDiagnostics(
+        ConnectionAttemptOutcome.failed,
+        message: e.toString(),
+      );
       _status = VpnConnectionStatus.disconnected;
       notifyListeners();
     }
@@ -1621,6 +1828,10 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         if (cancelled()) return;
         if (creds == null) {
           // User cancelled the credentials prompt → abort cleanly.
+          _finishProtocolDiagnostics(
+            ConnectionAttemptOutcome.cancelled,
+            message: 'Credential entry was cancelled.',
+          );
           _status = VpnConnectionStatus.disconnected;
           notifyListeners();
           return;
@@ -1644,6 +1855,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     }
 
     if (cancelled()) return;
+    _setProtocolStep(
+      0,
+      ConnectionStepState.complete,
+      detail: 'OpenVPN profile and required credentials are available.',
+    );
     // Tear down any prior/stale native session first.
     try {
       await OpenVpnConnection.disconnect();
@@ -1740,6 +1956,27 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       OpenVpnConnection.onStageChanged = (VPNStage? stage) {
         if (OpenVpnConnection.generation != myGen) return;
         if (kDebugMode) debugPrint('🔵 OpenVPN Stage: $stage');
+        final stageName = stage?.toString().split('.').last ?? 'unknown';
+        if (stage == VPNStage.connected) {
+          _setProtocolStep(
+            1,
+            ConnectionStepState.complete,
+            detail: 'OpenVPN reported VPNStage.connected.',
+          );
+          _setProtocolStep(
+            2,
+            ConnectionStepState.complete,
+            detail: 'Native OpenVPN connected callback received.',
+          );
+        } else if (stage != null &&
+            stage != VPNStage.disconnected &&
+            stage != VPNStage.exiting) {
+          _setProtocolStep(
+            1,
+            ConnectionStepState.running,
+            detail: 'OpenVPN reported stage: $stageName.',
+          );
+        }
 
         if (stage == VPNStage.connected) {
           _status = VpnConnectionStatus.connected;
@@ -1768,6 +2005,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       final watchdog = Timer(const Duration(seconds: 30), () => finish(false));
 
       try {
+        _setProtocolStep(
+          1,
+          ConnectionStepState.running,
+          detail: 'Waiting for native OpenVPN negotiation events.',
+        );
         await OpenVpnConnection.connect(
           _selectedOpenVpnConfig!,
           // This controls whether client-certificate material is stripped.
@@ -1858,14 +2100,42 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     _errorMessage = null;
     notifyListeners();
     if (config.validationError != null) {
+      _setProtocolStep(
+        0,
+        ConnectionStepState.failed,
+        detail: config.validationError,
+      );
+      _finishProtocolDiagnostics(
+        ConnectionAttemptOutcome.failed,
+        message: config.validationError,
+      );
       _status = VpnConnectionStatus.error;
       _errorMessage = config.validationError;
       notifyListeners();
       return;
     }
+    _setProtocolStep(
+      0,
+      ConnectionStepState.complete,
+      detail: 'Slow DNS profile passed local validation.',
+    );
+    _setProtocolStep(
+      1,
+      ConnectionStepState.running,
+      detail: 'Requesting Android VPN permission.',
+    );
     final granted = await SlowDnsConnection.requestPermission();
     if (cancelled()) return;
     if (!granted) {
+      _setProtocolStep(
+        1,
+        ConnectionStepState.failed,
+        detail: SlowDnsConnection.lastError ?? 'Android VPN permission was not granted.',
+      );
+      _finishProtocolDiagnostics(
+        ConnectionAttemptOutcome.failed,
+        message: SlowDnsConnection.lastError ?? 'Android VPN permission was not granted.',
+      );
       _status = VpnConnectionStatus.error;
       _errorMessage =
           SlowDnsConnection.lastError ??
@@ -1873,9 +2143,24 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       notifyListeners();
       return;
     }
+    _setProtocolStep(
+      1,
+      ConnectionStepState.complete,
+      detail: 'Android VPN permission was granted.',
+    );
     SlowDnsConnection.onStateChanged = (connected, message) {
       if (cancelled()) return;
       if (connected) {
+        _setProtocolStep(
+          2,
+          ConnectionStepState.complete,
+          detail: 'Native Slow DNS service reported ready and connected.',
+        );
+        _setProtocolStep(
+          3,
+          ConnectionStepState.complete,
+          detail: 'Authenticated resolver probe and tunnel readiness passed.',
+        );
         _status = VpnConnectionStatus.connected;
         _connectedServer = null;
         _errorMessage = null;
@@ -1883,6 +2168,15 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         // A direct ping from the excluded app UID is not tunnel latency.
         _stopPingTimer();
       } else {
+        _setProtocolStep(
+          3,
+          ConnectionStepState.failed,
+          detail: message,
+        );
+        _finishProtocolDiagnostics(
+          ConnectionAttemptOutcome.failed,
+          message: message,
+        );
         _status = VpnConnectionStatus.error;
         _errorMessage = message;
         _stopDurationTimer();
@@ -1890,12 +2184,23 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       }
       notifyListeners();
     };
+    _setProtocolStep(
+      2,
+      ConnectionStepState.running,
+      detail: 'Starting the native DNS tunnel and authenticated resolver.',
+    );
     final connected = await SlowDnsConnection.connect(config);
     if (cancelled()) return;
     if (!connected) {
-      _status = VpnConnectionStatus.error;
-      _errorMessage =
+      final failure =
           SlowDnsConnection.lastError ?? 'Slow DNS connection failed.';
+      _setProtocolStep(3, ConnectionStepState.failed, detail: failure);
+      _finishProtocolDiagnostics(
+        ConnectionAttemptOutcome.failed,
+        message: failure,
+      );
+      _status = VpnConnectionStatus.error;
+      _errorMessage = failure;
       notifyListeners();
     }
   }
@@ -2953,13 +3258,24 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         }
       }
 
+      _setProtocolStep(
+        0,
+        ConnectionStepState.complete,
+        detail: 'Selected proxy server ${serverToConnect!.remark}.',
+      );
       final prefs = await SharedPreferences.getInstance();
       final proxyMode =
           (prefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+      _setProtocolDiagnosticsMode(proxyMode);
 
       if (cancelled()) return;
 
       if (!proxyMode) {
+        _setProtocolStep(
+          1,
+          ConnectionStepState.running,
+          detail: 'Requesting Android VPN permission.',
+        );
         final granted = await XrayConnection.requestPermission();
         if (!granted) {
           _status = VpnConnectionStatus.error;
@@ -2967,13 +3283,35 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           notifyListeners();
           return;
         }
+        _setProtocolStep(
+          1,
+          ConnectionStepState.complete,
+          detail: 'Android VPN permission was granted.',
+        );
       }
 
       if (cancelled()) return;
 
+      final configStep = proxyMode ? 1 : 2;
+      final startStep = proxyMode ? 2 : 3;
+      _setProtocolStep(
+        configStep,
+        ConnectionStepState.running,
+        detail: 'Building the Xray proxy config.',
+      );
       final configJson = XrayConfigBuilder.buildForProxyServer(
         serverToConnect!,
         proxyMode: proxyMode,
+      );
+      _setProtocolStep(
+        configStep,
+        ConnectionStepState.complete,
+        detail: 'Proxy config built for ${serverToConnect!.protocol}.',
+      );
+      _setProtocolStep(
+        startStep,
+        ConnectionStepState.running,
+        detail: 'Sending the native proxy engine start request.',
       );
 
       if (kDebugMode) {
@@ -2994,6 +3332,23 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         return;
       }
       if (connected) {
+        _setProtocolStep(
+          startStep,
+          ConnectionStepState.complete,
+          detail:
+              'Native Xray accepted the '
+              '${proxyMode ? 'local Proxy' : 'VPN'} start request; '
+              'upstream reachability is separate.',
+        );
+        if (!proxyMode) {
+          _setProtocolStep(
+            4,
+            ConnectionStepState.unverified,
+            detail:
+                'A separate native service/TUN state has not yet been '
+                'observed for this attempt.',
+          );
+        }
         _status = VpnConnectionStatus.connected;
         _connectedServer = null;
         _activeProxyServer = serverToConnect;
@@ -3062,6 +3417,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         }
       }
 
+      _setProtocolStep(
+        0,
+        ConnectionStepState.complete,
+        detail: 'Selected Xray server ${serverToConnect!.remark}.',
+      );
       // Read fragment settings (default OFF).
       final prefs = await SharedPreferences.getInstance();
       final fragEnabled = prefs.getBool('xray_fragment') ?? false;
@@ -3074,6 +3434,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       // SOCKS/HTTP, no VPN icon). Global setting shared by the whole app.
       final proxyMode =
           (prefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+      _setProtocolDiagnosticsMode(proxyMode);
 
       if (cancelled()) {
         if (kDebugMode) debugPrint('🚫 Xray connect cancelled pre-permission');
@@ -3083,13 +3444,28 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       // Request VPN permission — ONLY needed for VPN (system-tunnel) mode.
       // Proxy mode establishes no VpnService interface, so no permission dialog.
       if (!proxyMode) {
+        _setProtocolStep(
+          1,
+          ConnectionStepState.running,
+          detail: 'Requesting Android VPN permission.',
+        );
         final granted = await XrayConnection.requestPermission();
         if (!granted) {
+          _setProtocolStep(
+            1,
+            ConnectionStepState.failed,
+            detail: 'Android VPN permission was not granted.',
+          );
           _status = VpnConnectionStatus.error;
           _errorMessage = 'VPN permission denied';
           notifyListeners();
           return;
         }
+        _setProtocolStep(
+          1,
+          ConnectionStepState.complete,
+          detail: 'Android VPN permission was granted.',
+        );
       }
 
       if (cancelled()) {
@@ -3097,6 +3473,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         return;
       }
 
+      final configStep = proxyMode ? 1 : 2;
+      final startStep = proxyMode ? 2 : 3;
+      _setProtocolStep(
+        configStep,
+        ConnectionStepState.running,
+        detail: 'Building the Xray config.',
+      );
       // Build the Xray JSON config (incl. TLS ClientHello fragment outbound).
       final configJson = XrayConfigBuilder.build(
         serverToConnect!,
@@ -3106,6 +3489,16 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         fragmentInterval: fragInterval,
         fragmentHost: fragHost,
         proxyMode: proxyMode,
+      );
+      _setProtocolStep(
+        configStep,
+        ConnectionStepState.complete,
+        detail: 'Xray config generated for ${serverToConnect!.protocol}.',
+      );
+      _setProtocolStep(
+        startStep,
+        ConnectionStepState.running,
+        detail: 'Sending the native Xray start request.',
       );
 
       if (kDebugMode) {
@@ -3131,6 +3524,23 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         return;
       }
       if (connected) {
+        _setProtocolStep(
+          startStep,
+          ConnectionStepState.complete,
+          detail:
+              'Native Android accepted the '
+              '${proxyMode ? 'local Proxy' : 'VPN'} start request; '
+              'remote reachability is separate.',
+        );
+        if (!proxyMode) {
+          _setProtocolStep(
+            4,
+            ConnectionStepState.unverified,
+            detail:
+                'A separate native service/TUN state has not yet been '
+                'observed for this attempt.',
+          );
+        }
         _status = VpnConnectionStatus.connected;
         _connectedServer = null; // Xray mode
         _activeXrayServer = serverToConnect; // session-only (for label + ping)
@@ -3185,14 +3595,32 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       final prefs = await SharedPreferences.getInstance();
       final proxyMode =
           (prefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+      _setProtocolDiagnosticsMode(proxyMode);
 
       if (!proxyMode) {
+        _setProtocolStep(
+          0,
+          ConnectionStepState.running,
+          detail: 'Requesting Android VPN permission for WARP.',
+        );
         final granted = await XrayConnection.requestPermission();
         if (cancelled()) return;
         if (!granted) {
           _setWarpFailure('WARP could not start: VPN permission denied.');
           return;
         }
+        _setProtocolStep(
+          0,
+          ConnectionStepState.complete,
+          detail: 'Android VPN permission was granted.',
+        );
+      } else {
+        _setProtocolStep(
+          0,
+          ConnectionStepState.skipped,
+          detail: 'Local Proxy mode does not request VPN permission; '
+              'WARP still requires VPN mode.',
+        );
       }
 
       if (cancelled()) return;
@@ -3209,6 +3637,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         if (cancelled()) return;
 
         WarpAccount account;
+        var registeredNow = false;
         try {
           if (_warpAccount != null && (attempt == 1 || retryNativeOnly)) {
             account = _warpAccount!;
@@ -3217,10 +3646,16 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
             notifyListeners();
             account = await _warpService.register(); // always fresh on retry
             _warpAccount = account;
+            registeredNow = true;
           }
         } catch (e) {
           if (kDebugMode) debugPrint('⚠️ WARP registration failed: $e');
           if (cancelled()) return;
+          _setProtocolStep(
+            1,
+            ConnectionStepState.failed,
+            detail: 'WARP identity registration failed: $e',
+          );
           _setWarpFailure('Could not register WARP identity: $e');
           return;
         } finally {
@@ -3229,9 +3664,31 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
         if (cancelled()) return;
 
+        _setProtocolStep(
+          1,
+          ConnectionStepState.complete,
+          detail: registeredNow
+              ? 'A WARP identity was registered successfully.'
+              : 'The saved WARP identity was loaded for this attempt.',
+        );
+        _setProtocolStep(
+          2,
+          ConnectionStepState.running,
+          detail: 'Building the native WARP configuration.',
+        );
         final configJson = XrayConfigBuilder.buildForWarp(
           account,
           proxyMode: proxyMode,
+        );
+        _setProtocolStep(
+          2,
+          ConnectionStepState.complete,
+          detail: 'WARP configuration generated for the selected identity.',
+        );
+        _setProtocolStep(
+          3,
+          ConnectionStepState.running,
+          detail: 'Waiting for native WARP handshake and data-plane validation.',
         );
 
         if (kDebugMode) {
@@ -3279,6 +3736,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
           return;
         }
 
+        _setProtocolStep(
+          3,
+          ConnectionStepState.complete,
+          detail: 'Native WARP readiness returned true after handshake and data-plane validation.',
+        );
         // XrayConnection.connect only returns after the service has accepted
         // the config. Do not call measureDelay here: it starts a second core,
         // and the concurrent WireGuard core is the native crash trigger.
@@ -3463,6 +3925,22 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     _lastUploadBytes = 0;
     _dnsBaselineRxBytes = -1;
     _dnsBaselineTxBytes = -1;
+    if (_selectedProtocol != 'mix') {
+      final diagnostics = _protocolDiagnostics;
+      if (diagnostics != null && diagnostics.protocol == _selectedProtocol) {
+        if (diagnostics.outcome == ConnectionAttemptOutcome.connecting) {
+          _finishProtocolDiagnostics(
+            ConnectionAttemptOutcome.cancelled,
+            message: 'Connection attempt cancelled by disconnect.',
+          );
+        } else if (diagnostics.outcome == ConnectionAttemptOutcome.connected) {
+          _finishProtocolDiagnostics(
+            ConnectionAttemptOutcome.disconnected,
+            message: 'Disconnected; showing the last observed connection stages.',
+          );
+        }
+      }
+    }
     _errorMessage = null;
     notifyListeners();
   }

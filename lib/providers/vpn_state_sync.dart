@@ -147,6 +147,58 @@ extension _VpnStateSync on VpnProvider {
       final connected = state['connected'] == true;
       final active = state['running'] == true || state['reconnecting'] == true;
       final nativeError = state['error'];
+      final reconnecting = state['reconnecting'] == true;
+      if (state['running'] == true || reconnecting) {
+        if (protocol == 'xray' || protocol == 'proxy') {
+          final diagnostics = _protocolDiagnostics;
+          if (diagnostics != null &&
+              diagnostics.protocol == protocol &&
+              (diagnostics.outcome == ConnectionAttemptOutcome.connecting ||
+                  diagnostics.outcome == ConnectionAttemptOutcome.connected)) {
+            if (diagnostics.proxyMode) {
+              _setProtocolStep(
+                2,
+                reconnecting
+                    ? ConnectionStepState.running
+                    : ConnectionStepState.complete,
+                detail: reconnecting
+                    ? 'Native state reports the local service reconnecting.'
+                    : 'Native state confirms the local Xray Proxy service is running.',
+                notify: false,
+              );
+            } else {
+              _setProtocolStep(
+                4,
+                reconnecting
+                    ? ConnectionStepState.running
+                    : ConnectionStepState.complete,
+                detail: reconnecting
+                    ? 'Native state reports the VPN service reconnecting; '
+                      'stable tunnel state is not confirmed.'
+                    : 'Native state confirms the VPN service is running; '
+                      'remote reachability remains separate.',
+                notify: false,
+              );
+            }
+          }
+        } else if (protocol == 'direct_dns' &&
+            (_protocolDiagnostics?.outcome ==
+                    ConnectionAttemptOutcome.connecting ||
+                _protocolDiagnostics?.outcome ==
+                    ConnectionAttemptOutcome.connected)) {
+          _setProtocolStep(
+            3,
+            reconnecting
+                ? ConnectionStepState.running
+                : ConnectionStepState.complete,
+            detail: reconnecting
+                ? 'Native state reports the DNS VPN service reconnecting.'
+                : 'Native state confirms the DNS VPN interface is running; '
+                  'DNS queries are separate.',
+            notify: false,
+          );
+        }
+      }
       if (protocol == 'warp' &&
           nativeError is String &&
           nativeError.isNotEmpty) {

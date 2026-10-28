@@ -59,7 +59,7 @@ class FakeVpnProvider implements VpnProvider {
   @override
   noSuchMethod(Invocation invocation) {
     final name = invocation.memberName;
-    if (name == #errorMessage) return null;
+    if (name == #errorMessage || name == #protocolDiagnostics) return null;
     if (name == #activeProxyServer ||
         name == #activeXrayServer ||
         name == #selectedProxyServer ||
