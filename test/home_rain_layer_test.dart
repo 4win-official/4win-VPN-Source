@@ -8,6 +8,8 @@ import 'package:vpn_swift/providers/app_mode_provider.dart';
 import 'package:vpn_swift/providers/theme_provider.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/screens/home_screen.dart';
+import 'package:vpn_swift/screens/logs_screen.dart';
+import 'package:vpn_swift/services/connection_logger.dart';
 import 'package:vpn_swift/widgets/glass_power_button_surface.dart';
 import 'package:vpn_swift/widgets/rain_animation.dart';
 import 'package:vpn_swift/widgets/rain_button_surface.dart';
@@ -161,9 +163,6 @@ void main() {
       await tester.tap(power);
       expect(provider.connectCalls, 1);
 
-      await tester.longPress(power);
-      await tester.pump();
-      expect(find.text('Settings'), findsOneWidget);
       expect(find.byType(RainButtonSurface), findsOneWidget);
       expect(
         tester
@@ -217,6 +216,31 @@ void main() {
             .enabled,
         isFalse,
       );
+
+      final logger = ConnectionLogger.instance;
+      await logger.clear();
+      logger.info('xray', 'current connection log marker');
+      logger.info('mix', 'other protocol log marker');
+      await tester.longPress(power);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(LogsScreen), findsOneWidget);
+      expect(find.text('Connection Logs'), findsOneWidget);
+      expect(
+        tester.widget<LogsScreen>(find.byType(LogsScreen)).initialProtocol,
+        'xray',
+      );
+      final xrayFilter = tester.widget<ChoiceChip>(
+        find.widgetWithText(ChoiceChip, 'xray'),
+      );
+      expect(xrayFilter.selected, isTrue);
+      final visibleLogText = tester
+          .widgetList<RichText>(find.byType(RichText))
+          .map((richText) => richText.text.toPlainText())
+          .join('\n');
+      expect(visibleLogText, contains('current connection log marker'));
+      expect(visibleLogText, isNot(contains('other protocol log marker')));
+      await tester.pump(const Duration(seconds: 2));
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();

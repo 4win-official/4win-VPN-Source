@@ -10,7 +10,9 @@ import '../services/connection_logger.dart';
 /// The tail of the log survives restarts (persisted by [ConnectionLogger]), so
 /// events from *before* a crash are still visible here afterwards.
 class LogsScreen extends StatefulWidget {
-  const LogsScreen({super.key});
+  const LogsScreen({super.key, this.initialProtocol});
+
+  final String? initialProtocol;
 
   @override
   State<LogsScreen> createState() => _LogsScreenState();
@@ -18,12 +20,13 @@ class LogsScreen extends StatefulWidget {
 
 class _LogsScreenState extends State<LogsScreen> {
   final ScrollController _scrollController = ScrollController();
-  String _protocolFilter = 'all';
+  late String _protocolFilter;
   bool _autoScroll = true;
 
   @override
   void initState() {
     super.initState();
+    _protocolFilter = widget.initialProtocol ?? 'all';
     ConnectionLogger.instance.addListener(_onLogChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }

@@ -30,6 +30,7 @@ import '../widgets/rainbow_heart_button.dart';
 import 'donate_screen.dart';
 import 'theme_selection_screen.dart';
 import 'settings_screen.dart';
+import 'logs_screen.dart';
 import 'guide_screen.dart';
 import 'dns_servers_screen.dart';
 import 'dns_scanner_screen.dart';
@@ -990,7 +991,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             provider,
                                           ),
                                           onLongPress: () =>
-                                              _openSettings(context),
+                                              _openConnectionLogs(
+                                                context,
+                                                provider.selectedProtocol,
+                                              ),
                                           child: KeyedSubtree(
                                             key: const ValueKey('power-button'),
                                             child: Container(
@@ -2373,6 +2377,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     provider.connect();
   }
 
+  void _openConnectionLogs(BuildContext context, String protocol) {
+    HapticFeedback.mediumImpact();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LogsScreen(initialProtocol: protocol),
+      ),
+    );
+  }
+
   void _openSettings(BuildContext context) async {
     // Show a quick rotating-gear indicator before opening the settings screen.
     HapticFeedback.mediumImpact();
@@ -2403,7 +2416,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-/// A short-lived overlay shown when the user long-presses the power button.
+/// A short-lived overlay shown when the user opens Settings from the toolbar.
 /// It displays a rotating gear (cog) with a scale/fade-in animation plus a
 /// "Settings" label so the user understands they are heading to settings.
 /// It automatically closes itself once the animation completes.
