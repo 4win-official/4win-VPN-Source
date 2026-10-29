@@ -1291,17 +1291,138 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                       const EdgeInsets.symmetric(
                                                         horizontal: 32,
                                                       ),
-                                                  child: LocalizedText(
-                                                    provider.dataUsage,
-                                                    style: TextStyle(
-                                                      fontSize: 14,
-                                                      color: isDark
-                                                          ? Colors.white70
-                                                          : Colors.black87,
-                                                      fontWeight:
-                                                          FontWeight.w500,
+                                                  child: Row(
+                                                    key: const ValueKey(
+                                                      'home-data-usage',
                                                     ),
-                                                    textAlign: TextAlign.center,
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    textDirection:
+                                                        Directionality.of(
+                                                          context,
+                                                        ),
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .center,
+                                                    children: [
+                                                      Directionality(
+                                                        key: const ValueKey(
+                                                          'download-data-counter',
+                                                        ),
+                                                        textDirection:
+                                                            Directionality.of(
+                                                              context,
+                                                            ),
+                                                        child: Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          children: [
+                                                            Text(
+                                                              '↓',
+                                                              style: TextStyle(
+                                                                fontSize: 14,
+                                                                color: isDark
+                                                                    ? Colors
+                                                                          .white70
+                                                                    : Colors
+                                                                          .black87,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w500,
+                                                              ),
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 4,
+                                                            ),
+                                                            Directionality(
+                                                              key: const ValueKey(
+                                                                'download-data-value-direction',
+                                                              ),
+                                                              textDirection:
+                                                                  TextDirection
+                                                                      .ltr,
+                                                              child: Text(
+                                                                provider
+                                                                    .downloadDataUsage,
+                                                                key: const ValueKey(
+                                                                  'download-data-value',
+                                                                ),
+                                                                style: TextStyle(
+                                                                  fontSize: 14,
+                                                                  color: isDark
+                                                                      ? Colors
+                                                                            .white70
+                                                                      : Colors
+                                                                            .black87,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w500,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 16),
+                                                      Directionality(
+                                                        key: const ValueKey(
+                                                          'upload-data-counter',
+                                                        ),
+                                                        textDirection:
+                                                            Directionality.of(
+                                                              context,
+                                                            ),
+                                                        child: Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          children: [
+                                                            Text(
+                                                              '↑',
+                                                              style: TextStyle(
+                                                                fontSize: 14,
+                                                                color: isDark
+                                                                    ? Colors
+                                                                          .white70
+                                                                    : Colors
+                                                                          .black87,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w500,
+                                                              ),
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 4,
+                                                            ),
+                                                            Directionality(
+                                                              key: const ValueKey(
+                                                                'upload-data-value-direction',
+                                                              ),
+                                                              textDirection:
+                                                                  TextDirection
+                                                                      .ltr,
+                                                              child: Text(
+                                                                provider
+                                                                    .uploadDataUsage,
+                                                                key: const ValueKey(
+                                                                  'upload-data-value',
+                                                                ),
+                                                                style: TextStyle(
+                                                                  fontSize: 14,
+                                                                  color: isDark
+                                                                      ? Colors
+                                                                            .white70
+                                                                      : Colors
+                                                                            .black87,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w500,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ),
                                                 ),
                                               // Connection Duration

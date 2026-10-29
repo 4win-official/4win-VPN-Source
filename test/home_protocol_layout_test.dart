@@ -178,6 +178,39 @@ void main() {
     );
   }
 
+  testWidgets('RTL traffic counters keep download on the right', (
+    tester,
+  ) async {
+    final provider = _LayoutProvider()..connected = true;
+    await pumpHome(tester, provider, textDirection: TextDirection.rtl);
+
+    final downloadCounter = tester.getRect(
+      find.byKey(const ValueKey('download-data-counter')),
+    );
+    final uploadCounter = tester.getRect(
+      find.byKey(const ValueKey('upload-data-counter')),
+    );
+    expect(downloadCounter.center.dx, greaterThan(uploadCounter.center.dx));
+    expect(
+      tester
+          .widget<Directionality>(
+            find.byKey(const ValueKey('download-data-value-direction')),
+          )
+          .textDirection,
+      TextDirection.ltr,
+    );
+    expect(
+      tester
+          .widget<Directionality>(
+            find.byKey(const ValueKey('upload-data-value-direction')),
+          )
+          .textDirection,
+      TextDirection.ltr,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Slow DNS Resolver Scanner opens discovery directly', (
     tester,
   ) async {

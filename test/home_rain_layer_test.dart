@@ -52,6 +52,12 @@ class FakeVpnProvider implements VpnProvider {
   String get dataUsage => '0 B';
 
   @override
+  String get downloadDataUsage => '0 B';
+
+  @override
+  String get uploadDataUsage => '0 B';
+
+  @override
   Future<void> connect({bool forceBypassCert = false}) async => connectCalls++;
 
   @override
@@ -81,7 +87,11 @@ class FakeVpnProvider implements VpnProvider {
   }
 }
 
-Future<void> pumpHome(WidgetTester tester, FakeVpnProvider provider) async {
+Future<void> pumpHome(
+  WidgetTester tester,
+  FakeVpnProvider provider, {
+  TextDirection? textDirection,
+}) async {
   final appMode = AppModeProvider();
   await appMode.setMode(AppExperienceMode.advanced);
   final themeProvider = ThemeProvider();
@@ -92,7 +102,14 @@ Future<void> pumpHome(WidgetTester tester, FakeVpnProvider provider) async {
         ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
         ChangeNotifierProvider<VpnProvider>.value(value: provider),
       ],
-      child: MaterialApp(home: const HomeScreen()),
+      child: MaterialApp(
+        home: textDirection == null
+            ? const HomeScreen()
+            : Directionality(
+                textDirection: textDirection,
+                child: const HomeScreen(),
+              ),
+      ),
     ),
   );
   // ThemeProvider loads its persisted selection asynchronously. The extra

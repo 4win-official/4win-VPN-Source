@@ -531,10 +531,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   int? get currentPing => _currentPing;
   bool get pingFailed => _pingFailed; // نمایش Failed در UI
 
+  String get downloadDataUsage => _formatBytes(_totalDownloadBytes);
+  String get uploadDataUsage => _formatBytes(_totalUploadBytes);
+
   String get dataUsage {
-    final download = _formatBytes(_totalDownloadBytes);
-    final upload = _formatBytes(_totalUploadBytes);
-    return '↓ $download  ↑ $upload';
+    return '↓ $downloadDataUsage  ↑ $uploadDataUsage';
   }
 
   VpnProvider({ServerService? serverService, SstpServerStore? sstpStore})
