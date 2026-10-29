@@ -127,6 +127,17 @@ class MainActivity: FlutterActivity() {
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.forwin.vpn/app_locale"
+        ).setMethodCallHandler { call, result ->
+            if (call.method == "refreshNotifications") {
+                VpnNotificationLabels.refreshExisting(this)
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
         val updateChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             UPDATE_METHOD_CHANNEL
@@ -920,10 +931,10 @@ class MainActivity: FlutterActivity() {
             manager.createNotificationChannel(
                 NotificationChannel(
                     UPDATE_CHANNEL_ID,
-                    "App updates",
+                    VpnNotificationLabels.localized(this, "App updates"),
                     NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
-                    description = "Notifications when a new 4win VPN version is available"
+                    description = VpnNotificationLabels.localized(this@MainActivity, "Notifications when a new 4win VPN version is available")
                 }
             )
         }
@@ -945,14 +956,14 @@ class MainActivity: FlutterActivity() {
             openUpdateIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val message = "Version $latestVersion is ready to install."
+        val message = VpnNotificationLabels.localized(this, "Version $latestVersion is ready to install.")
         val notification = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, UPDATE_CHANNEL_ID)
         } else {
             Notification.Builder(this)
         })
             .setSmallIcon(R.drawable.ic_stat_vpn)
-            .setContentTitle("Update available")
+            .setContentTitle(VpnNotificationLabels.localized(this, "Update available"))
             .setContentText(message)
             .setStyle(Notification.BigTextStyle().bigText(message))
             .setContentIntent(pendingIntent)
@@ -962,7 +973,7 @@ class MainActivity: FlutterActivity() {
             .addAction(
                 Notification.Action.Builder(
                     android.R.drawable.stat_sys_download_done,
-                    "Update",
+                    VpnNotificationLabels.localized(this, "Update"),
                     pendingIntent
                 ).build()
             )

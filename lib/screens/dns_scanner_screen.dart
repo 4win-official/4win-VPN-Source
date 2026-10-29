@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import '../services/dns_scanner_service.dart';
 import '../services/operator_ipv4_catalog.dart';
@@ -309,16 +310,16 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        LocalizedText(
           'Candidate resolvers ($count)',
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
-        const Text(
+        const LocalizedText(
           'Candidates are not verified tunnels or proof that a website opens. '
           'Copy and exports include only candidates, one IPv4:port per TXT line.',
         ),
         if (_total > 0)
-          Text(
+          LocalizedText(
             'Test: $_resultTarget · ${DnsScannerService.parseIp(_resultTarget) == null ? 'A lookup' : 'reverse PTR lookup'}'
             ' · Port $_resultPort · Timeout $_resultTimeout ms per probe'
             ' · $_resultWorkers workers'
@@ -331,17 +332,17 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
             OutlinedButton.icon(
               onPressed: enabled ? _copyCandidates : null,
               icon: const Icon(Icons.copy_all),
-              label: const Text('Copy all candidates'),
+              label: const LocalizedText('Copy all candidates'),
             ),
             OutlinedButton.icon(
               onPressed: enabled ? () => _exportCandidates('txt') : null,
               icon: const Icon(Icons.download),
-              label: const Text('Export TXT'),
+              label: const LocalizedText('Export TXT'),
             ),
             OutlinedButton.icon(
               onPressed: enabled ? () => _exportCandidates('json') : null,
               icon: const Icon(Icons.data_object),
-              label: const Text('Export JSON'),
+              label: const LocalizedText('Export JSON'),
             ),
           ],
         ),
@@ -368,14 +369,14 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     key: ValueKey('operator-$_operatorId'),
     initialValue: _operatorId,
     isExpanded: true,
-    decoration: const InputDecoration(
-      labelText: 'Operator / range source',
+    decoration: InputDecoration(
+      labelText: context.l10n.text('Operator / range source'),
       border: OutlineInputBorder(),
     ),
     items: [
       const DropdownMenuItem(
         value: 'custom',
-        child: Text('Custom IPv4 ranges'),
+        child: LocalizedText('Custom IPv4 ranges'),
       ),
       ...OperatorIpv4Catalog.operators.map(
         (operator) =>
@@ -406,8 +407,8 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
       return TextField(
         controller: _randomCount,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(
-          labelText: 'Random public IPv4 count (max 200000)',
+        decoration: InputDecoration(
+          labelText: context.l10n.text('Random public IPv4 count (max 200000)'),
           border: OutlineInputBorder(),
           isDense: true,
         ),
@@ -426,15 +427,15 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
             key: ValueKey('$_operatorId-$_operatorBatch'),
             initialValue: _operatorBatch,
             isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'IPv4 batch (max 200000 targets)',
+            decoration: InputDecoration(
+              labelText: context.l10n.text('IPv4 batch (max 200000 targets)'),
               border: OutlineInputBorder(),
             ),
             items: List.generate(
               operator.batchCount,
               (index) => DropdownMenuItem(
                 value: index,
-                child: Text(
+                child: LocalizedText(
                   'Batch ${index + 1} / ${operator.batchCount} · ${operator.batchSize(index)} IPs',
                 ),
               ),
@@ -457,7 +458,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
       children: [
         _operatorChoice(),
         const SizedBox(height: 8),
-        const Text(
+        const LocalizedText(
           'Enter your own IPv4 ranges, or choose a built-in operator above. '
           'Custom inputs use at most the first 200000 unique targets; '
           'shuffle changes their order, not the capped selection.',
@@ -469,8 +470,8 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
               child: TextField(
                 controller: _fromIp,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'From IPv4',
+                decoration: InputDecoration(
+                  labelText: context.l10n.text('From IPv4'),
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -481,8 +482,8 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
               child: TextField(
                 controller: _toIp,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'To IPv4',
+                decoration: InputDecoration(
+                  labelText: context.l10n.text('To IPv4'),
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -497,11 +498,11 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           maxLines: 4,
           keyboardType: TextInputType.multiline,
           decoration: InputDecoration(
-            labelText: 'Paste IPv4 addresses or CIDR ranges',
+            labelText: context.l10n.text('Paste IPv4 addresses or CIDR ranges'),
             hintText: '198.51.100.1\n203.0.113.0/24',
-            helperText: _sourceLabel == null
+            helperText: context.l10n.text(_sourceLabel == null
                 ? 'IPv4 only; separate entries with spaces, commas, or new lines.'
-                : 'Imported: $_sourceLabel',
+                : 'Imported: $_sourceLabel'),
             border: const OutlineInputBorder(),
           ),
         ),
@@ -509,7 +510,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         OutlinedButton.icon(
           onPressed: _scanning ? null : _importRanges,
           icon: const Icon(Icons.upload_file),
-          label: const Text('Import IPv4 ranges'),
+          label: const LocalizedText('Import IPv4 ranges'),
         ),
       ],
     );
@@ -524,8 +525,8 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         child: TextField(
           controller: _domain,
           enabled: !_scanning,
-          decoration: const InputDecoration(
-            labelText: 'Test domain or IPv4',
+          decoration: InputDecoration(
+            labelText: context.l10n.text('Test domain or IPv4'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -537,8 +538,8 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           controller: _port,
           enabled: !_scanning,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Port',
+          decoration: InputDecoration(
+            labelText: context.l10n.text('Port'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -550,8 +551,8 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           controller: _timeout,
           enabled: !_scanning,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Timeout ms',
+          decoration: InputDecoration(
+            labelText: context.l10n.text('Timeout ms'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -563,8 +564,8 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           controller: _parallel,
           enabled: !_scanning,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Workers (1–64)',
+          decoration: InputDecoration(
+            labelText: context.l10n.text('Workers (1–64)'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -576,7 +577,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
     if (_results.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(24),
-        child: Center(child: Text('No reachable resolvers yet.')),
+        child: Center(child: LocalizedText('No reachable resolvers yet.')),
       );
     }
     return Column(
@@ -616,11 +617,11 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
                             if (mounted) _message('Copied ${r.ip}');
                           },
                           icon: const Icon(Icons.copy),
-                          tooltip: 'Copy resolver',
+                          tooltip: context.l10n.text('Copy resolver'),
                         ),
                     ],
                   ),
-                  Text(
+                  LocalizedText(
                     safe
                         ? 'Candidate resolver · UDP port $_resultPort · Tap to use'
                         : 'Not selectable · DNS capability checks incomplete or unsafe',
@@ -637,20 +638,20 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('DNS resolver discovery'),
+      title: const LocalizedText('DNS resolver discovery'),
       actions: [
         if (_scanning)
           IconButton(
             onPressed: _stop,
             icon: const Icon(Icons.stop),
-            tooltip: 'Stop',
+            tooltip: context.l10n.text('Stop'),
           ),
       ],
     ),
     body: ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        const Text(
+        const LocalizedText(
           'Choose one IPv4 discovery approach.',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
@@ -683,7 +684,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         const SizedBox(height: 12),
         _fieldRow(),
         const SizedBox(height: 8),
-        const Text(
+        const LocalizedText(
           'Domains use an A lookup; IPv4 targets use a reverse PTR lookup. '
           'An IP without a PTR record will not qualify. No ping or website test is used. '
           'Timeout applies to each DNS probe, not the whole scan.',
@@ -693,7 +694,7 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           onChanged: _scanning
               ? null
               : (v) => setState(() => _shuffle = v ?? false),
-          title: const Text('Shuffle targets'),
+          title: const LocalizedText('Shuffle targets'),
           contentPadding: EdgeInsets.zero,
         ),
         CheckboxListTile(
@@ -701,15 +702,14 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
           onChanged: _scanning || _mode == 1 || _operatorId != 'custom'
               ? null
               : (v) => setState(() => _nearby = v ?? false),
-          title: const Text('Include nearby IPv4 addresses'),
-          subtitle: Text(
+          title: const LocalizedText('Include nearby IPv4 addresses'),
+          subtitle: LocalizedText(
             _mode == 1 || _operatorId != 'custom'
                 ? 'Available only for custom ranges; built-in batches stay within their announced ranges.'
-                : 'Expand each safe resolver to its nearby /24 addresses.',
-          ),
+                : 'Expand each safe resolver to its nearby /24 addresses.'),
           contentPadding: EdgeInsets.zero,
         ),
-        const Text(
+        const LocalizedText(
           'IPv6 is not supported. Only IPv4 addresses and CIDR ranges are accepted.',
         ),
         const SizedBox(height: 8),
@@ -724,13 +724,13 @@ class _DnsScannerScreenState extends State<DnsScannerScreen> {
         FilledButton.icon(
           onPressed: _scanning ? null : _start,
           icon: const Icon(Icons.play_arrow),
-          label: Text(_scanning ? 'Scanning…' : 'Start scan'),
+          label: LocalizedText(_scanning ? 'Scanning…' : 'Start scan'),
         ),
         if (_scanning || _total > 0) ...[
           const SizedBox(height: 10),
           LinearProgressIndicator(value: _progress),
           const SizedBox(height: 4),
-          Text('Tested $_tested / $_total'),
+          LocalizedText('Tested $_tested / $_total'),
           if (_scanScope != null) Text(_scanScope!),
         ],
         const SizedBox(height: 8),

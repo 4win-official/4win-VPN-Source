@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import '../services/secret_text_cipher.dart';
 
@@ -77,7 +78,9 @@ class _SecretTextScreenState extends State<SecretTextScreen>
     } catch (e) {
       setState(() {
         _plainOut.text = '';
-        _decodeError = e is FormatException ? e.message : 'Could not decode';
+        _decodeError = e is FormatException
+            ? e.message
+            : context.l10n.text('Could not decode');
       });
     }
   }
@@ -87,7 +90,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$label copied')),
+      SnackBar(content: LocalizedText('$label copied')),
     );
   }
 
@@ -103,7 +106,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Secret Text'),
+        title: const LocalizedText('Secret Text'),
         backgroundColor: _accent,
         foregroundColor: Colors.white,
         bottom: TabBar(
@@ -142,7 +145,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
               color: _accent.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(
+            child: LocalizedText(
               'Turn Xray share links into protected 4win links. The output '
               '(4ws://…) imports into the Xray server list like any normal '
               'link and goes to "My Servers", but the real link stays hidden — '
@@ -170,7 +173,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
               TextButton.icon(
                 onPressed: () => _paste(_xrayIn).then((_) => _encryptXray()),
                 icon: const Icon(Icons.content_paste, size: 18),
-                label: const Text('Paste'),
+                label: const LocalizedText('Paste'),
               ),
               const Spacer(),
               ElevatedButton.icon(
@@ -180,7 +183,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
                   foregroundColor: Colors.white,
                 ),
                 icon: const Icon(Icons.enhanced_encryption),
-                label: const Text('Encrypt'),
+                label: const LocalizedText('Encrypt'),
               ),
             ],
           ),
@@ -202,7 +205,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
           ),
           const SizedBox(height: 8),
           Align(
-            alignment: Alignment.centerRight,
+            alignment: AlignmentDirectional.centerEnd,
             child: ElevatedButton.icon(
               onPressed: () => _copy(_xrayOut.text, 'Protected links'),
               style: ElevatedButton.styleFrom(
@@ -211,11 +214,11 @@ class _SecretTextScreenState extends State<SecretTextScreen>
                 elevation: 0,
               ),
               icon: const Icon(Icons.copy),
-              label: const Text('Copy'),
+              label: const LocalizedText('Copy'),
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          LocalizedText(
             'Import these in Xray → Servers → Add. They cannot be turned back '
             'into the original link outside the app.',
             style: TextStyle(
@@ -266,7 +269,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
               TextButton.icon(
                 onPressed: () => _paste(_plainIn).then((_) => _encrypt()),
                 icon: const Icon(Icons.content_paste, size: 18),
-                label: const Text('Paste'),
+                label: const LocalizedText('Paste'),
               ),
               const Spacer(),
               ElevatedButton.icon(
@@ -276,7 +279,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
                   foregroundColor: Colors.white,
                 ),
                 icon: const Icon(Icons.enhanced_encryption),
-                label: const Text('Encrypt'),
+                label: const LocalizedText('Encrypt'),
               ),
             ],
           ),
@@ -294,7 +297,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
           ),
           const SizedBox(height: 8),
           Align(
-            alignment: Alignment.centerRight,
+            alignment: AlignmentDirectional.centerEnd,
             child: ElevatedButton.icon(
               onPressed: () => _copy(_secretOut.text, 'Secret'),
               style: ElevatedButton.styleFrom(
@@ -303,11 +306,11 @@ class _SecretTextScreenState extends State<SecretTextScreen>
                 elevation: 0,
               ),
               icon: const Icon(Icons.copy),
-              label: const Text('Copy secret'),
+              label: const LocalizedText('Copy secret'),
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          LocalizedText(
             'Only 4win VPN can decode this. Anyone without the app just sees gibberish.',
             style: TextStyle(
                 fontSize: 12,
@@ -341,7 +344,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
               TextButton.icon(
                 onPressed: () => _paste(_secretIn).then((_) => _decrypt()),
                 icon: const Icon(Icons.content_paste, size: 18),
-                label: const Text('Paste'),
+                label: const LocalizedText('Paste'),
               ),
               const Spacer(),
               ElevatedButton.icon(
@@ -351,7 +354,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
                   foregroundColor: Colors.white,
                 ),
                 icon: const Icon(Icons.no_encryption_outlined),
-                label: const Text('Decrypt'),
+                label: const LocalizedText('Decrypt'),
               ),
             ],
           ),
@@ -369,7 +372,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
           ),
           const SizedBox(height: 8),
           Align(
-            alignment: Alignment.centerRight,
+            alignment: AlignmentDirectional.centerEnd,
             child: ElevatedButton.icon(
               onPressed: () => _copy(_plainOut.text, 'Text'),
               style: ElevatedButton.styleFrom(
@@ -378,7 +381,7 @@ class _SecretTextScreenState extends State<SecretTextScreen>
                 elevation: 0,
               ),
               icon: const Icon(Icons.copy),
-              label: const Text('Copy text'),
+              label: const LocalizedText('Copy text'),
             ),
           ),
         ],

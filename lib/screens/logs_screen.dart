@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import '../services/connection_logger.dart';
 
@@ -61,24 +62,24 @@ class _LogsScreenState extends State<LogsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Connection Logs'),
+        title: const LocalizedText('Connection Logs'),
         actions: [
           IconButton(
             icon: Icon(
               _autoScroll ? Icons.arrow_downward : Icons.pause,
               color: _autoScroll ? Colors.green : null,
             ),
-            tooltip: _autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF',
+            tooltip: context.l10n.text(_autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'),
             onPressed: () => setState(() => _autoScroll = !_autoScroll),
           ),
           IconButton(
             icon: const Icon(Icons.copy_outlined),
-            tooltip: 'Copy all',
+            tooltip: context.l10n.text('Copy all'),
             onPressed: entries.isEmpty ? null : () => _copyAll(context, entries),
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
-            tooltip: 'Clear logs',
+            tooltip: context.l10n.text('Clear logs'),
             onPressed: entries.isEmpty
                 ? null
                 : () async {
@@ -120,7 +121,7 @@ class _LogsScreenState extends State<LogsScreen> {
                             color: theme.disabledColor,
                           ),
                           const SizedBox(height: 16),
-                          Text(
+                          LocalizedText(
                             'No logs yet',
                             style: TextStyle(
                               fontSize: 16,
@@ -129,7 +130,7 @@ class _LogsScreenState extends State<LogsScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Text(
+                          LocalizedText(
                             'Connect to VPN to see logs',
                             style: TextStyle(
                               fontSize: 13,
@@ -189,7 +190,7 @@ class _LogsScreenState extends State<LogsScreen> {
             // Footer hint.
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Text(
+              child: LocalizedText(
                 '${entries.length} lines • log tail survives restarts',
                 style: TextStyle(fontSize: 11, color: theme.disabledColor),
               ),
@@ -251,7 +252,7 @@ class _LogsScreenState extends State<LogsScreen> {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Copied ${entries.length} log lines to clipboard')),
+            content: LocalizedText('Copied ${entries.length} log lines to clipboard')),
       );
     }
   }

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'l10n/app_localizations.dart';
+import 'providers/app_locale_provider.dart';
 import 'providers/vpn_provider.dart';
 import 'providers/theme_provider.dart';
+import 'screens/language_selection_screen.dart';
 import 'screens/loading_screen.dart';
 import 'screens/openvpn_configs_screen.dart';
 import 'services/ovpn_import_service.dart';
@@ -76,15 +80,24 @@ class _MyAppState extends State<MyApp> {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => AppLocaleProvider()),
         ChangeNotifierProvider<VpnProvider>(
           create: (_) => VpnProvider(),
         ),
       ],
-      child: Consumer<ThemeProvider>(
-        builder: (context, themeProvider, _) {
+      child: Consumer2<ThemeProvider, AppLocaleProvider>(
+        builder: (context, themeProvider, appLocale, _) {
           return MaterialApp(
             navigatorKey: navigatorKey,
-            title: '4win VPN',
+            title: context.l10n.text('4win VPN'),
+            locale: appLocale.locale,
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: [
+              AppLocalizationsDelegate(),
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
             debugShowCheckedModeBanner: false,
             theme: themeProvider.lightTheme,
             darkTheme: themeProvider.darkTheme,
@@ -97,7 +110,7 @@ class _MyAppState extends State<MyApp> {
               }
               return navigator;
             },
-            home: const LoadingScreen(),
+            home: const LanguageGate(child: LoadingScreen()),
           );
         },
       ),

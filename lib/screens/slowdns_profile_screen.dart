@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 
 import '../models/slowdns_config.dart';
 import 'dns_scanner_screen.dart';
@@ -110,7 +111,7 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
     }
     if (_transport != 'doh' && endpoint == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid DNS resolver and port.')),
+        const SnackBar(content: LocalizedText('Enter a valid DNS resolver and port.')),
       );
       return;
     }
@@ -127,7 +128,7 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
       if (!saved) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
+            content: LocalizedText(
               'Could not save profile. Check for a duplicate name and try again.',
             ),
           ),
@@ -171,11 +172,11 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Add Slow DNS Profile'),
+      title: const LocalizedText('Add Slow DNS Profile'),
       actions: [
         IconButton(
           onPressed: _saving ? null : _save,
-          tooltip: 'Save profile',
+          tooltip: context.l10n.text('Save profile'),
           icon: const Icon(Icons.check),
         ),
       ],
@@ -185,33 +186,33 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          const Text('DNSTT', style: TextStyle(fontWeight: FontWeight.bold)),
+          const LocalizedText('DNSTT', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
           _field(
             controller: _name,
-            label: 'Profile Name',
+            label: context.l10n.text('Profile Name'),
             validator: (v) => v == null || v.trim().isEmpty
                 ? 'Profile name is required.'
                 : null,
           ),
           _field(
             controller: _domain,
-            label: 'Domain',
+            label: context.l10n.text('Domain'),
             helper: 'DNSTT tunnel domain',
-            hint: 'tunnel.example.com',
+            hint: context.l10n.text('tunnel.example.com'),
             validator: (v) => SlowDnsConfig.isValidDnsName(v ?? '')
                 ? null
                 : 'Enter a valid tunnel DNS name.',
           ),
           _field(
             controller: _key,
-            label: 'Public Key',
+            label: context.l10n.text('Public Key'),
             helper: "Server's Noise protocol public key in hex format",
             validator: (v) => SlowDnsConfig.isValidPublicKey(v)
                 ? null
                 : 'Enter exactly 64 hexadecimal characters.',
           ),
-          Text('DNS Transport', style: Theme.of(context).textTheme.titleMedium),
+          LocalizedText('DNS Transport', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -248,15 +249,15 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
           ),
           const Padding(
             padding: EdgeInsets.only(top: 8, bottom: 20),
-            child: Text(
+            child: LocalizedText(
               'TCP resolver transport is not supported by the current DNSTT engine.',
             ),
           ),
           if (_transport == 'doh')
             _field(
               controller: _doh,
-              label: 'DNS Resolver (DoH URL)',
-              hint: 'https://dns.example/dns-query',
+              label: context.l10n.text('DNS Resolver (DoH URL)'),
+              hint: context.l10n.text('https://dns.example/dns-query'),
               helper: 'HTTPS only. No fallback to plaintext DNS.',
               validator: (v) => SlowDnsConfig.isValidDohUrl(v)
                   ? null
@@ -265,13 +266,13 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
           else
             _field(
               controller: _resolver,
-              label: 'DNS Resolver',
-              hint: _transport == 'dot' ? 'dns.example:853' : '1.1.1.1:53',
+              label: context.l10n.text('DNS Resolver'),
+              hint: context.l10n.text(_transport == 'dot' ? 'dns.example:853' : '1.1.1.1:53'),
               helper: 'IPv4 or domain (host:port). IPv6 is not supported.',
               suffix: IconButton(
-                tooltip: _transport == 'udp'
+                tooltip: context.l10n.text(_transport == 'udp'
                     ? 'Scan for Working Resolvers'
-                    : 'Scanner tests UDP only',
+                    : 'Scanner tests UDP only'),
                 onPressed: _transport == 'udp' ? _scan : null,
                 icon: const Icon(Icons.radar),
               ),
@@ -287,33 +288,32 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
           FilledButton.icon(
             onPressed: _transport == 'udp' ? _scan : null,
             icon: const Icon(Icons.search),
-            label: const Text('Scan for Working Resolvers'),
+            label: const LocalizedText('Scan for Working Resolvers'),
           ),
           if (_transport != 'udp')
             const Padding(
               padding: EdgeInsets.only(top: 8),
-              child: Text(
+              child: LocalizedText(
                 'The scanner checks UDP resolvers; it does not verify DoT or DoH endpoints.',
               ),
             ),
           const SizedBox(height: 20),
           const SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: Text('Authoritative Mode'),
-            subtitle: Text('Not supported by the current DNSTT engine.'),
+            title: LocalizedText('Authoritative Mode'),
+            subtitle: LocalizedText('Not supported by the current DNSTT engine.'),
             value: false,
             onChanged: null,
           ),
           const ListTile(
             contentPadding: EdgeInsets.zero,
-            title: Text('DNS Query Size'),
-            subtitle: Text(
-              'Managed by the engine. Custom query sizes are not supported.',
-            ),
+            title: LocalizedText('DNS Query Size'),
+            subtitle: LocalizedText(
+              'Managed by the engine. Custom query sizes are not supported.'),
             leading: Icon(Icons.info_outline),
           ),
           const SizedBox(height: 16),
-          Text(
+          LocalizedText(
             'Connection Method',
             style: Theme.of(context).textTheme.titleMedium,
           ),
@@ -321,28 +321,28 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
           const Wrap(
             spacing: 8,
             children: [
-              ChoiceChip(label: Text('SOCKS'), selected: true),
-              ChoiceChip(label: Text('SSH'), selected: false),
+              ChoiceChip(label: LocalizedText('SOCKS'), selected: true),
+              ChoiceChip(label: LocalizedText('SSH'), selected: false),
             ],
           ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text(
+            child: LocalizedText(
               'The DNSTT server must forward to a remote SOCKS5 endpoint. SSH chaining is not supported; these credentials are for SOCKS5, not SSH.',
             ),
           ),
           _field(
             controller: _username,
-            label: 'SOCKS5 Username (optional)',
+            label: context.l10n.text('SOCKS5 Username (optional)'),
             validator: (v) => _credentialError(v, _password.text),
           ),
           _field(
             controller: _password,
-            label: 'SOCKS5 Password (optional)',
+            label: context.l10n.text('SOCKS5 Password (optional)'),
             obscure: !_showPassword,
             validator: (v) => _credentialError(v, _username.text),
             suffix: IconButton(
-              tooltip: _showPassword ? 'Hide password' : 'Show password',
+              tooltip: context.l10n.text(_showPassword ? 'Hide password' : 'Show password'),
               icon: Icon(
                 _showPassword ? Icons.visibility_off : Icons.visibility,
               ),
@@ -350,12 +350,12 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
             ),
           ),
           ExpansionTile(
-            title: const Text('Advanced'),
+            title: const LocalizedText('Advanced'),
             children: [
               if (_transport != 'doh')
                 _field(
                   controller: _fallback,
-                  label: 'Failover Resolvers (optional)',
+                  label: context.l10n.text('Failover Resolvers (optional)'),
                   maxLines: 3,
                   helper:
                       'Up to 31 additional bare IPs or hostnames, separated by spaces or commas. Uses the primary resolver port. Tried in order.',
@@ -373,10 +373,9 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
                   },
                 ),
               const ListTile(
-                title: Text('Local Proxy'),
-                subtitle: Text(
-                  'The app manages the local listen address and port. Arbitrary application UDP is blocked; TCP and tunneled DNS are supported.',
-                ),
+                title: LocalizedText('Local Proxy'),
+                subtitle: LocalizedText(
+                  'The app manages the local listen address and port. Arbitrary application UDP is blocked; TCP and tunneled DNS are supported.'),
               ),
             ],
           ),
@@ -384,7 +383,7 @@ class _SlowDnsProfileScreenState extends State<SlowDnsProfileScreen> {
           FilledButton.icon(
             onPressed: _saving ? null : _save,
             icon: const Icon(Icons.check),
-            label: const Text('Save Profile'),
+            label: const LocalizedText('Save Profile'),
           ),
           const SizedBox(height: 24),
         ],

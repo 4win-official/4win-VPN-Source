@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
@@ -28,7 +29,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
   void _toast(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+      SnackBar(content: LocalizedText(message), duration: const Duration(seconds: 2)),
     );
   }
 
@@ -49,7 +50,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.link),
-              title: const Text('Copy proxy links'),
+              title: const LocalizedText('Copy proxy links'),
               onTap: () async {
                 await Clipboard.setData(ClipboardData(text: plain));
                 if (ctx.mounted) Navigator.pop(ctx);
@@ -58,7 +59,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.data_object),
-              title: const Text('Copy as subscription (base64)'),
+              title: const LocalizedText('Copy as subscription (base64)'),
               onTap: () async {
                 await Clipboard.setData(ClipboardData(text: encoded));
                 if (ctx.mounted) Navigator.pop(ctx);
@@ -85,7 +86,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
       final p = int.tryParse(port.text.trim());
       if (h.isEmpty || p == null || p < 1 || p > 65535) {
         ScaffoldMessenger.of(dialogContext).showSnackBar(
-          const SnackBar(content: Text('Enter a valid host and port')),
+          const SnackBar(content: LocalizedText('Enter a valid host and port')),
         );
         return;
       }
@@ -105,7 +106,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
         _toast(added > 0 ? 'Proxy added successfully' : 'Proxy already exists');
       } catch (e) {
         ScaffoldMessenger.of(dialogContext).showSnackBar(
-          SnackBar(content: Text('Invalid proxy: $e')),
+          SnackBar(content: LocalizedText('Invalid proxy: $e')),
         );
       }
     }
@@ -113,7 +114,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Proxy'),
+        title: const LocalizedText('Add Proxy'),
         content: ValueListenableBuilder<String>(
           valueListenable: scheme,
           builder: (ctx, selectedScheme, _) {
@@ -126,14 +127,14 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                 children: [
                   DropdownButtonFormField<String>(
                     value: selectedScheme,
-                    decoration: const InputDecoration(
-                      labelText: 'Protocol',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.text('Protocol'),
                       border: OutlineInputBorder(),
                     ),
                     items: const [
-                      DropdownMenuItem(value: 'socks5', child: Text('SOCKS5')),
-                      DropdownMenuItem(value: 'socks4', child: Text('SOCKS4')),
-                      DropdownMenuItem(value: 'http', child: Text('HTTP')),
+                      DropdownMenuItem(value: 'socks5', child: LocalizedText('SOCKS5')),
+                      DropdownMenuItem(value: 'socks4', child: LocalizedText('SOCKS4')),
+                      DropdownMenuItem(value: 'http', child: LocalizedText('HTTP')),
                     ],
                     onChanged: (v) {
                       if (v != null) scheme.value = v;
@@ -144,9 +145,9 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: host,
-                    decoration: const InputDecoration(
-                      labelText: 'Host / IP',
-                      hintText: 'proxy.example.com',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.text('Host / IP'),
+                      hintText: context.l10n.text('proxy.example.com'),
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -154,16 +155,16 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                   TextField(
                     controller: port,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Port',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.text('Port'),
                       border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: user,
-                    decoration: const InputDecoration(
-                      labelText: 'Username (optional)',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.text('Username (optional)'),
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -171,23 +172,23 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                   TextField(
                     controller: pass,
                     obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password (optional)',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.text('Password (optional)'),
                       border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: remark,
-                    decoration: const InputDecoration(
-                      labelText: 'Name / Remark (optional)',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.text('Name / Remark (optional)'),
                       border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 14),
                   OutlinedButton.icon(
                     icon: const Icon(Icons.playlist_add),
-                    label: const Text('Bulk import / Import group'),
+                    label: const LocalizedText('Bulk import / Import group'),
                     onPressed: () async {
                       Navigator.pop(ctx);
                       await _showBulkImportDialog();
@@ -199,8 +200,8 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
           },
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(onPressed: () => addSingle(ctx), child: const Text('Add Proxy')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const LocalizedText('Cancel')),
+          FilledButton(onPressed: () => addSingle(ctx), child: const LocalizedText('Add Proxy')),
         ],
       ),
     );
@@ -218,15 +219,15 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Bulk Import Proxies'),
+        title: const LocalizedText('Bulk Import Proxies'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: group,
-                decoration: const InputDecoration(
-                  labelText: 'Group name',
+                decoration: InputDecoration(
+                  labelText: context.l10n.text('Group name'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -235,10 +236,10 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                 controller: links,
                 minLines: 6,
                 maxLines: 12,
-                decoration: const InputDecoration(
-                  labelText: 'Proxy links',
-                  hintText: 'socks5://user:pass@host:1080\nsocks4://host:1080\nhttp://host:8080',
-                  helperText: 'One proxy per line. host:port is also accepted.',
+                decoration: InputDecoration(
+                  labelText: context.l10n.text('Proxy links'),
+                  hintText: context.l10n.text('socks5://user:pass@host:1080\nsocks4://host:1080\nhttp://host:8080'),
+                  helperText: context.l10n.text('One proxy per line. host:port is also accepted.'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -246,7 +247,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const LocalizedText('Cancel')),
           FilledButton(
             onPressed: () async {
               final raw = links.text.trim();
@@ -273,7 +274,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
               if (mounted) await context.read<VpnProvider>().loadProxyServers();
               _toast(added > 0 ? '$added proxy(s) imported into "$groupName"' : 'No valid new proxies found');
             },
-            child: const Text('Import Group'),
+            child: const LocalizedText('Import Group'),
           ),
         ],
       ),
@@ -300,21 +301,21 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
     final accent = Colors.tealAccent.shade700;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Proxy Servers'),
+        title: const LocalizedText('Proxy Servers'),
         actions: [
           Consumer<VpnProvider>(
             builder: (context, p, _) => IconButton(
               icon: p.proxyRefreshing
                   ? const SizedBox(width: 18, height: 18, child: FourWinLoader(strokeWidth: 2))
                   : const Icon(Icons.cloud_download_outlined),
-              tooltip: 'Update subscriptions',
+              tooltip: context.l10n.text('Update subscriptions'),
               onPressed: p.proxyRefreshing ? null : _refreshAll,
             ),
           ),
           Consumer<VpnProvider>(
             builder: (context, p, _) => IconButton(
               icon: Icon(p.proxyGroupTesting ? Icons.close : Icons.speed),
-              tooltip: p.proxyGroupTesting ? 'Stop all tests' : 'Test all',
+              tooltip: context.l10n.text(p.proxyGroupTesting ? 'Stop all tests' : 'Test all'),
               onPressed: p.proxyGroupTesting
                   ? p.cancelProxyTests
                   : () {
@@ -323,7 +324,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                     },
             ),
           ),
-          IconButton(icon: const Icon(Icons.add), tooltip: 'Add proxy', onPressed: _showAddDialog),
+          IconButton(icon: const Icon(Icons.add), tooltip: context.l10n.text('Add proxy'), onPressed: _showAddDialog),
         ],
       ),
       body: Consumer<VpnProvider>(
@@ -338,11 +339,11 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                   children: [
                     Icon(Icons.swap_horiz, size: 64, color: accent.withValues(alpha: .6)),
                     const SizedBox(height: 16),
-                    const Text('No proxy servers yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const LocalizedText('No proxy servers yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
-                    const Text('Use Add Proxy to enter a proxy as a form, or import many proxies as a group.', textAlign: TextAlign.center),
+                    const LocalizedText('Use Add Proxy to enter a proxy as a form, or import many proxies as a group.', textAlign: TextAlign.center),
                     const SizedBox(height: 18),
-                    FilledButton.icon(onPressed: _showAddDialog, icon: const Icon(Icons.add), label: const Text('Add Proxy')),
+                    FilledButton.icon(onPressed: _showAddDialog, icon: const Icon(Icons.add), label: const LocalizedText('Add Proxy')),
                   ],
                 ),
               ),
@@ -372,21 +373,21 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
                   ListTile(
                     leading: Icon(locked ? Icons.cloud_outlined : Icons.folder, color: accent),
                     title: Text('$title (${servers.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: locked ? Text(selectedGroup ? 'Selected — connects to the fastest proxy' : 'Tap to select • auto-picks fastest') : null,
+                    subtitle: locked ? LocalizedText(selectedGroup ? 'Selected — connects to the fastest proxy' : 'Tap to select • auto-picks fastest') : null,
                     onTap: locked ? () => provider.selectProxyGroup(key) : () => setState(() => expanded ? _expandedGroups.remove(key) : _expandedGroups.add(key)),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (selectedGroup) Icon(Icons.check_circle, color: accent),
                         if (locked && key != ProxyServerService.userLinksGroup)
-                          IconButton(icon: const Icon(Icons.refresh), tooltip: 'Update group', onPressed: () => _refreshOneGroup(provider, key, title)),
-                        IconButton(icon: Icon(Icons.copy_all, color: accent), tooltip: 'Export group', onPressed: () => _exportServers(servers, title)),
+                          IconButton(icon: const Icon(Icons.refresh), tooltip: context.l10n.text('Update group'), onPressed: () => _refreshOneGroup(provider, key, title)),
+                        IconButton(icon: Icon(Icons.copy_all, color: accent), tooltip: context.l10n.text('Export group'), onPressed: () => _exportServers(servers, title)),
                         IconButton(
                           icon: Icon(
                             provider.proxyGroupTestingFor(key) ? Icons.close : Icons.speed,
                             color: provider.proxyGroupTestingFor(key) ? Colors.redAccent : accent,
                           ),
-                          tooltip: provider.proxyGroupTestingFor(key) ? 'Stop group test' : 'Test group',
+                          tooltip: context.l10n.text(provider.proxyGroupTestingFor(key) ? 'Stop group test' : 'Test group'),
                           onPressed: provider.proxyGroupTestingFor(key)
                               ? () => provider.cancelProxyTests(group: key)
                               : provider.proxyGroupTesting
@@ -413,7 +414,7 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
         onPressed: _showAddDialog,
         backgroundColor: accent,
         icon: const Icon(Icons.add),
-        label: const Text('Add Proxy'),
+        label: const LocalizedText('Add Proxy'),
       ),
     );
   }
@@ -430,28 +431,28 @@ class _ProxyServersScreenState extends State<ProxyServersScreen> {
         children: [
           Expanded(child: Text('${s.protocol.toUpperCase()} • ${s.fullAddress}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12))),
           const SizedBox(width: 6),
-          Text(ping == null ? '—' : '$ping ms', style: TextStyle(color: pingColor, fontSize: 11, fontWeight: FontWeight.bold)),
+          LocalizedText(ping == null ? '—' : '$ping ms', style: TextStyle(color: pingColor, fontSize: 11, fontWeight: FontWeight.bold)),
         ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(icon: Icon(Icons.copy, color: accent, size: 18), tooltip: 'Copy link', onPressed: () async { await Clipboard.setData(ClipboardData(text: s.exportLink)); _toast('Link copied'); }),
+          IconButton(icon: Icon(Icons.copy, color: accent, size: 18), tooltip: context.l10n.text('Copy link'), onPressed: () async { await Clipboard.setData(ClipboardData(text: s.exportLink)); _toast('Link copied'); }),
           if (testing)
             IconButton(
               icon: const Icon(Icons.close, color: Colors.redAccent, size: 20),
-              tooltip: 'Stop test',
+              tooltip: context.l10n.text('Stop test'),
               onPressed: () => provider.cancelProxyServerTest(s.id),
             )
           else ...[
             IconButton(
               icon: Icon(Icons.network_ping, color: accent, size: 20),
-              tooltip: 'Ping test',
+              tooltip: context.l10n.text('Ping test'),
               onPressed: () => provider.pingProxyServer(s),
             ),
             IconButton(
               icon: Icon(Icons.public, color: accent, size: 20),
-              tooltip: 'Open-site test',
+              tooltip: context.l10n.text('Open-site test'),
               onPressed: () => provider.openSiteTestProxyServer(s),
             ),
           ],

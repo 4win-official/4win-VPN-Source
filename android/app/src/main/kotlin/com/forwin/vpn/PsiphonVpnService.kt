@@ -990,11 +990,11 @@ class PsiphonVpnService : VpnService() {
         val reconnectPending = PendingIntent.getService(this, requestCode xor 0x40000000, reconnect, piFlags)
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🔐 Psiphon VPN")
-            .setContentText(status)
+            .setContentText(VpnNotificationLabels.localized(this, status))
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pending)
-            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPending)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPending)
+            .addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(this, "Reconnect"), reconnectPending)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(this, "Disconnect"), disconnectPending)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(foreground)
         notificationBuilder = notification
@@ -1006,8 +1006,8 @@ class PsiphonVpnService : VpnService() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Psiphon VPN Service", NotificationManager.IMPORTANCE_LOW)
-            channel.description = "Psiphon VPN tunnel status"
+            val channel = NotificationChannel(CHANNEL_ID, VpnNotificationLabels.localized(this, "Psiphon VPN Service"), NotificationManager.IMPORTANCE_LOW)
+            channel.description = VpnNotificationLabels.localized(this, "Psiphon VPN tunnel status")
             channel.setShowBadge(false)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }

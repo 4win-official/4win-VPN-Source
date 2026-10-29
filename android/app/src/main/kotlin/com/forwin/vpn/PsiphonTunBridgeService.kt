@@ -162,9 +162,9 @@ class PsiphonTunBridgeService : Service() {
                         NotificationCompat.Builder(this, CHANNEL_ID)
                             .setSmallIcon(android.R.drawable.ic_lock_lock)
                             .setContentTitle("4win VPN")
-                            .setContentText("Psiphon traffic bridge active")
-                            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPending)
-                            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPending)
+                            .setContentText(VpnNotificationLabels.localized(this, "Psiphon traffic bridge active"))
+                            .addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(this, "Reconnect"), reconnectPending)
+                            .addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(this, "Disconnect"), disconnectPending)
                             .setPriority(NotificationCompat.PRIORITY_LOW)
                             .setOngoing(true)
                             .build()
@@ -291,7 +291,7 @@ class PsiphonTunBridgeService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Psiphon VPN bridge",
+                VpnNotificationLabels.localized(this, "Psiphon VPN bridge"),
                 NotificationManager.IMPORTANCE_LOW
             )
             channel.setShowBadge(false)

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/four_win_loader.dart';
@@ -152,7 +153,7 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
     }).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Split Tunneling')),
+      appBar: AppBar(title: const LocalizedText('Split Tunneling')),
       body: _loading
           ? Center(
               child: Padding(
@@ -162,16 +163,16 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
                   children: [
                     const FourWinLoader(
                       size: 52,
-                      semanticsLabel: 'Loading installed apps',
+                      semanticsLabel: context.l10n.text('Loading installed apps'),
                     ),
                     const SizedBox(height: 20),
-                    Text(
+                    LocalizedText(
                       'Loading installed apps…',
                       style: Theme.of(context).textTheme.titleMedium,
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 6),
-                    Text(
+                    LocalizedText(
                       'Please wait while the app list is prepared.',
                       style: TextStyle(
                         color: isDark ? Colors.white60 : Colors.black54,
@@ -189,7 +190,7 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      LocalizedText(
                         'Choose how per-app tunneling works:',
                         style: TextStyle(
                             fontSize: 13,
@@ -199,9 +200,13 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
                       SegmentedButton<String>(
                         segments: const [
                           ButtonSegment(
-                              value: 'include', label: Text('Only selected')),
+                            value: 'include',
+                            label: LocalizedText('Only selected'),
+                          ),
                           ButtonSegment(
-                              value: 'exclude', label: Text('Bypass selected')),
+                            value: 'exclude',
+                            label: LocalizedText('Bypass selected'),
+                          ),
                         ],
                         selected: {_mode},
                         onSelectionChanged: (s) async {
@@ -210,7 +215,7 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
                         },
                       ),
                       const SizedBox(height: 8),
-                      Text(
+                      LocalizedText(
                         _mode == 'include'
                             ? 'Only the checked apps will use the VPN.'
                             : 'The checked apps will bypass the VPN.',
@@ -222,7 +227,7 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
                       TextField(
                         decoration: const InputDecoration(
                           prefixIcon: Icon(Icons.search),
-                          hintText: 'Search apps',
+                          hintText: context.l10n.text('Search apps'),
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
@@ -235,11 +240,12 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
                 Expanded(
                   child: _apps.isEmpty
                       ? Center(
-                          child: Text('No apps found',
-                              style: TextStyle(
-                                  color: isDark
-                                      ? Colors.white54
-                                      : Colors.black45)),
+                          child: LocalizedText(
+                            'No apps found',
+                            style: TextStyle(
+                              color: isDark ? Colors.white54 : Colors.black45,
+                            ),
+                          ),
                         )
                       : ListView.builder(
                           itemCount: filtered.length,

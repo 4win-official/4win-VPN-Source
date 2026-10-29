@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import '../services/update_service.dart';
 
 /// دیالوگ نمایش آپدیت جدید - به کاربر می‌گوید نسخه جدید موجود است
@@ -110,7 +111,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           Icon(Icons.system_update, color: accent),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
+            child: LocalizedText(
               'New update available',
               style: TextStyle(
                 color: textColor,
@@ -125,12 +126,12 @@ class _UpdateDialogState extends State<UpdateDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          LocalizedText(
             'Your current version: ${widget.currentVersion}',
             style: TextStyle(color: subTextColor, fontSize: 14),
           ),
           const SizedBox(height: 4),
-          Text(
+          LocalizedText(
             'New version: ${widget.updateInfo.latestVersion}',
             style: TextStyle(
               color: accent,
@@ -140,7 +141,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           ),
           const SizedBox(height: 12),
           if (widget.updateInfo.releaseNotes != null) ...[
-            Text(
+            LocalizedText(
               'Changes:',
               style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
             ),
@@ -164,7 +165,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
               valueColor: AlwaysStoppedAnimation<Color>(accent),
             ),
             const SizedBox(height: 8),
-            Text(
+            LocalizedText(
               _progress > 0
                   ? 'Downloading... ${(_progress * 100).toStringAsFixed(0)}%'
                   : 'Downloading...',
@@ -185,7 +186,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           : [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: Text(
+                child: LocalizedText(
                   'Later',
                   style: TextStyle(color: subTextColor),
                 ),
@@ -200,7 +201,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   ),
                 ),
                 icon: const Icon(Icons.download, size: 18),
-                label: const Text(
+                label: const LocalizedText(
                   'Download',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),

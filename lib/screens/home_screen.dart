@@ -3,6 +3,7 @@ import '../widgets/protocol_chain_diagnostics.dart';
 import 'mix_strategies_screen.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -110,11 +111,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => AlertDialog(
-          title: const Text('Enter Credentials'),
+          title: const LocalizedText('Enter Credentials'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
+              LocalizedText(
                 'This config requires a username and password.',
                 style: TextStyle(fontSize: 13, color: Theme.of(ctx).hintColor),
               ),
@@ -122,8 +123,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               TextField(
                 controller: userCtrl,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Username',
+                decoration: InputDecoration(
+                  labelText: context.l10n.text('Username'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -132,7 +133,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 controller: passCtrl,
                 obscureText: obscure,
                 decoration: InputDecoration(
-                  labelText: 'Password',
+                  labelText: context.l10n.text('Password'),
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
                     icon: Icon(
@@ -147,7 +148,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Cancel'),
+              child: const LocalizedText('Cancel'),
             ),
             ElevatedButton(
               onPressed: () {
@@ -156,14 +157,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (u.isEmpty || p.isEmpty) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
                     const SnackBar(
-                      content: Text('Username and password are required'),
+                      content: LocalizedText('Username and password are required'),
                     ),
                   );
                   return;
                 }
                 Navigator.pop(ctx, (username: u, password: p));
               },
-              child: const Text('Connect'),
+              child: const LocalizedText('Connect'),
             ),
           ],
         ),
@@ -201,18 +202,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Update notifications'),
-        content: const Text(
+        title: const LocalizedText('Update notifications'),
+        content: const LocalizedText(
           'Would you like to receive a notification when a new version is available?',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Not now'),
+            child: const LocalizedText('Not now'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Yes, notify me'),
+            child: const LocalizedText('Yes, notify me'),
           ),
         ],
       ),
@@ -397,7 +398,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         leading: IconButton(
           padding: EdgeInsets.zero,
           icon: Icon(Icons.help_outline, color: iconColor),
-          tooltip: 'Quick Guide',
+          tooltip: context.l10n.text('Quick Guide'),
           onPressed: () {
             Navigator.push(
               context,
@@ -406,7 +407,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           },
         ),
         titleSpacing: 0,
-        title: Text(
+        title: LocalizedText(
           '4win VPN',
           style: TextStyle(
             color: textColor,
@@ -418,7 +419,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // Secret Text tool — encode/decode text so only 4win VPN can read it.
           IconButton(
             icon: Icon(Icons.enhanced_encryption_outlined, color: iconColor),
-            tooltip: 'Secret Text',
+            tooltip: context.l10n.text('Secret Text'),
             onPressed: () {
               Navigator.push(
                 context,
@@ -432,7 +433,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // Theme Selection Button
           IconButton(
             icon: Icon(Icons.palette_outlined, color: iconColor),
-            tooltip: 'VPN Themes',
+            tooltip: context.l10n.text('VPN Themes'),
             onPressed: () {
               Navigator.push(
                 context,
@@ -448,7 +449,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           // Donate button: liquid-glass heart with an occasional Support Us callout.
           RainbowHeartButton(
-            tooltip: 'Support Us',
+            tooltip: context.l10n.text('Support Us'),
             onPressed: () {
               Navigator.push(
                 context,
@@ -618,7 +619,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     children: [
                                       const FourWinLoader(),
                                       const SizedBox(height: 24),
-                                      Text(
+                                      LocalizedText(
                                         'Loading servers...',
                                         style: TextStyle(
                                           fontSize: 16,
@@ -670,11 +671,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           // A fixed-size capsule keeps protocol changes
                                           // from shifting the surrounding controls.
                                           Tooltip(
-                                            message: 'Select protocol',
+                                            message: context.l10n.text('Select protocol'),
                                             child: Semantics(
                                               button: true,
                                               label:
-                                                  'Select protocol, current: ${_protocolName(provider.selectedProtocol)}',
+                                                  context.l10n.text('Select protocol, current: ${_protocolName(provider.selectedProtocol)}'),
                                               child: Material(
                                                 color: Colors.transparent,
                                                 child: InkWell(
@@ -780,7 +781,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             height: 24,
                                             child: FittedBox(
                                               fit: BoxFit.scaleDown,
-                                              child: Text(
+                                              child: LocalizedText(
                                                 _getStatusText(provider.status),
                                                 style: TextStyle(
                                                   fontSize: isMascotTheme
@@ -1239,7 +1240,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                       const EdgeInsets.symmetric(
                                                         horizontal: 32,
                                                       ),
-                                                  child: Text(
+                                                  child: LocalizedText(
                                                     provider.dataUsage,
                                                     style: TextStyle(
                                                       fontSize: 14,
@@ -1369,7 +1370,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     return Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Text(
+                                        LocalizedText(
                                           provider.selectedMixStrategy?.name ??
                                               'No strategy selected',
                                           maxLines: 1,
@@ -1391,7 +1392,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             icon: const Icon(
                                               Icons.account_tree,
                                             ),
-                                            label: const Text('Strategy'),
+                                            label: const LocalizedText('Strategy'),
                                             onPressed: () => Navigator.push(
                                               context,
                                               MaterialPageRoute(
@@ -1431,7 +1432,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               ? Colors.white70
                                               : Colors.black87,
                                         ),
-                                        label: Text(
+                                        label: LocalizedText(
                                           'Server List',
                                           style: TextStyle(
                                             fontSize: 16,
@@ -1495,7 +1496,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               ),
                                             ),
                                             icon: const Icon(Icons.vpn_key),
-                                            label: const Text(
+                                            label: const LocalizedText(
                                               'Server List',
                                               style: TextStyle(fontSize: 16),
                                             ),
@@ -1538,7 +1539,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               ? Colors.white70
                                               : Colors.black87,
                                         ),
-                                        label: Text(
+                                        label: LocalizedText(
                                           'OpenVPN Configs',
                                           style: TextStyle(
                                             fontSize: 16,
@@ -1585,7 +1586,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               );
                                             },
                                             icon: const Icon(Icons.radar),
-                                            label: const Text(
+                                            label: const LocalizedText(
                                               'Resolver Scanner',
                                               style: TextStyle(fontSize: 16),
                                             ),
@@ -1616,7 +1617,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               );
                                             },
                                             icon: const Icon(Icons.settings),
-                                            label: const Text('Slow DNS Configs'),
+                                            label: const LocalizedText('Slow DNS Configs'),
                                           ),
                                         ),
                                       ],
@@ -1638,7 +1639,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         );
                                       },
                                       icon: const Icon(Icons.swap_horiz),
-                                      label: const Text(
+                                      label: const LocalizedText(
                                         'Proxy Servers',
                                         style: TextStyle(fontSize: 16),
                                       ),
@@ -1673,7 +1674,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                 context,
                                               ).showSnackBar(
                                                 SnackBar(
-                                                  content: Text(
+                                                  content: LocalizedText(
                                                     'Next: ${s.remark.isEmpty ? s.address : s.remark}',
                                                   ),
                                                   duration: const Duration(
@@ -1688,7 +1689,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             ? Colors.white70
                                             : Colors.black87,
                                       ),
-                                      label: Text(
+                                      label: LocalizedText(
                                         'Next',
                                         style: TextStyle(
                                           fontSize: 16,
@@ -1744,7 +1745,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         );
                                       },
                                       icon: const Icon(Icons.rocket_launch),
-                                      label: const Text(
+                                      label: const LocalizedText(
                                         'Xray Servers',
                                         style: TextStyle(fontSize: 16),
                                       ),
@@ -1779,7 +1780,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                 context,
                                               ).showSnackBar(
                                                 SnackBar(
-                                                  content: Text(
+                                                  content: LocalizedText(
                                                     'Next: ${s.remark.isEmpty ? s.address : s.remark}',
                                                   ),
                                                   duration: const Duration(
@@ -1794,7 +1795,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             ? Colors.white70
                                             : Colors.black87,
                                       ),
-                                      label: Text(
+                                      label: LocalizedText(
                                         'Next',
                                         style: TextStyle(
                                           fontSize: 16,
@@ -2038,7 +2039,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(width: 6),
-            Text(
+            LocalizedText(
               'Pinging…',
               style: TextStyle(
                 fontSize: 13,
@@ -2059,7 +2060,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               color: isDark ? Colors.white54 : Colors.black54,
             ),
             const SizedBox(width: 4),
-            Text(
+            LocalizedText(
               'click to ping',
               style: TextStyle(
                 fontSize: 13,
@@ -2082,7 +2083,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   : (isDark ? Colors.white38 : Colors.black38),
             ),
             const SizedBox(width: 4),
-            Text(
+            LocalizedText(
               ping != null
                   ? '${ping}ms'
                   : (provider.pingFailed ? 'Failed' : 'click to ping'),
@@ -2122,7 +2123,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               : (isDark ? Colors.white38 : Colors.black38),
         ),
         const SizedBox(width: 4),
-        Text(
+        LocalizedText(
           ping != null
               ? '${ping}ms'
               : (provider.pingFailed ? 'Failed' : 'Testing...'),
@@ -2338,7 +2339,7 @@ class _SettingsTransitionOverlayState extends State<_SettingsTransitionOverlay>
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text(
+                const LocalizedText(
                   'Settings',
                   style: TextStyle(
                     color: Colors.white,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../widgets/four_win_loader.dart';
@@ -25,7 +26,7 @@ class _ServersScreenState extends State<ServersScreen> {
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
+        title: const LocalizedText(
           'Servers',
           style: TextStyle(
             color: Colors.black87,
@@ -37,13 +38,13 @@ class _ServersScreenState extends State<ServersScreen> {
           if (_isTestingServers)
             IconButton(
               icon: const Icon(Icons.close, color: Colors.redAccent),
-              tooltip: 'Stop test',
+              tooltip: context.l10n.text('Stop test'),
               onPressed: _stopFindingBestServer,
             )
           else
             IconButton(
               icon: const Icon(Icons.speed, color: Colors.black54),
-              tooltip: 'Find Best Server',
+              tooltip: context.l10n.text('Find Best Server'),
               onPressed: () => _findBestServer(context),
             ),
         ],
@@ -71,7 +72,7 @@ class _ServersScreenState extends State<ServersScreen> {
                       color: Colors.red,
                     ),
                     const SizedBox(height: 16),
-                    Text(
+                    LocalizedText(
                       provider.errorMessage!,
                       style: const TextStyle(
                         fontSize: 14,
@@ -89,7 +90,7 @@ class _ServersScreenState extends State<ServersScreen> {
                         ),
                         side: const BorderSide(color: Colors.black12),
                       ),
-                      child: const Text(
+                      child: const LocalizedText(
                         'Retry',
                         style: TextStyle(color: Colors.black87),
                       ),
@@ -102,7 +103,7 @@ class _ServersScreenState extends State<ServersScreen> {
 
           if (provider.servers.isEmpty) {
             return const Center(
-              child: Text(
+              child: LocalizedText(
                 'No servers available',
                 style: TextStyle(
                   fontSize: 14,
@@ -154,7 +155,7 @@ class _ServersScreenState extends State<ServersScreen> {
                 ),
                 subtitle: Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Text(
+                  child: LocalizedText(
                     'Port: ${server.port}${server.ping != null ? ' • ${server.ping}ms' : ''}',
                     style: const TextStyle(
                       fontSize: 12,
@@ -202,7 +203,7 @@ class _ServersScreenState extends State<ServersScreen> {
     if (provider.selectedServer != null) {
       messenger.showSnackBar(
         SnackBar(
-          content: Text(
+          content: LocalizedText(
             'Best server: ${provider.selectedServer!.address} (${provider.selectedServer!.ping}ms)',
           ),
           backgroundColor: const Color(0xFF4CAF50),

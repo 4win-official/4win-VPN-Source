@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -27,7 +28,7 @@ class DefaultThemeSettingsScreen extends StatelessWidget {
           icon: Icon(Icons.arrow_back, color: textColor),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(
+        title: LocalizedText(
           'Default Theme Settings',
           style: TextStyle(
             color: textColor,
@@ -42,7 +43,7 @@ class DefaultThemeSettingsScreen extends StatelessWidget {
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Text(
+                LocalizedText(
                   'Custom Background',
                   style: TextStyle(
                     color: subColor,
@@ -51,7 +52,7 @@ class DefaultThemeSettingsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
+                LocalizedText(
                   'Set your own wallpaper for the default theme. You can pick a '
                   'different image for day and for night — the one shown here '
                   'applies to the current mode.',
@@ -98,7 +99,7 @@ class _CustomBackgroundCard extends StatelessWidget {
     } catch (_) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not set background image')),
+          const SnackBar(content: LocalizedText('Could not set background image')),
         );
       }
     }
@@ -144,7 +145,7 @@ class _CustomBackgroundCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                LocalizedText(
                   'Custom background ($modeLabel)',
                   style: TextStyle(
                     color: isDark ? Colors.white : Colors.black87,
@@ -153,7 +154,7 @@ class _CustomBackgroundCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 3),
-                Text(
+                LocalizedText(
                   hasBg
                       ? 'Tap to change your $modeLabel background'
                       : 'Pick an image for the default theme ($modeLabel)',
@@ -169,13 +170,13 @@ class _CustomBackgroundCard extends StatelessWidget {
             IconButton(
               icon: Icon(Icons.delete_outline,
                   color: isDark ? Colors.white54 : Colors.black45),
-              tooltip: 'Remove',
+              tooltip: context.l10n.text('Remove'),
               onPressed: () => themeProvider.setCustomBackground(null),
             ),
           IconButton(
             icon: Icon(Icons.add_photo_alternate_outlined,
                 color: isDark ? const Color(0xFF00FF88) : Colors.blue),
-            tooltip: 'Choose image',
+            tooltip: context.l10n.text('Choose image'),
             onPressed: () => _pickImage(context),
           ),
         ],

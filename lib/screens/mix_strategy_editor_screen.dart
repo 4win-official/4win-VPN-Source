@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../models/dns_server.dart';
@@ -115,7 +116,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
         context: context,
         isScrollControlled: true,
         builder: (_) => _ReferenceSheet(
-          title: 'Choose DNS',
+          title: context.l10n.text('Choose DNS'),
           children: dns
               .map(
                 (d) => ListTile(
@@ -158,7 +159,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
               .toList()
             ..sort();
       final selected = await _serverSheet<ProxyServer>(
-        title: 'Choose Proxy server or group',
+        title: context.l10n.text('Choose Proxy server or group'),
         groups: groups,
         servers: provider.proxyServers,
         label: (s) => s.remark,
@@ -168,7 +169,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
       if (selected != null && mounted) setState(() => _hops[index] = selected);
     } else if (hop.protocol == 'openvpn') {
       final selected = await _configSheet<OpenVpnConfig>(
-        title: 'Choose OpenVPN config',
+        title: context.l10n.text('Choose OpenVPN config'),
         values: provider.openVpnConfigs,
         label: (c) => c.name,
         value: (c) => MixHop(protocol: 'openvpn', serverId: c.name),
@@ -178,19 +179,18 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
       final selected = await showModalBottomSheet<MixHop>(
         context: context,
         builder: (_) => _ReferenceSheet(
-          title: hop.protocol == 'warp'
+          title: context.l10n.text(hop.protocol == 'warp'
               ? 'Choose WARP account'
-              : 'Choose Psiphon profile',
+              : 'Choose Psiphon profile'),
           children: [
             ListTile(
               leading: const Icon(Icons.check_circle_outline),
-              title: Text(
+              title: LocalizedText(
                 hop.protocol == 'warp'
                     ? (provider.warpAccount == null
                           ? 'No registered WARP account'
                           : 'Current WARP account')
-                    : 'Current Psiphon profile',
-              ),
+                    : 'Current Psiphon profile'),
               enabled: hop.protocol != 'warp' || provider.warpAccount != null,
               onTap: () => Navigator.pop(
                 context,
@@ -242,8 +242,8 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
             const Padding(
               padding: EdgeInsets.fromLTRB(20, 14, 20, 4),
               child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
+                alignment: AlignmentDirectional.centerStart,
+                child: LocalizedText(
                   'GROUPS',
                   style: TextStyle(
                     fontSize: 11,
@@ -265,8 +265,8 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 4, 20, 4),
             child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
+              alignment: AlignmentDirectional.centerStart,
+              child: LocalizedText(
                 'SERVERS',
                 style: TextStyle(
                   fontSize: 11,
@@ -294,11 +294,10 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
     return Scaffold(
       backgroundColor: dark ? Colors.black : const Color(0xfff4f5f8),
       appBar: AppBar(
-        title: Text(
+        title: LocalizedText(
           widget.existingStrategy == null
               ? 'New Mix Strategy'
-              : 'Edit Mix Strategy',
-        ),
+              : 'Edit Mix Strategy'),
         actions: [
           IconButton(
             onPressed: _saving ? null : _save,
@@ -326,9 +325,9 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                   TextField(
                     controller: _name,
                     textInputAction: TextInputAction.done,
-                    decoration: const InputDecoration(
-                      labelText: 'Strategy name',
-                      hintText: 'e.g. Gaming route',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.text('Strategy name'),
+                      hintText: context.l10n.text('e.g. Gaming route'),
                       prefixIcon: Icon(Icons.edit_outlined),
                     ),
                   ),
@@ -337,13 +336,13 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                     child: ExpansionTile(
                       initiallyExpanded: _relayEnabled,
                       leading: const Icon(Icons.security_outlined),
-                      title: const Text('Optional UDP-over-TLS relay'),
-                      subtitle: const Text(
+                      title: const LocalizedText('Optional UDP-over-TLS relay'),
+                      subtitle: const LocalizedText(
                         'Advanced: TCP-only proxy compatibility',
                       ),
                       children: [
                         SwitchListTile(
-                          title: const Text('Enable UDP relay'),
+                          title: const LocalizedText('Enable UDP relay'),
                           value: _relayEnabled,
                           onChanged: (enabled) =>
                               setState(() => _relayEnabled = enabled),
@@ -351,8 +350,8 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                         const Padding(
                           padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
                           child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: LocalizedText(
                               'Not required for Psiphon: its native packet tunnel carries TCP and UDP using Psiphon servers. This optional compatibility feature is only for TCP-only proxies such as HTTP/SOCKS4 and requires your own trusted TLS relay. For wrapped proxy blocks, UDP exits from that relay while TCP still exits from the selected proxy. No relay or hidden protocol is added automatically. Standalone protocols are unchanged.',
                               style: TextStyle(
                                 fontSize: 12,
@@ -363,22 +362,22 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                         ),
                         TextField(
                           controller: _relayHost,
-                          decoration: const InputDecoration(
-                            labelText: 'Relay host (IP or hostname)',
+                          decoration: InputDecoration(
+                            labelText: context.l10n.text('Relay host (IP or hostname)'),
                           ),
                           keyboardType: TextInputType.url,
                         ),
                         TextField(
                           controller: _relayPort,
-                          decoration: const InputDecoration(
-                            labelText: 'Relay port',
+                          decoration: InputDecoration(
+                            labelText: context.l10n.text('Relay port'),
                           ),
                           keyboardType: TextInputType.number,
                         ),
                         TextField(
                           controller: _relayServerName,
-                          decoration: const InputDecoration(
-                            labelText: 'TLS server name (defaults to host)',
+                          decoration: InputDecoration(
+                            labelText: context.l10n.text('TLS server name (defaults to host)'),
                           ),
                           keyboardType: TextInputType.url,
                         ),
@@ -387,13 +386,13 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                           obscureText: true,
                           enableSuggestions: false,
                           autocorrect: false,
-                          decoration: const InputDecoration(
-                            labelText: 'Auth token',
-                            helperText: '32–256 printable ASCII characters',
+                          decoration: InputDecoration(
+                            labelText: context.l10n.text('Auth token'),
+                            helperText: context.l10n.text('32–256 printable ASCII characters'),
                           ),
                         ),
                         Align(
-                          alignment: Alignment.centerRight,
+                          alignment: AlignmentDirectional.centerEnd,
                           child: TextButton(
                             onPressed: () => setState(() {
                               _relayEnabled = false;
@@ -402,7 +401,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                               _relayServerName.clear();
                               _relayToken.clear();
                             }),
-                            child: const Text('Disable relay'),
+                            child: const LocalizedText('Disable relay'),
                           ),
                         ),
                       ],
@@ -432,7 +431,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                       ),
                     ),
                   const SizedBox(height: 16),
-                  Text(
+                  LocalizedText(
                     'ADD PROTOCOL BLOCK  (${_hops.length}/${MixStrategy.maxBlocks})',
                     style: TextStyle(
                       fontSize: 12,
@@ -471,7 +470,7 @@ class _MixStrategyEditorScreenState extends State<MixStrategyEditorScreen> {
                     }).toList(),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
+                  const LocalizedText(
                     'Tap or drag a chip to append; hold a block to reorder. DNS is a resolver at the selected position, not a tunnel: DNS first resolves on the physical link; multiple DNS blocks are allowed, and the last DNS is effective for app queries. DNS does not have to be last; tunnel order and scoped prefixes stay intact.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
@@ -517,15 +516,15 @@ class _GridCanvas extends StatelessWidget {
         children: [
           _GridNode(
             icon: Icons.smartphone,
-            title: 'START',
-            subtitle: 'This device',
+            title: context.l10n.text('START'),
+            subtitle: context.l10n.text('This device'),
             color: Colors.cyanAccent,
           ),
           const _GridLine(),
           if (hops.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 18),
-              child: Text(
+              child: LocalizedText(
                 'Drop or add a protocol block',
                 style: TextStyle(color: Colors.white54),
               ),
@@ -540,10 +539,10 @@ class _GridCanvas extends StatelessWidget {
             ),
           ),
           const _GridLine(),
-          const _GridNode(
+          _GridNode(
             icon: Icons.public,
-            title: 'INTERNET',
-            subtitle: 'Exit',
+            title: context.l10n.text('INTERNET'),
+            subtitle: context.l10n.text('Exit'),
             color: Colors.greenAccent,
           ),
         ],
@@ -662,7 +661,7 @@ class _GridBlock extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: 'Remove',
+            tooltip: context.l10n.text('Remove'),
             onPressed: () => onRemove(index),
             icon: const Icon(Icons.close, color: Colors.white54, size: 20),
           ),
@@ -734,7 +733,7 @@ class _PaletteChip extends StatelessWidget {
     label: Text(label),
     onPressed: locked
         ? () => ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Maximum 50 blocks reached.')),
+            const SnackBar(content: LocalizedText('Maximum 50 blocks reached.')),
           )
         : onTap,
   );

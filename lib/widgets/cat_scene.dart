@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 
 /// A small, sleepy cat mascot that decorates the top of the Cat-theme screen.
 class CatScene extends StatefulWidget {
@@ -82,7 +83,7 @@ class _CatSceneState extends State<CatScene>
               rect: painter.mascotBounds(size).inflate(4),
               child: Semantics(
                 button: true,
-                label: 'Cat mascot',
+                label: context.l10n.text('Cat mascot'),
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: widget.onCatTap,

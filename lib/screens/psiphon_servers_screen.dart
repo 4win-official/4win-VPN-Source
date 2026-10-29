@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../models/psiphon_server.dart';
@@ -319,7 +320,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
+            content: LocalizedText(
               provider.errorMessage ?? 'Unable to connect to Psiphon.',
             ),
           ),
@@ -329,7 +330,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(provider.errorMessage ?? 'Unable to connect: $error'),
+            content: LocalizedText(provider.errorMessage ?? 'Unable to connect: $error'),
           ),
         );
       }
@@ -361,12 +362,12 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
         !list.servers.any((server) => server.matchesId(selectedId));
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Psiphon servers'),
+        title: const LocalizedText('Psiphon servers'),
         actions: [
           IconButton(
             onPressed: _loading || _refreshing ? null : _refresh,
             icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh signed list',
+            tooltip: context.l10n.text('Refresh signed list'),
           ),
         ],
       ),
@@ -377,7 +378,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  Text(
+                  LocalizedText(
                     'TCP reachability, not VPN latency. A successful test does not guarantee a Psiphon connection.',
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -405,8 +406,8 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _searchController,
-                    decoration: const InputDecoration(
-                      labelText: 'Search IP or region',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.text('Search IP or region'),
                       prefixIcon: Icon(Icons.search),
                       border: OutlineInputBorder(),
                     ),
@@ -421,14 +422,14 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
                                   ? null
                                   : _testAll,
                           icon: Icon(_batchTesting ? Icons.close : Icons.network_check),
-                          label: Text(_batchTesting ? 'Stop testing' : 'Test all (max 4 at a time)'),
+                          label: LocalizedText(_batchTesting ? 'Stop testing' : 'Test all (max 4 at a time)'),
                         ),
                       ),
                       const SizedBox(width: 8),
                       IconButton(
                         onPressed: () =>
                             setState(() => _sortByLatency = !_sortByLatency),
-                        tooltip: 'Sort by TCP latency',
+                        tooltip: context.l10n.text('Sort by TCP latency'),
                         icon: Icon(
                           _sortByLatency ? Icons.sort : Icons.sort_outlined,
                         ),
@@ -439,7 +440,7 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
                   if (selectedMissing)
                     const Padding(
                       padding: EdgeInsets.only(top: 8),
-                      child: Text(
+                      child: LocalizedText(
                         'The selected server is no longer listed. Choose another server or Automatic.',
                         style: TextStyle(color: Colors.orange),
                       ),
@@ -447,17 +448,17 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.auto_awesome),
-                    title: const Text('Automatic selection'),
-                    subtitle: const Text('Let Psiphon choose a server'),
+                    title: const LocalizedText('Automatic selection'),
+                    subtitle: const LocalizedText('Let Psiphon choose a server'),
                     trailing: FilledButton(
                       onPressed: _connecting ? null : () => _connect(null),
-                      child: const Text('Connect'),
+                      child: const LocalizedText('Connect'),
                     ),
                   ),
                   if (_visibleServers.isEmpty)
                     Padding(
                       padding: const EdgeInsets.all(24),
-                      child: Text(
+                      child: LocalizedText(
                         list?.error ?? 'No servers available.',
                         textAlign: TextAlign.center,
                       ),
@@ -494,14 +495,14 @@ class _PsiphonServersScreenState extends State<PsiphonServersScreen> {
                   : server.port == null
                       ? null
                       : () => _test(server),
-              tooltip: testing ? 'Stop test' : 'Test TCP latency',
+              tooltip: context.l10n.text(testing ? 'Stop test' : 'Test TCP latency'),
               icon: testing
                   ? const Icon(Icons.close, color: Colors.redAccent)
                   : const Icon(Icons.network_check),
             ),
             FilledButton(
               onPressed: _connecting ? null : () => _connect(server),
-              child: const Text('Connect'),
+              child: const LocalizedText('Connect'),
             ),
           ],
         ),

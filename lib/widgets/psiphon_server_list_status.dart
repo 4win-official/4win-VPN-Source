@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 
 import '../models/psiphon_server.dart';
 import '../services/psiphon_service.dart';
@@ -137,7 +138,7 @@ class _PsiphonServerListStatusState extends State<PsiphonServerListStatus> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
+                child: LocalizedText(
                   'Psiphon server list',
                   style: TextStyle(
                     color: foreground,
@@ -152,7 +153,7 @@ class _PsiphonServerListStatusState extends State<PsiphonServerListStatus> {
                     builder: (_) => PsiphonServersScreen(service: _service),
                   ),
                 ),
-                child: const Text('Open'),
+                child: const LocalizedText('Open'),
               ),
             ],
           ),
@@ -175,7 +176,7 @@ class _PsiphonServerListStatusState extends State<PsiphonServerListStatus> {
               !_refreshResult!.updated &&
               _refreshResult!.error == null) ...[
             const SizedBox(height: 4),
-            Text(
+            LocalizedText(
               _refreshResult!.busy
                   ? 'A signed-list refresh is already in progress.'
                   : 'The signed server list was not updated.',
@@ -184,7 +185,7 @@ class _PsiphonServerListStatusState extends State<PsiphonServerListStatus> {
           ],
           const SizedBox(height: 8),
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: OutlinedButton.icon(
               onPressed: _refreshing ? null : _refresh,
               icon: _refreshing
@@ -194,7 +195,7 @@ class _PsiphonServerListStatusState extends State<PsiphonServerListStatus> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.refresh, size: 18),
-              label: const Text('Refresh signed list'),
+              label: const LocalizedText('Refresh signed list'),
             ),
           ),
         ],

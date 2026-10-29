@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -18,7 +19,7 @@ class DonateScreen extends StatelessWidget {
             children: [
               Icon(Icons.check_circle, color: Colors.white, size: 20),
               SizedBox(width: 10),
-              Text('Wallet address copied to clipboard'),
+              LocalizedText('Wallet address copied to clipboard'),
             ],
           ),
           behavior: SnackBarBehavior.floating,
@@ -37,7 +38,7 @@ class DonateScreen extends StatelessWidget {
     } else {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMessage), behavior: SnackBarBehavior.floating),
+          SnackBar(content: LocalizedText(errorMessage), behavior: SnackBarBehavior.floating),
         );
       }
     }
@@ -51,7 +52,7 @@ class DonateScreen extends StatelessWidget {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Support Project', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const LocalizedText('Support Project', style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -122,7 +123,7 @@ class DonateScreen extends StatelessWidget {
                     
                     const SizedBox(height: 24),
                     
-                    const Text(
+                    const LocalizedText(
                       'Support 4win VPN',
                       style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
@@ -130,7 +131,7 @@ class DonateScreen extends StatelessWidget {
                     
                     const SizedBox(height: 12),
                     
-                    Text(
+                    LocalizedText(
                       'Your support keeps our servers alive and helps us build more free tools for everyone.',
                       style: TextStyle(
                         fontSize: 15,
@@ -148,8 +149,8 @@ class DonateScreen extends StatelessWidget {
                       isDark,
                       icon: Icons.code_rounded,
                       iconColor: isDark ? Colors.white : Colors.black,
-                      title: 'Follow our GitHub',
-                      subtitle: 'Watch our latest developments and contributions.',
+                      title: context.l10n.text('Follow our GitHub'),
+                      subtitle: context.l10n.text('Watch our latest developments and contributions.'),
                       buttonLabel: 'Visit GitHub',
                       buttonColor: isDark ? Colors.white24 : Colors.black87,
                       onPressed: () => _launchUrl(context, githubUrl, 'Could not open GitHub'),
@@ -168,8 +169,8 @@ class DonateScreen extends StatelessWidget {
                       isDark,
                       icon: Icons.telegram_rounded,
                       iconColor: const Color(0xFF0088CC),
-                      title: 'Join Community',
-                      subtitle: 'Get real-time updates and support on Telegram.',
+                      title: context.l10n.text('Join Community'),
+                      subtitle: context.l10n.text('Get real-time updates and support on Telegram.'),
                       buttonLabel: 'Open Telegram',
                       buttonColor: const Color(0xFF0088CC),
                       onPressed: () => _openTelegram(context),
@@ -185,7 +186,7 @@ class DonateScreen extends StatelessWidget {
                         children: [
                           Icon(Icons.auto_awesome, size: 16, color: primaryColor),
                           const SizedBox(width: 8),
-                          const Text(
+                          const LocalizedText(
                             'Made with passion for freedom',
                             style: TextStyle(fontStyle: FontStyle.italic),
                           ),
@@ -302,14 +303,14 @@ class DonateScreen extends StatelessWidget {
             children: [
               Icon(Icons.account_balance_wallet_rounded, color: Colors.blue),
               SizedBox(width: 10),
-              Text(
+              LocalizedText(
                 'Donate with Crypto',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          const Text(
+          const LocalizedText(
             'TON Coin Address (TON Network):',
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
           ),
@@ -343,7 +344,7 @@ class DonateScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          Text(
+          LocalizedText(
             'Support us by donating any amount to keep servers active.',
             style: TextStyle(
               fontSize: 12,

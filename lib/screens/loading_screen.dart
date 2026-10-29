@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -123,7 +124,7 @@ class _LoadingScreenState extends State<LoadingScreen> {
                   const SizedBox(height: 32),
                   
                   // App Name
-                  Text(
+                  LocalizedText(
                     '4win VPN',
                     style: TextStyle(
                       fontSize: 32,
@@ -139,7 +140,7 @@ class _LoadingScreenState extends State<LoadingScreen> {
                   const SizedBox(height: 24),
                   
                   // Loading Text
-                  Text(
+                  LocalizedText(
                     provider.errorMessage ?? 'Loading server list...',
                     style: TextStyle(
                       fontSize: 14,
@@ -153,7 +154,7 @@ class _LoadingScreenState extends State<LoadingScreen> {
                   
                   // Server count progress
                   if (provider.servers.isNotEmpty)
-                    Text(
+                    LocalizedText(
                       'Testing ${provider.servers.length} servers...',
                       style: TextStyle(
                         fontSize: 12,
@@ -173,7 +174,7 @@ class _LoadingScreenState extends State<LoadingScreen> {
               alignment: Alignment.bottomCenter,
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 24),
-                child: Text(
+                child: LocalizedText(
                   _appVersion.isNotEmpty ? 'Version $_appVersion' : '',
                   style: TextStyle(
                     fontSize: 13,

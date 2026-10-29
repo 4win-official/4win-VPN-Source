@@ -1,5 +1,6 @@
 // Protocol order: Xray, Psiphon, WARP, OpenVPN, SSTP, DNS changer, Proxy, Slow DNS.
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import 'protocol_glass_surface.dart';
@@ -144,7 +145,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(30),
             ),
-            contentPadding: const EdgeInsets.only(left: 12, right: 2),
+            contentPadding: const EdgeInsetsDirectional.only(start: 12, end: 2),
             minLeadingWidth: 30,
             horizontalTitleGap: 10,
             leading: SizedBox(
@@ -195,7 +196,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                   context,
                   isDark: isDark,
                   color: ink.withValues(alpha: 0.78),
-                  tooltip: '$title settings',
+                  tooltip: context.l10n.text('$title settings'),
                   onTap: () => _openProtocolSettings(context, protocol),
                 ),
               ],
@@ -239,7 +240,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                     Row(
                       children: [
                         IconButton(
-                          tooltip: 'Close protocol selector',
+                          tooltip: context.l10n.text('Close protocol selector'),
                           onPressed: () => Navigator.pop(context),
                           icon: const Icon(Icons.close_rounded, size: 21),
                           color: isDark
@@ -247,7 +248,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                               : const Color(0xFF334155),
                         ),
                         Expanded(
-                          child: Text(
+                          child: LocalizedText(
                             'Select Protocol',
                             textAlign: TextAlign.center,
                             style: TextStyle(
@@ -260,7 +261,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                         _gearButton(
                           context,
                           isDark: isDark,
-                          tooltip: 'General settings (all protocols)',
+                          tooltip: context.l10n.text('General settings (all protocols)'),
                           outlined: true,
                           color: isDark ? Colors.white : Colors.black87,
                           onTap: () => _openGlobalSettings(context),
@@ -269,7 +270,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-                      child: Text(
+                      child: LocalizedText(
                         'Choose your connection',
                         style: TextStyle(
                           fontSize: 12,
@@ -300,9 +301,9 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'mix',
-                                  title: 'Mix',
+                                  title: context.l10n.text('Mix'),
                                   subtitle:
-                                      'Ordered, real multi-hop strategies',
+                                      context.l10n.text('Ordered, real multi-hop strategies'),
                                   icon: Icons.account_tree,
                                   badge: 'Beta',
                                 ),
@@ -311,8 +312,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'xray',
-                                  title: 'Xray',
-                                  subtitle: 'Real Xray core + TLS fragment',
+                                  title: context.l10n.text('Xray'),
+                                  subtitle: context.l10n.text('Real Xray core + TLS fragment'),
                                   icon: Icons.rocket_launch,
 
                                   badge: 'Default',
@@ -322,8 +323,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'psiphon',
-                                  title: 'Psiphon',
-                                  subtitle: 'Automatic server selection',
+                                  title: context.l10n.text('Psiphon'),
+                                  subtitle: context.l10n.text('Automatic server selection'),
                                   icon: Icons.public,
                                 ),
                                 _protocolTile(
@@ -331,8 +332,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'warp',
-                                  title: 'WARP',
-                                  subtitle: 'Cloudflare WireGuard tunnel',
+                                  title: context.l10n.text('WARP'),
+                                  subtitle: context.l10n.text('Cloudflare WireGuard tunnel'),
                                   icon: Icons.cloud_done,
                                 ),
                                 _protocolTile(
@@ -340,8 +341,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'openvpn',
-                                  title: 'OpenVPN',
-                                  subtitle: 'Custom config support',
+                                  title: context.l10n.text('OpenVPN'),
+                                  subtitle: context.l10n.text('Custom config support'),
                                   icon: Icons.shield,
                                 ),
                                 _protocolTile(
@@ -349,8 +350,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'sstp',
-                                  title: 'SSTP',
-                                  subtitle: 'Automatic server selection',
+                                  title: context.l10n.text('SSTP'),
+                                  subtitle: context.l10n.text('Automatic server selection'),
                                   icon: Icons.vpn_key,
                                 ),
                                 _protocolTile(
@@ -358,8 +359,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'direct_dns',
-                                  title: 'DNS changer',
-                                  subtitle: 'Connect via DNS servers',
+                                  title: context.l10n.text('DNS changer'),
+                                  subtitle: context.l10n.text('Connect via DNS servers'),
                                   icon: Icons.dns,
                                 ),
                                 _protocolTile(
@@ -367,8 +368,8 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'proxy',
-                                  title: 'Proxy',
-                                  subtitle: 'SOCKS4 / SOCKS5 / HTTP proxy',
+                                  title: context.l10n.text('Proxy'),
+                                  subtitle: context.l10n.text('SOCKS4 / SOCKS5 / HTTP proxy'),
                                   icon: Icons.swap_horiz,
                                 ),
                                 _protocolTile(
@@ -376,9 +377,9 @@ class ProtocolSelectorDialog extends StatelessWidget {
                                   provider: vpnProvider,
                                   isDark: isDark,
                                   protocol: 'slowdns',
-                                  title: 'Slow DNS',
+                                  title: context.l10n.text('Slow DNS'),
                                   subtitle:
-                                      'DNS Tunneling for heavy censorship',
+                                      context.l10n.text('DNS Tunneling for heavy censorship'),
                                   icon: Icons.cloud_queue,
 
                                   badge: 'Beta',

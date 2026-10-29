@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../models/mix_strategy.dart';
@@ -20,7 +21,7 @@ class MixStrategiesScreen extends StatelessWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+        ).showSnackBar(SnackBar(content: LocalizedText(error.toString())));
       }
     }
   }
@@ -40,17 +41,17 @@ class MixStrategiesScreen extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete strategy?'),
-        content: Text('Delete “${strategy.name}”?'),
+        title: const LocalizedText('Delete strategy?'),
+        content: LocalizedText('Delete “${strategy.name}”?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: const LocalizedText('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
+            child: const LocalizedText('Delete'),
           ),
         ],
       ),
@@ -69,12 +70,12 @@ class MixStrategiesScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: dark ? Colors.black : const Color(0xfff6f7fb),
       appBar: AppBar(
-        title: const Text('Mix Strategies'),
+        title: const LocalizedText('Mix Strategies'),
         elevation: 0,
         backgroundColor: Colors.transparent,
         actions: [
           IconButton(
-            tooltip: 'New strategy',
+            tooltip: context.l10n.text('New strategy'),
             icon: const Icon(Icons.add),
             onPressed: () => _openEditor(context),
           ),
@@ -138,7 +139,7 @@ class MixStrategiesScreen extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  subtitle: Text(
+                  subtitle: LocalizedText(
                     error ??
                         '${strategy.hops.length} block${strategy.hops.length == 1 ? '' : 's'}  •  ${strategy.hops.map((h) => MixStrategy.protocols[h.protocol] ?? h.protocol).join(' → ')}',
                     maxLines: 2,
@@ -152,14 +153,14 @@ class MixStrategiesScreen extends StatelessWidget {
                     () => provider.selectMixStrategy(strategy.id),
                   ),
                   trailing: PopupMenuButton<String>(
-                    tooltip: 'Strategy actions',
+                    tooltip: context.l10n.text('Strategy actions'),
                     onSelected: (value) {
                       if (value == 'edit') _openEditor(context, strategy);
                       if (value == 'delete') _delete(context, strategy);
                     },
                     itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'edit', child: Text('Edit')),
-                      PopupMenuItem(value: 'delete', child: Text('Delete')),
+                      PopupMenuItem(value: 'edit', child: LocalizedText('Edit')),
+                      PopupMenuItem(value: 'delete', child: LocalizedText('Delete')),
                     ],
                   ),
                 ),
@@ -188,12 +189,12 @@ class _EmptyState extends StatelessWidget {
             color: Theme.of(context).colorScheme.primary.withValues(alpha: .7),
           ),
           const SizedBox(height: 14),
-          const Text(
+          const LocalizedText(
             'No Mix strategies yet',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          const Text(
+          const LocalizedText(
             'Chain existing Xray, Proxy, and DNS profiles without changing your standalone connection.',
             textAlign: TextAlign.center,
           ),
@@ -201,7 +202,7 @@ class _EmptyState extends StatelessWidget {
           FilledButton.icon(
             onPressed: onCreate,
             icon: const Icon(Icons.add),
-            label: const Text('Create strategy'),
+            label: const LocalizedText('Create strategy'),
           ),
         ],
       ),

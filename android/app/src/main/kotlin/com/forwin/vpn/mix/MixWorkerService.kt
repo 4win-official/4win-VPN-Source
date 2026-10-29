@@ -40,7 +40,7 @@ open class MixWorkerService : Service() {
     private fun showNotification() {
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.mipmap.ic_launcher).setContentTitle(VpnNotificationLabels.MIX_PROTOCOL)
-            .setContentText("Preparing an isolated tunnel stage").setOngoing(true)
+            .setContentText(VpnNotificationLabels.localized(this, "Preparing an isolated tunnel stage")).setOngoing(true)
         if (sessionId.isNotBlank()) {
             val stop = PendingIntent.getService(this, 0,
                 notificationIntent(this, MixCoordinatorService.ACTION_STOP, sessionId),
@@ -48,8 +48,8 @@ open class MixWorkerService : Service() {
             val reconnect = PendingIntent.getService(this, 1,
                 notificationIntent(this, MixCoordinatorService.ACTION_RECONNECT, sessionId),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", stop)
-                .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnect)
+            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(this, "Disconnect"), stop)
+                .addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(this, "Reconnect"), reconnect)
         }
         startForeground(NOTIFICATION + (javaClass.simpleName.removePrefix("MixWorker").toIntOrNull() ?: 0), builder.build())
     }

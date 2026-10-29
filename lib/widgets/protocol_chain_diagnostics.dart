@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../models/protocol_diagnostics.dart';
@@ -33,17 +34,17 @@ class ProtocolChainDiagnostics extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+                    padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 8, 0),
                     child: Row(
                       children: [
                         Expanded(
-                          child: Text(
+                          child: LocalizedText(
                             '${data.displayName} connection stages',
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Close connection graph',
+                          tooltip: context.l10n.text('Close connection graph'),
                           icon: const Icon(Icons.close),
                           onPressed: () => Navigator.pop(context),
                         ),
@@ -52,7 +53,7 @@ class ProtocolChainDiagnostics extends StatelessWidget {
                   ),
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
+                    child: LocalizedText(
                       'Only observed signals are marked complete. A running service '
                       'does not always prove remote reachability.',
                       style: TextStyle(fontSize: 12),
@@ -239,7 +240,7 @@ class ProtocolConnectionGraph extends StatelessWidget {
           return Column(
             children: [
               const Icon(Icons.phone_android, size: 32),
-              const Text('Start'),
+              const LocalizedText('Start'),
               _connector(Colors.grey),
             ],
           );

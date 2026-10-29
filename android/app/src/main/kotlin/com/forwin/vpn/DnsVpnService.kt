@@ -122,14 +122,14 @@ class DnsVpnService : VpnService() {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("DNS VPN")
-            .setContentText(if (connected) "DNS: $primaryDns • Speed unavailable (DNS-only)"
-                else "DNS: $primaryDns • Reconnect or disconnect")
+            .setContentText(VpnNotificationLabels.localized(this, if (connected) "DNS: $primaryDns • Speed unavailable (DNS-only)"
+                else "DNS: $primaryDns • Reconnect or disconnect"))
             .setSmallIcon(R.mipmap.ic_launcher) // لوگو اپ
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true) // Cannot be dismissed
             .setContentIntent(mainPendingIntent) // Open app when tapped
-            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
+            .addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(this, "Reconnect"), reconnectPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(this, "Disconnect"), disconnectPendingIntent)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
@@ -289,10 +289,10 @@ class DnsVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "DNS VPN Service",
+                VpnNotificationLabels.localized(this, "DNS VPN Service"),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows when DNS VPN is active"
+                description = VpnNotificationLabels.localized(this, "Shows when DNS VPN is active")
             }
             
             val notificationManager = getSystemService(NotificationManager::class.java)

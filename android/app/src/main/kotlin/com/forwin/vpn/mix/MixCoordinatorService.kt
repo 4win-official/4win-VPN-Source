@@ -564,9 +564,10 @@ class MixCoordinatorService : VpnService() {
             notificationIntent(this, ACTION_RECONNECT, session),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         startForeground(NOTIFICATION, NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.mipmap.ic_launcher).setContentTitle(VpnNotificationLabels.MIX_PROTOCOL).setContentText(text)
-            .setOngoing(true).addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", stop)
-            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnect).build())
+            .setSmallIcon(R.mipmap.ic_launcher).setContentTitle(VpnNotificationLabels.MIX_PROTOCOL)
+            .setContentText(VpnNotificationLabels.localized(this, text))
+            .setOngoing(true).addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(this, "Disconnect"), stop)
+            .addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(this, "Reconnect"), reconnect).build())
     }
 
     override fun onRevoke() { request?.let { requestStop(it) }; super.onRevoke() }

@@ -10,7 +10,7 @@ import com.example.sstp_flutter.TrafficRateSampler
 import java.util.concurrent.atomic.AtomicLong
 
 /** Updates the existing notification, never its action PendingIntents or service state. */
-internal class LiveTrafficNotification(context: Context) {
+internal class LiveTrafficNotification(private val context: Context) {
     private val manager = context.getSystemService(NotificationManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private val revision = AtomicLong()
@@ -26,13 +26,14 @@ internal class LiveTrafficNotification(context: Context) {
         counters: () -> LongArray?
     ) {
         val version = revision.incrementAndGet()
+        val localizedStatus = { VpnNotificationLabels.localized(context, status) }
         handler.post {
             synchronized(lock) {
                 if (version != revision.get()) return@post
                 pending?.let { handler.removeCallbacks(it) }
                 val sampler = TrafficRateSampler()
                 clearRate = {
-                    builder.setOnlyAlertOnce(true).setContentText(status).setStyle(null)
+                    builder.setOnlyAlertOnce(true).setContentText(localizedStatus()).setStyle(null)
                     manager?.notify(id, builder.build())
                 }
                 val tick = object : Runnable {
@@ -41,7 +42,7 @@ internal class LiveTrafficNotification(context: Context) {
                             if (version != revision.get()) return
                             if (!connected()) {
                                 sampler.reset()
-                                builder.setContentText(status).setStyle(null)
+                                builder.setContentText(localizedStatus()).setStyle(null)
                             } else {
                                 val totals = runCatching { counters() }.getOrNull()
                                 val speed = if (totals != null && totals.size >= 2) {
@@ -50,10 +51,12 @@ internal class LiveTrafficNotification(context: Context) {
                                     sampler.reset()
                                     null
                                 }
-                                val text = speed ?: status
+                                val currentStatus = localizedStatus()
+                                val currentSpeed = speed?.let { VpnNotificationLabels.localized(context, it) }
+                                val text = currentSpeed ?: currentStatus
                                 builder.setOnlyAlertOnce(true).setContentText(text)
                                     .setStyle(NotificationCompat.BigTextStyle().bigText(
-                                        if (speed == null) status else "$status\n$speed"
+                                        if (currentSpeed == null) currentStatus else "$currentStatus\n$currentSpeed"
                                     ))
                             }
                             if (version != revision.get()) return

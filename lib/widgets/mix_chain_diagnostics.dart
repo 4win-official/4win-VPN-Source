@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../models/mix_diagnostics.dart';
@@ -39,7 +40,7 @@ class MixChainDiagnostics extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+                    padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 8, 0),
                     child: Row(
                       children: [
                         Expanded(
@@ -49,7 +50,7 @@ class MixChainDiagnostics extends StatelessWidget {
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Close chain graph',
+                          tooltip: context.l10n.text('Close chain graph'),
                           icon: const Icon(Icons.close),
                           onPressed: () => Navigator.pop(context),
                         ),
@@ -58,7 +59,7 @@ class MixChainDiagnostics extends StatelessWidget {
                   ),
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
+                    child: LocalizedText(
                       'Initialized does not prove remote reachability.',
                       style: TextStyle(fontSize: 12),
                     ),
@@ -87,7 +88,7 @@ class MixChainDiagnostics extends StatelessWidget {
       ),
       onPressed: () => _showGraph(context),
       icon: Icon(Icons.account_tree, color: failed ? Colors.red : null),
-      label: Text(failed ? 'View failed chain' : 'View Mix chain'),
+      label: LocalizedText(failed ? 'View failed chain' : 'View Mix chain'),
     );
   }
 }
@@ -204,7 +205,7 @@ class MixChainGraph extends StatelessWidget {
           return Column(
             children: [
               const Icon(Icons.phone_android, size: 32),
-              const Text('Start'),
+              const LocalizedText('Start'),
               _connector(Colors.grey),
             ],
           );
@@ -214,7 +215,7 @@ class MixChainGraph extends StatelessWidget {
             return const Column(
               children: [
                 Icon(Icons.check_circle_outline, size: 34, color: Colors.green),
-                Text('Connected', textAlign: TextAlign.center),
+                LocalizedText('Connected', textAlign: TextAlign.center),
               ],
             );
           }
@@ -225,7 +226,7 @@ class MixChainGraph extends StatelessWidget {
                 size: 34,
                 color: attributed ? Colors.grey : Colors.orange,
               ),
-              Text(
+              LocalizedText(
                 attributed
                     ? 'Failure detected at block ${diagnostics.states.indexOf(MixBlockState.failed) + 1}'
                     : 'Failure location unknown',

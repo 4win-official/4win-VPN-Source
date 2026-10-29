@@ -10,8 +10,37 @@ import com.forwin.vpn.mix.sstp.MIN_MTU
 import com.forwin.vpn.mix.sstp.preference.accessor.*
 
 
+private fun localizedPreferenceMessage(context: Context, source: String): String {
+    if (context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            .getString("flutter.app_language", "en") != "fa"
+    ) return source
+    Regex("^The given MRU is out of (\\d+)-(\\d+)$").matchEntire(source)?.let {
+        return "مقدار MRU باید در بازهٔ ${it.groupValues[1]} تا ${it.groupValues[2]} باشد."
+    }
+    return when (source) {
+        "Hostname is missing" -> "نام میزبان وارد نشده است."
+        "The given port is out of 0-65535" -> "شمارهٔ درگاه باید بین 0 تا 65535 باشد."
+        "Adding trusted certificates needs SSL version to be specified" -> "برای افزودن گواهی‌های مورد اعتماد، باید نسخهٔ SSL مشخص شود."
+        "No certificates directory was selected" -> "پوشهٔ گواهی‌ها انتخاب نشده است."
+        "No cipher suite was selected" -> "هیچ مجموعهٔ رمزنگاری انتخاب نشده است."
+        "Proxy server hostname is missing" -> "نام میزبان پراکسی وارد نشده است."
+        "The given proxy server port is out of 0-65535" -> "شمارهٔ درگاه پراکسی باید بین 0 تا 65535 باشد."
+        "No network protocol was enabled" -> "هیچ پروتکل شبکه‌ای فعال نشده است."
+        "No static IPv4 address was given" -> "نشانی ثابت IPv4 وارد نشده است."
+        "No authentication protocol was enabled" -> "هیچ پروتکل احراز هویتی فعال نشده است."
+        "PPP authentication timeout period must be >=1 second" -> "مهلت احراز هویت PPP باید دست‌کم 1 ثانیه باشد."
+        "No custom DNS server address was given" -> "نشانی سرور DNS سفارشی وارد نشده است."
+        "Retry Count must be a positive integer" -> "تعداد تلاش مجدد باید عدد صحیح مثبت باشد."
+        "No log directory was selected" -> "پوشهٔ گزارش انتخاب نشده است."
+        else -> source
+    }
+}
+
 internal fun toastInvalidSetting(message: String, context: Context) {
-    Toast.makeText(context, "INVALID SETTING: $message", Toast.LENGTH_LONG).show()
+    val persian = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        .getString("flutter.app_language", "en") == "fa"
+    val title = if (persian) "تنظیم نامعتبر" else "INVALID SETTING"
+    Toast.makeText(context, "$title: ${localizedPreferenceMessage(context, message)}", Toast.LENGTH_LONG).show()
 }
 
 internal fun checkPreferences(prefs: SharedPreferences): String? {

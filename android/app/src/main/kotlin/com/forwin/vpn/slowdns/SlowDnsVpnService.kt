@@ -60,7 +60,7 @@ class SlowDnsVpnService : VpnService() {
         instance = this
         if (Build.VERSION.SDK_INT >= 26) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL, "Slow DNS VPN", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL, VpnNotificationLabels.localized(this, "Slow DNS VPN"), NotificationManager.IMPORTANCE_LOW)
             )
         }
     }
@@ -327,10 +327,10 @@ class SlowDnsVpnService : VpnService() {
         val disconnect = PendingIntent.getService(this, requestCode, disconnectIntent, piFlags)
         val reconnect = PendingIntent.getService(this, requestCode xor 0x40000000, reconnectIntent, piFlags)
         val notification = NotificationCompat.Builder(this, CHANNEL).setContentTitle("Slow DNS")
-            .setContentText(text).setSmallIcon(R.mipmap.ic_launcher)
+            .setContentText(VpnNotificationLabels.localized(this, text)).setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE))
-            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnect)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnect)
+            .addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(this, "Reconnect"), reconnect)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(this, "Disconnect"), disconnect)
             .setOngoing(true).setPriority(NotificationCompat.PRIORITY_LOW)
         notificationBuilder = notification
         startForeground(NOTIFICATION_ID, notification.build())

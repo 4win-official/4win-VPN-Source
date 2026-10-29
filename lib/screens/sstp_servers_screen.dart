@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../models/sstp_server_group.dart';
@@ -45,7 +46,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ).showSnackBar(SnackBar(content: LocalizedText(message)));
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -99,8 +100,8 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
     final yes = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(isSingleServer ? 'Delete server?' : 'Delete group?'),
-        content: Text(
+        title: LocalizedText(isSingleServer ? 'Delete server?' : 'Delete group?'),
+        content: LocalizedText(
           isSingleServer
               ? 'Delete "${group.servers.single.fullAddress}"?'
               : 'Delete "${group.name}" and its servers?',
@@ -108,11 +109,11 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: const LocalizedText('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: const LocalizedText('Delete'),
           ),
         ],
       ),
@@ -168,11 +169,11 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
     final accent = dark ? const Color(0xFF00FF88) : Colors.blue;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SSTP Servers'),
+        title: const LocalizedText('SSTP Servers'),
         actions: [
           Consumer<VpnProvider>(
             builder: (_, p, __) => IconButton(
-              tooltip: 'Refresh default servers',
+              tooltip: context.l10n.text('Refresh default servers'),
               onPressed:
                   p.sstpGroupTesting ||
                       p.sstpRefreshing ||
@@ -185,7 +186,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
           ),
           Consumer<VpnProvider>(
             builder: (_, p, __) => PopupMenuButton<String>(
-              tooltip: 'Add SSTP entry',
+              tooltip: context.l10n.text('Add SSTP entry'),
               enabled:
                   !p.sstpGroupTesting &&
                   !p.sstpRefreshing &&
@@ -199,8 +200,8 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
                 }
               },
               itemBuilder: (_) => const [
-                PopupMenuItem(value: 'server', child: Text('Add server')),
-                PopupMenuItem(value: 'group', child: Text('Add group')),
+                PopupMenuItem(value: 'server', child: LocalizedText('Add server')),
+                PopupMenuItem(value: 'group', child: LocalizedText('Add group')),
               ],
             ),
           ),
@@ -296,14 +297,14 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
                             ),
                           ),
                           const SizedBox(width: 6),
-                          Text(
+                          LocalizedText(
                             'Testing $progress…',
                             style: TextStyle(fontSize: 11, color: accent),
                           ),
                         ],
                       )
                     else
-                      Text(
+                      LocalizedText(
                         selected
                             ? p.selectedSstpGroup == null
                                   ? 'Manual server selected'
@@ -323,7 +324,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
               ),
               if (selected) Icon(Icons.check_circle, color: accent, size: 21),
               IconButton(
-                tooltip: testing ? 'Stop test' : 'Test group latency',
+                tooltip: context.l10n.text(testing ? 'Stop test' : 'Test group latency'),
                 onPressed: testing
                     ? p.cancelSstpTest
                     : busy
@@ -335,7 +336,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
               ),
               if (g.isDefault || g.subscriptionUrl != null)
                 IconButton(
-                  tooltip: 'Refresh group',
+                  tooltip: context.l10n.text('Refresh group'),
                   onPressed: busy
                       ? null
                       : () => _run(() => p.refreshSstpGroup(g.id)),
@@ -343,9 +344,9 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
                 ),
               if (!g.isDefault)
                 IconButton(
-                  tooltip: _isSingleServerEntry(g)
+                  tooltip: context.l10n.text(_isSingleServerEntry(g)
                       ? 'Delete server'
-                      : 'Delete group',
+                      : 'Delete group'),
                   onPressed: busy ? null : () => _confirmDelete(g),
                   icon: const Icon(
                     Icons.delete_outline,
@@ -353,7 +354,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
                   ),
                 ),
               IconButton(
-                tooltip: open ? 'Collapse' : 'Expand',
+                tooltip: context.l10n.text(open ? 'Collapse' : 'Expand'),
                 onPressed: () => setState(
                   () => open ? _expanded.remove(g.id) : _expanded.add(g.id),
                 ),
@@ -393,7 +394,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         s.fullAddress,
         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
       ),
-      subtitle: Text(
+      subtitle: LocalizedText(
         testing
             ? 'Testing…'
             : ping == null
@@ -409,7 +410,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            tooltip: 'Test TCP latency',
+            tooltip: context.l10n.text('Test TCP latency'),
             onPressed: testing
                 ? p.cancelSstpTest
                 : p.sstpGroupTesting ||
@@ -459,7 +460,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
           color: accent.withValues(alpha: .6),
         ),
         const SizedBox(height: 16),
-        Text(
+        LocalizedText(
           'No SSTP servers yet',
           style: TextStyle(
             fontSize: 18,
@@ -470,7 +471,7 @@ class _SstpServersScreenState extends State<SstpServersScreen> {
         const SizedBox(height: 8),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 32),
-          child: Text(
+          child: LocalizedText(
             'Add a server or group, or refresh the default group to load servers.',
             textAlign: TextAlign.center,
           ),
@@ -506,35 +507,35 @@ class _SstpGroupDialogState extends State<_SstpGroupDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Add SSTP group'),
+    title: const LocalizedText('Add SSTP group'),
     content: SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
             controller: name,
-            decoration: const InputDecoration(labelText: 'Group name'),
+            decoration: InputDecoration(labelText: context.l10n.text('Group name')),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: content,
             maxLines: 5,
-            decoration: const InputDecoration(
-              labelText: 'Host:port lines or subscription URL',
-              hintText: 'vpn.example.com:443\nhttps://example.com/servers.txt',
+            decoration: InputDecoration(
+              labelText: context.l10n.text('Host:port lines or subscription URL'),
+              hintText: context.l10n.text('vpn.example.com:443\nhttps://example.com/servers.txt'),
               border: OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: username,
-            decoration: const InputDecoration(labelText: 'Username'),
+            decoration: InputDecoration(labelText: context.l10n.text('Username')),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: password,
             obscureText: true,
-            decoration: const InputDecoration(labelText: 'Password'),
+            decoration: InputDecoration(labelText: context.l10n.text('Password')),
           ),
         ],
       ),
@@ -542,7 +543,7 @@ class _SstpGroupDialogState extends State<_SstpGroupDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
+        child: const LocalizedText('Cancel'),
       ),
       FilledButton(
         onPressed: () => Navigator.pop(context, (
@@ -551,7 +552,7 @@ class _SstpGroupDialogState extends State<_SstpGroupDialog> {
           username.text,
           password.text,
         )),
-        child: const Text('Add'),
+        child: const LocalizedText('Add'),
       ),
     ],
   );
@@ -582,7 +583,7 @@ class _SstpServerDialogState extends State<_SstpServerDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Add SSTP server'),
+    title: const LocalizedText('Add SSTP server'),
     content: SingleChildScrollView(
       child: Form(
         key: formKey,
@@ -592,7 +593,7 @@ class _SstpServerDialogState extends State<_SstpServerDialog> {
             TextFormField(
               controller: host,
               keyboardType: TextInputType.url,
-              decoration: const InputDecoration(labelText: 'Host'),
+              decoration: InputDecoration(labelText: context.l10n.text('Host')),
               validator: (value) => value?.trim().isNotEmpty == true
                   ? null
                   : 'Enter a host.',
@@ -601,7 +602,7 @@ class _SstpServerDialogState extends State<_SstpServerDialog> {
             TextFormField(
               controller: port,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Port'),
+              decoration: InputDecoration(labelText: context.l10n.text('Port')),
               validator: (value) {
                 final parsed = int.tryParse(value?.trim() ?? '');
                 return parsed != null && parsed >= 1 && parsed <= 65535
@@ -612,7 +613,7 @@ class _SstpServerDialogState extends State<_SstpServerDialog> {
             const SizedBox(height: 12),
             TextFormField(
               controller: username,
-              decoration: const InputDecoration(labelText: 'Username'),
+              decoration: InputDecoration(labelText: context.l10n.text('Username')),
               validator: (value) => value?.trim().isNotEmpty == true
                   ? null
                   : 'Enter a username.',
@@ -621,7 +622,7 @@ class _SstpServerDialogState extends State<_SstpServerDialog> {
             TextFormField(
               controller: password,
               obscureText: true,
-              decoration: const InputDecoration(labelText: 'Password'),
+              decoration: InputDecoration(labelText: context.l10n.text('Password')),
               validator: (value) => value?.trim().isNotEmpty == true
                   ? null
                   : 'Enter a password.',
@@ -633,7 +634,7 @@ class _SstpServerDialogState extends State<_SstpServerDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
+        child: const LocalizedText('Cancel'),
       ),
       FilledButton(
         onPressed: () {
@@ -645,7 +646,7 @@ class _SstpServerDialogState extends State<_SstpServerDialog> {
             password.text,
           ));
         },
-        child: const Text('Add server'),
+        child: const LocalizedText('Add server'),
       ),
     ],
   );

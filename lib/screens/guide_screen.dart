@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 
 /// A comprehensive in-app guide shown to new users on first launch (and any
 /// time from the "?" icon on the home screen). It explains every major part of
@@ -23,7 +24,7 @@ class GuideScreen extends StatelessWidget {
           icon: Icon(Icons.arrow_back, color: textColor),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(
+        title: LocalizedText(
           'Quick Guide',
           style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
         ),
@@ -35,7 +36,7 @@ class GuideScreen extends StatelessWidget {
             const SizedBox(height: 8),
             Icon(Icons.lightbulb_outline, size: 56, color: accent),
             const SizedBox(height: 12),
-            Text(
+            LocalizedText(
               'Welcome to 4win VPN',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -45,7 +46,7 @@ class GuideScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
+            LocalizedText(
               'A full walkthrough of everything the app can do. '
               'You can reopen this guide anytime from the "?" icon at the top.',
               textAlign: TextAlign.center,
@@ -58,7 +59,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               stepNumber: '1',
-              title: 'Connect & disconnect',
+              title: context.l10n.text('Connect & disconnect'),
               description:
                   'Tap the big round power button in the middle of the home '
                   'screen to connect. Tap it again to disconnect. The colour and '
@@ -75,7 +76,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               stepNumber: '2',
-              title: 'Open Settings',
+              title: context.l10n.text('Open Settings'),
               description:
                   'Press and HOLD the power button. A spinning gear appears and '
                   'takes you to the settings for the protocol you are using. The '
@@ -91,7 +92,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               icon: Icons.swap_vert,
-              title: 'Choose a protocol',
+              title: context.l10n.text('Choose a protocol'),
               description:
                   'Tap the sliders icon above the connection status to open the protocol selector. 4win VPN '
                   'supports several ways to connect:\n\n'
@@ -112,7 +113,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               icon: Icons.dns,
-              title: 'Servers & speed testing',
+              title: context.l10n.text('Servers & speed testing'),
               description:
                   'Open the server list button under the power button (for Xray '
                   'and Proxy it is the "Servers" button). You can:\n\n'
@@ -132,7 +133,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               icon: Icons.link,
-              title: 'Subscription links',
+              title: context.l10n.text('Subscription links'),
               description:
                   'Instead of adding servers manually you can paste a '
                   'subscription link (a URL that returns a list of servers). The '
@@ -147,7 +148,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               icon: Icons.settings_ethernet,
-              title: 'Proxy protocol (SOCKS / HTTP)',
+              title: context.l10n.text('Proxy protocol (SOCKS / HTTP)'),
               description:
                   'The Proxy protocol connects you through a real SOCKS4, SOCKS5 '
                   'or HTTP proxy. Add proxies as links (socks5://, socks4://, '
@@ -165,7 +166,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               icon: Icons.call_split,
-              title: 'Split tunneling',
+              title: context.l10n.text('Split tunneling'),
               description:
                   'In General Settings → Split Tunneling you choose which apps '
                   'use the VPN:\n\n'
@@ -183,7 +184,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               stepNumber: '8',
-              title: 'Themes & appearance',
+              title: context.l10n.text('Themes & appearance'),
               description:
                   'Tap the palette icon at the top to open VPN Themes. Switch '
                   'between the day / night toggle and pick a theme: Liquid, '
@@ -200,7 +201,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               icon: Icons.vpn_lock,
-              title: 'Connection mode (Xray)',
+              title: context.l10n.text('Connection mode (Xray)'),
               description:
                   'Inside the Xray settings you can choose the connection mode:\n\n'
                   '• VPN mode — tunnels the whole device (the system VPN key icon '
@@ -217,7 +218,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               icon: Icons.build,
-              title: 'Extra tools & security',
+              title: context.l10n.text('Extra tools & security'),
               description:
                   '• Secret Text (lock icon) — encode/decode text so only 4win '
                   'VPN can read it.\n'
@@ -234,7 +235,7 @@ class GuideScreen extends StatelessWidget {
               isDark: isDark,
               accent: accent,
               icon: Icons.system_update,
-              title: 'Staying up to date',
+              title: context.l10n.text('Staying up to date'),
               description:
                   'General Settings → Updates checks GitHub for a newer version '
                   'of 4win VPN. If one is available you can download and install '
@@ -255,7 +256,7 @@ class GuideScreen extends StatelessWidget {
                   ),
                 ),
                 onPressed: () => Navigator.pop(context),
-                child: const Text(
+                child: const LocalizedText(
                   'Got it!',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
@@ -438,7 +439,7 @@ class _TopBarIllustration extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(
+          LocalizedText(
             '4win VPN',
             style: TextStyle(
               color: isDark ? Colors.white : Colors.black87,
@@ -517,7 +518,7 @@ class _PowerButtonIllustration extends StatelessWidget {
           children: [
             Icon(Icons.touch_app, size: 18, color: accent),
             const SizedBox(width: 6),
-            Text(
+            LocalizedText(
               'Press & hold',
               style: TextStyle(
                 color: accent,

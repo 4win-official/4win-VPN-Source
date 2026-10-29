@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import '../models/dns_server.dart';
 import '../providers/vpn_provider.dart';
@@ -66,7 +67,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return AlertDialog(
           backgroundColor: isDark ? const Color(0xFF000000) : Colors.white,
-          title: Text(
+          title: LocalizedText(
             'Add Custom DNS',
             style: TextStyle(color: isDark ? Colors.white : Colors.black87),
           ),
@@ -78,7 +79,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                   controller: nameController,
                   style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                   decoration: InputDecoration(
-                    labelText: 'Name',
+                    labelText: context.l10n.text('Name'),
                     labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
                   ),
                 ),
@@ -87,7 +88,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                   controller: primaryController,
                   style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                   decoration: InputDecoration(
-                    labelText: 'Primary DNS (required)',
+                    labelText: context.l10n.text('Primary DNS (required)'),
                     hintText: '8.8.8.8',
                     labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
                   ),
@@ -98,7 +99,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                   controller: secondaryController,
                   style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                   decoration: InputDecoration(
-                    labelText: 'Secondary DNS (optional)',
+                    labelText: context.l10n.text('Secondary DNS (optional)'),
                     hintText: '8.8.4.4',
                     labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
                   ),
@@ -109,7 +110,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                   controller: descController,
                   style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                   decoration: InputDecoration(
-                    labelText: 'Description (optional)',
+                    labelText: context.l10n.text('Description (optional)'),
                     labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
                   ),
                 ),
@@ -119,13 +120,13 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
+              child: LocalizedText('Cancel'),
             ),
             ElevatedButton(
               onPressed: () async {
                 if (nameController.text.isEmpty || primaryController.text.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Name and Primary DNS are required')),
+                    const SnackBar(content: LocalizedText('Name and Primary DNS are required')),
                   );
                   return;
                 }
@@ -143,7 +144,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                 Navigator.pop(context);
                 _loadDnsServers();
               },
-              child: const Text('Add'),
+              child: const LocalizedText('Add'),
             ),
           ],
         );
@@ -167,7 +168,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
           ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(
+        title: LocalizedText(
           'DNS Servers',
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
@@ -183,7 +184,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                   ? Colors.redAccent
                   : (isDark ? Colors.white70 : Colors.black87),
             ),
-            tooltip: _isTesting ? 'Stop testing' : 'Test all servers',
+            tooltip: context.l10n.text(_isTesting ? 'Stop testing' : 'Test all servers'),
             onPressed: _isTesting
                 ? () => _testCancellation?.cancel()
                 : _testDnsServers,
@@ -204,7 +205,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                 children: [
                   const FourWinLoader(),
                   const SizedBox(height: 16),
-                  Text(
+                  LocalizedText(
                     'Testing DNS servers...',
                     style: TextStyle(
                       color: isDark ? Colors.white70 : Colors.black54,
@@ -214,14 +215,14 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                   OutlinedButton.icon(
                     onPressed: () => _testCancellation?.cancel(),
                     icon: const Icon(Icons.close),
-                    label: const Text('Stop testing'),
+                    label: const LocalizedText('Stop testing'),
                   ),
                 ],
               ),
             )
           : _dnsServers.isEmpty
               ? Center(
-                  child: Text(
+                  child: LocalizedText(
                     'No DNS servers available',
                     style: TextStyle(
                       color: isDark ? Colors.white70 : Colors.black54,
@@ -244,7 +245,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                           ),
                         ),
                         icon: const Icon(Icons.speed, color: Colors.white),
-                        label: const Text(
+                        label: const LocalizedText(
                           'Test All Servers',
                           style: TextStyle(
                             color: Colors.white,
@@ -281,7 +282,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const SizedBox(height: 4),
-                            Text(
+                            LocalizedText(
                               'Primary: ${server.primaryDns}',
                               style: TextStyle(
                                 color: isDark ? Colors.white70 : Colors.black54,
@@ -289,7 +290,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                               ),
                             ),
                             if (server.secondaryDns != null)
-                              Text(
+                              LocalizedText(
                                 'Secondary: ${server.secondaryDns}',
                                 style: TextStyle(
                                   color: isDark ? Colors.white70 : Colors.black54,
@@ -310,7 +311,7 @@ class _DnsServersScreenState extends State<DnsServersScreen> {
                           children: [
                             // نمایش ping
                             if (server.ping != null)
-                              Text(
+                              LocalizedText(
                                 '${server.ping}ms',
                                 style: TextStyle(
                                   color: _getPingColor(server.ping!),

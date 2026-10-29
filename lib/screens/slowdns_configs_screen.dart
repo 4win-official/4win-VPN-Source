@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import '../models/slowdns_config.dart';
@@ -31,13 +32,13 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
-          children: [const Text('Slow DNS')],
+          children: [const LocalizedText('Slow DNS')],
         ),
         backgroundColor: Colors.orange,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            tooltip: 'DNS Scanner',
+            tooltip: context.l10n.text('DNS Scanner'),
             icon: const Icon(Icons.radar),
             onPressed: () {
               Navigator.push(
@@ -67,7 +68,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
+                      child: LocalizedText(
                         'Requires a dnstt server exposing a remote SOCKS5 endpoint. '
                         'The client forwards TCP through tunneled DNS queries; it does not '
                         'provide SSH or arbitrary UDP tunneling.',
@@ -110,7 +111,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
         onPressed: () => _showAddConfigDialog(context),
         backgroundColor: Colors.orange,
         icon: const Icon(Icons.add),
-        label: const Text('Add Config'),
+        label: const LocalizedText('Add Config'),
       ),
     );
   }
@@ -126,7 +127,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
             color: isDark ? Colors.white24 : Colors.black26,
           ),
           const SizedBox(height: 16),
-          Text(
+          LocalizedText(
             'No Slow DNS configs yet',
             style: TextStyle(
               fontSize: 16,
@@ -135,7 +136,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          LocalizedText(
             'Tap "Add Config" to create one',
             style: TextStyle(
               fontSize: 13,
@@ -177,8 +178,8 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Domain: ${config.domain}'),
-            Text(
+            LocalizedText('Domain: ${config.domain}'),
+            LocalizedText(
               config.dnsTransport == 'doh'
                   ? 'DoH: ${config.dohUrl}'
                   : 'NS: ${config.nameServer}:${config.effectivePort}',
@@ -201,7 +202,7 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
           provider.selectSlowDnsConfig(config);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Selected: ${config.name}'),
+              content: LocalizedText('Selected: ${config.name}'),
               duration: const Duration(seconds: 1),
             ),
           );
@@ -218,19 +219,19 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Config'),
-        content: Text('Delete "${config.name}"?'),
+        title: const LocalizedText('Delete Config'),
+        content: LocalizedText('Delete "${config.name}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: const LocalizedText('Cancel'),
           ),
           TextButton(
             onPressed: () {
               provider.removeSlowDnsConfig(config.name);
               Navigator.pop(ctx);
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const LocalizedText('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -247,6 +248,6 @@ class _SlowDnsConfigsScreenState extends State<SlowDnsConfigsScreen> {
     if (!context.mounted || config == null) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: const Text('Profile added')));
+    ).showSnackBar(SnackBar(content: const LocalizedText('Profile added')));
   }
 }

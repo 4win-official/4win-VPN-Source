@@ -73,13 +73,13 @@ public final class OpenVpnNotificationActions {
                 SESSIONS.put(service, state);
             }
             if (state.connected && state.rateText != null) {
-                builder.setSubText(state.rateText);
+                builder.setSubText(VpnNotificationLabels.localized(service, state.rateText));
             }
             token = state.token;
         }
-        builder.addAction(android.R.drawable.ic_popup_sync, "Reconnect",
+        builder.addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(service, "Reconnect"),
                 pending(service, ACTION_RECONNECT, token));
-        builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect",
+        builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(service, "Disconnect"),
                 pending(service, ACTION_DISCONNECT, token));
         return true;
     }

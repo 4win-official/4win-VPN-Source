@@ -496,12 +496,12 @@ class XrayVpnService : VpnService() {
 
         val isWarp = configJson?.contains("__APP_FILES__") == true
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(VpnNotificationLabels.xrayTitle(mixMode, isWarp))
-            .setContentText("Tap to open • Reconnect or disconnect")
+            .setContentTitle(VpnNotificationLabels.xrayTitle(this, mixMode, isWarp))
+            .setContentText(VpnNotificationLabels.localized(this, "Tap to open • Reconnect or disconnect"))
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
+            .addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(this, "Reconnect"), reconnectPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(this, "Disconnect"), disconnectPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
 
@@ -517,10 +517,10 @@ class XrayVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Xray VPN Service",
+                VpnNotificationLabels.localized(this, "Xray VPN Service"),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Xray VPN connection status"
+                description = VpnNotificationLabels.localized(this, "Xray VPN connection status")
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)

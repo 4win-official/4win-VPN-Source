@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show PathMetric;
 
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 
 /// The 4win shield with a travelling mint/cyan highlight instead of a stock ring.
 /// Drawn as vectors so the same loader stays crisp in buttons and full pages.
@@ -61,7 +62,7 @@ class _FourWinLoaderState extends State<FourWinLoader>
         (isDark ? const Color(0xFF22CED0) : const Color(0xFF078799));
 
     return Semantics(
-      label: widget.semanticsLabel ?? 'Loading',
+      label: context.l10n.text(widget.semanticsLabel ?? 'Loading'),
       child: SizedBox.square(
         dimension: widget.size,
         child: RepaintBoundary(

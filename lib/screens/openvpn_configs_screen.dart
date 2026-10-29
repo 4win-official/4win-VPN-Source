@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -67,7 +68,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
+            content: LocalizedText(
               'Invalid OpenVPN config. Add a remote endpoint and a client directive.',
             ),
           ),
@@ -117,7 +118,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load configs: $e')),
+          SnackBar(content: LocalizedText('Failed to load configs: $e')),
         );
       }
     }
@@ -148,7 +149,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('❌ Invalid file format. Please select .ovpn, .conf, or .open file'),
+              content: LocalizedText('❌ Invalid file format. Please select .ovpn, .conf, or .open file'),
               duration: Duration(seconds: 3),
             ),
           );
@@ -177,7 +178,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('❌ Failed to read file: $e')),
+            SnackBar(content: LocalizedText('❌ Failed to read file: $e')),
           );
         }
         return;
@@ -186,7 +187,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       if (configContent == null || configContent.trim().isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('❌ File is empty or unreadable')),
+            const SnackBar(content: LocalizedText('❌ File is empty or unreadable')),
           );
         }
         return;
@@ -197,7 +198,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('❌ Invalid OpenVPN config format. Missing required fields (client, remote, dev)'),
+              content: LocalizedText('❌ Invalid OpenVPN config format. Missing required fields (client, remote, dev)'),
               duration: Duration(seconds: 4),
             ),
           );
@@ -242,7 +243,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Platform error: ${e.message ?? e.code}'),
+            content: LocalizedText('❌ Platform error: ${e.message ?? e.code}'),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -251,7 +252,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Error: $e'),
+            content: LocalizedText('❌ Error: $e'),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -266,13 +267,13 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Add Config'),
+        title: const LocalizedText('Add Config'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.check_circle, color: Colors.green, size: 48),
             const SizedBox(height: 16),
-            const Text(
+            const LocalizedText(
               '✅ Credentials found in config file',
               style: TextStyle(
                 color: Colors.green,
@@ -283,8 +284,8 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Config Name',
+              decoration: InputDecoration(
+                labelText: context.l10n.text('Config Name'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -293,7 +294,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const LocalizedText('Cancel'),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -301,7 +302,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
 
               if (name.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Name is required')),
+                  const SnackBar(content: LocalizedText('Name is required')),
                 );
                 return;
               }
@@ -322,20 +323,20 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                 if (success) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('✅ Config added successfully with embedded credentials'),
+                      content: LocalizedText('✅ Config added successfully with embedded credentials'),
                     ),
                   );
                   _loadConfigs();
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('❌ Failed to add config (name may already exist)'),
+                      content: LocalizedText('❌ Failed to add config (name may already exist)'),
                     ),
                   );
                 }
               }
             },
-            child: const Text('Add'),
+            child: const LocalizedText('Add'),
           ),
         ],
       ),
@@ -352,23 +353,23 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Config Details'),
+          title: const LocalizedText('Config Details'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Config Name',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.text('Config Name'),
                     border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: usernameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Username (Optional)',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.text('Username (Optional)'),
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -377,7 +378,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                   controller: passwordController,
                   obscureText: obscurePassword,
                   decoration: InputDecoration(
-                    labelText: 'Password (Optional)',
+                    labelText: context.l10n.text('Password (Optional)'),
                     border: const OutlineInputBorder(),
                     suffixIcon: IconButton(
                       icon: Icon(
@@ -399,7 +400,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
+              child: const LocalizedText('Cancel'),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -407,7 +408,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
 
                 if (name.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Name is required')),
+                    const SnackBar(content: LocalizedText('Name is required')),
                   );
                   return;
                 }
@@ -431,20 +432,20 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                   if (success) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('✅ Config added successfully'),
+                        content: LocalizedText('✅ Config added successfully'),
                       ),
                     );
                     _loadConfigs();
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('❌ Failed to add config (name may already exist)'),
+                        content: LocalizedText('❌ Failed to add config (name may already exist)'),
                       ),
                     );
                   }
                 }
               },
-              child: const Text('Add'),
+              child: const LocalizedText('Add'),
             ),
           ],
         ),
@@ -456,19 +457,19 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Config'),
-        content: Text('Are you sure you want to delete "${config.name}"?'),
+        title: const LocalizedText('Delete Config'),
+        content: LocalizedText('Are you sure you want to delete "${config.name}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const LocalizedText('Cancel'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
             ),
-            child: const Text('Delete'),
+            child: const LocalizedText('Delete'),
           ),
         ],
       ),
@@ -481,14 +482,14 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('✅ Config deleted successfully'),
+              content: LocalizedText('✅ Config deleted successfully'),
             ),
           );
           _loadConfigs();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('❌ Failed to delete config'),
+              content: LocalizedText('❌ Failed to delete config'),
             ),
           );
         }
@@ -516,7 +517,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     if (config.serverAddress == null || config.serverAddress!.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('❌ No server address found in config')),
+          const SnackBar(content: LocalizedText('❌ No server address found in config')),
         );
       }
       return;
@@ -564,14 +565,14 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                 children: [
                   Icon(Icons.check_circle, color: Colors.green),
                   SizedBox(width: 8),
-                  Text('Connection Test'),
+                  LocalizedText('Connection Test'),
                 ],
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  LocalizedText(
                     '✅ Server is reachable',
                     style: const TextStyle(
                       color: Colors.green,
@@ -580,10 +581,10 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text('Server: $serverAddress'),
-                  Text('Port: $serverPort'),
+                  LocalizedText('Server: $serverAddress'),
+                  LocalizedText('Port: $serverPort'),
                   const SizedBox(height: 8),
-                  Text(
+                  LocalizedText(
                     '⚡ Response Time: ${pingMs}ms',
                     style: TextStyle(
                       color: pingMs < 100 
@@ -595,7 +596,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(
+                  LocalizedText(
                     pingMs < 100 
                         ? '🟢 Excellent connection'
                         : pingMs < 300 
@@ -612,7 +613,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
+                  child: const LocalizedText('OK'),
                 ),
               ],
             ),
@@ -632,14 +633,14 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                 children: [
                   Icon(Icons.warning, color: Colors.red),
                   SizedBox(width: 8),
-                  Text('Connection Test'),
+                  LocalizedText('Connection Test'),
                 ],
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  const LocalizedText(
                     '❌ Cannot reach server',
                     style: TextStyle(
                       color: Colors.red,
@@ -648,10 +649,10 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text('Server: $serverAddress'),
-                  Text('Port: $serverPort'),
+                  LocalizedText('Server: $serverAddress'),
+                  LocalizedText('Port: $serverPort'),
                   const SizedBox(height: 8),
-                  Text(
+                  LocalizedText(
                     'Error: ${e.message}',
                     style: const TextStyle(
                       fontSize: 12,
@@ -665,7 +666,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                       color: Colors.blue.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Text(
+                    child: const LocalizedText(
                       '💡 This might be due to:\n'
                       '• Server is down\n'
                       '• Firewall blocking connection\n'
@@ -682,7 +683,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
+                  child: const LocalizedText('OK'),
                 ),
               ],
             ),
@@ -699,14 +700,14 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                 children: [
                   Icon(Icons.timer_off, color: Colors.orange),
                   SizedBox(width: 8),
-                  Text('Connection Test'),
+                  LocalizedText('Connection Test'),
                 ],
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  const LocalizedText(
                     '⏱️ Connection timeout',
                     style: TextStyle(
                       color: Colors.orange,
@@ -715,10 +716,10 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text('Server: $serverAddress'),
-                  Text('Port: $serverPort'),
+                  LocalizedText('Server: $serverAddress'),
+                  LocalizedText('Port: $serverPort'),
                   const SizedBox(height: 12),
-                  const Text(
+                  const LocalizedText(
                     'Server did not respond within 5 seconds. It might be slow or unreachable.',
                     style: TextStyle(fontSize: 12),
                   ),
@@ -727,7 +728,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
+                  child: const LocalizedText('OK'),
                 ),
               ],
             ),
@@ -740,7 +741,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     } catch (e) {
       if (mounted && !cancellation.isCancelled) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Test failed: $e')),
+          SnackBar(content: LocalizedText('❌ Test failed: $e')),
         );
       }
     } finally {
@@ -759,12 +760,12 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.grey[50],
       appBar: AppBar(
-        title: const Text('OpenVPN Configs'),
+        title: const LocalizedText('OpenVPN Configs'),
         actions: [
           IconButton(
             icon: const Icon(Icons.upload_file),
             onPressed: _pickAndAddConfigFile,
-            tooltip: 'Add .ovpn File',
+            tooltip: context.l10n.text('Add .ovpn File'),
           ),
         ],
       ),
@@ -781,7 +782,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                         color: Colors.grey[400],
                       ),
                       const SizedBox(height: 16),
-                      Text(
+                      LocalizedText(
                         'No OpenVPN configs',
                         style: TextStyle(
                           fontSize: 18,
@@ -789,7 +790,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
+                      LocalizedText(
                         'Tap upload icon to add .ovpn file',
                         style: TextStyle(
                           fontSize: 14,
@@ -847,7 +848,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                               '${config.serverAddress ?? 'Unknown'}:${config.serverPort ?? '?'}',
                               style: const TextStyle(fontSize: 13),
                             ),
-                            Text(
+                            LocalizedText(
                               'Protocol: ${config.protocol?.toUpperCase() ?? 'UDP'}',
                               style: TextStyle(
                                 fontSize: 12,
@@ -855,7 +856,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                               ),
                             ),
                             if (config.username != null)
-                              Text(
+                              LocalizedText(
                                 'Auth: ${config.username}',
                                 style: TextStyle(
                                   fontSize: 12,
@@ -877,7 +878,7 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                                   color: Colors.purple,
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: const Text(
+                                child: const LocalizedText(
                                   'Selected',
                                   style: TextStyle(
                                     color: Colors.white,
@@ -897,14 +898,14 @@ class _OpenVpnConfigsScreenState extends State<OpenVpnConfigsScreen> {
                                     : Colors.blue,
                               ),
                               onPressed: () => _testPingWithCancellation(config),
-                              tooltip: _pingTests.containsKey(config.name)
+                              tooltip: context.l10n.text(_pingTests.containsKey(config.name)
                                   ? 'Stop test'
-                                  : 'Test Ping',
+                                  : 'Test Ping'),
                             ),
                             IconButton(
                               icon: const Icon(Icons.delete, color: Colors.red),
                               onPressed: () => _confirmDelete(config),
-                              tooltip: 'Delete',
+                              tooltip: context.l10n.text('Delete'),
                             ),
                           ],
                         ),

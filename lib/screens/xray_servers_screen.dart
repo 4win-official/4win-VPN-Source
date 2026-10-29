@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
@@ -76,7 +77,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
+                  LocalizedText(
                     'Export "$title" (${servers.length})',
                     style: const TextStyle(
                         fontSize: 16, fontWeight: FontWeight.bold),
@@ -84,7 +85,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   if (hasEncrypted)
                     const Padding(
                       padding: EdgeInsets.only(top: 6),
-                      child: Text(
+                      child: LocalizedText(
                         '🔒 Encrypted servers are copied in their protected '
                         '4win form.',
                         style: TextStyle(fontSize: 12),
@@ -96,8 +97,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.link),
-              title: const Text('Copy share links'),
-              subtitle: const Text('Plain text, one link per line'),
+              title: const LocalizedText('Copy share links'),
+              subtitle: const LocalizedText('Plain text, one link per line'),
               onTap: () async {
                 await Clipboard.setData(ClipboardData(text: plain));
                 if (!ctx.mounted) return;
@@ -107,8 +108,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.data_object),
-              title: const Text('Copy as subscription (base64)'),
-              subtitle: const Text('Paste into other apps as a sub blob'),
+              title: const LocalizedText('Copy as subscription (base64)'),
+              subtitle: const LocalizedText('Paste into other apps as a sub blob'),
               onTap: () async {
                 await Clipboard.setData(ClipboardData(text: b64));
                 if (!ctx.mounted) return;
@@ -146,14 +147,14 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final result = await showDialog<(String, String)?>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Edit server'),
+        title: const LocalizedText('Edit server'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Name',
+              decoration: InputDecoration(
+                labelText: context.l10n.text('Name'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -161,21 +162,21 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             TextField(
               controller: linkController,
               maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Share link / configuration',
+              decoration: InputDecoration(
+                labelText: context.l10n.text('Share link / configuration'),
                 border: OutlineInputBorder(),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const LocalizedText('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(
               ctx,
               (nameController.text.trim(), linkController.text.trim()),
             ),
-            child: const Text('Save'),
+            child: const LocalizedText('Save'),
           ),
         ],
       ),
@@ -214,14 +215,14 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final result = await showDialog<(String, String)?>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Edit subscription group'),
+        title: const LocalizedText('Edit subscription group'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Group name',
+              decoration: InputDecoration(
+                labelText: context.l10n.text('Group name'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -229,21 +230,21 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             TextField(
               controller: urlController,
               keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: 'Subscription URL',
+              decoration: InputDecoration(
+                labelText: context.l10n.text('Subscription URL'),
                 border: OutlineInputBorder(),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const LocalizedText('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(
               ctx,
               (nameController.text.trim(), urlController.text.trim()),
             ),
-            child: const Text('Save'),
+            child: const LocalizedText('Save'),
           ),
         ],
       ),
@@ -264,13 +265,13 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete server?'),
-        content: Text('Remove "${s.remark.isEmpty ? s.address : s.remark}"?'),
+        title: const LocalizedText('Delete server?'),
+        content: LocalizedText('Remove "${s.remark.isEmpty ? s.address : s.remark}"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const LocalizedText('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: const LocalizedText('Delete'),
           ),
         ],
       ),
@@ -283,26 +284,26 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final mode = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete servers from "$title"?'),
-        content: const Text(
+        title: LocalizedText('Delete servers from "$title"?'),
+        content: const LocalizedText(
           'The group itself will remain. Choose which servers to remove.',
         ),
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, 'untested'),
-            child: const Text('Delete servers without a ping'),
+            child: const LocalizedText('Delete servers without a ping'),
           ),
           OutlinedButton(
             onPressed: () => Navigator.pop(ctx, 'bad'),
-            child: const Text('Delete failed or bad-ping servers'),
+            child: const LocalizedText('Delete failed or bad-ping servers'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, 'all'),
-            child: const Text('Delete all servers in this group'),
+            child: const LocalizedText('Delete all servers in this group'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: const LocalizedText('Cancel'),
           ),
         ],
       ),
@@ -334,19 +335,19 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const ListTile(
-              title: Text('Add to Xray'),
-              subtitle: Text('Choose a server or a subscription group'),
+              title: LocalizedText('Add to Xray'),
+              subtitle: LocalizedText('Choose a server or a subscription group'),
             ),
             ListTile(
               leading: const Icon(Icons.dns_outlined),
-              title: const Text('Add server'),
-              subtitle: const Text('Paste one or more share links'),
+              title: const LocalizedText('Add server'),
+              subtitle: const LocalizedText('Paste one or more share links'),
               onTap: () => Navigator.pop(ctx, 'server'),
             ),
             ListTile(
               leading: const Icon(Icons.link),
-              title: const Text('Add subscription group'),
-              subtitle: const Text('Add an HTTP(S) subscription URL'),
+              title: const LocalizedText('Add subscription group'),
+              subtitle: const LocalizedText('Add an HTTP(S) subscription URL'),
               onTap: () => Navigator.pop(ctx, 'subscription'),
             ),
             const SizedBox(height: 8),
@@ -368,38 +369,38 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final result = await showDialog<(String, String)?>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Subscription Group'),
+        title: const LocalizedText('Add Subscription Group'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: urlController,
               keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: 'Subscription URL',
-                hintText: 'https://example.com/sub.txt',
+              decoration: InputDecoration(
+                labelText: context.l10n.text('Subscription URL'),
+                hintText: context.l10n.text('https://example.com/sub.txt'),
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Group name (optional)',
-                hintText: 'My subscription',
+              decoration: InputDecoration(
+                labelText: context.l10n.text('Group name (optional)'),
+                hintText: context.l10n.text('My subscription'),
                 border: OutlineInputBorder(),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const LocalizedText('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(
               ctx,
               (urlController.text.trim(), nameController.text.trim()),
             ),
-            child: const Text('Add'),
+            child: const LocalizedText('Add'),
           ),
         ],
       ),
@@ -425,11 +426,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Xray Server'),
+        title: const LocalizedText('Add Xray Server'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            const LocalizedText(
               'Paste one or more share links (vless://, vmess://, '
               'trojan://, ss://) or 4win encrypted links (4ws://). '
               'One per line.',
@@ -440,8 +441,8 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
               controller: controller,
               maxLines: 5,
               minLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'vless://...\nvmess://...',
+              decoration: InputDecoration(
+                hintText: context.l10n.text('vless://...\nvmess://...'),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -450,11 +451,11 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: const LocalizedText('Cancel'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Add'),
+            child: const LocalizedText('Add'),
           ),
         ],
       ),
@@ -467,7 +468,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(added > 0
+        content: LocalizedText(added > 0
             ? 'Added $added server${added == 1 ? '' : 's'}'
             : 'No valid links found'),
         backgroundColor: added > 0 ? Colors.green : Colors.red,
@@ -481,7 +482,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(count > 0
+        content: LocalizedText(count > 0
             ? 'Free servers updated ($count configs)'
             : 'Could not update free servers'),
         backgroundColor: count > 0 ? Colors.green : Colors.orange,
@@ -497,7 +498,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(count >= 0
+        content: LocalizedText(count >= 0
             ? '"$title" updated ($count configs)'
             : 'Could not update "$title"'),
         backgroundColor: count >= 0 ? Colors.green : Colors.orange,
@@ -512,7 +513,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Xray Servers'),
+        title: const LocalizedText('Xray Servers'),
         actions: [
           Consumer<VpnProvider>(
             builder: (context, provider, _) => IconButton(
@@ -523,14 +524,14 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                       child: FourWinLoader(strokeWidth: 2),
                     )
                   : const Icon(Icons.cloud_download_outlined),
-              tooltip: 'Update free servers',
+              tooltip: context.l10n.text('Update free servers'),
               onPressed: provider.xrayRefreshing ? null : _refreshFreeGroup,
             ),
           ),
           Consumer<VpnProvider>(
             builder: (context, provider, _) => IconButton(
               icon: Icon(provider.xrayGroupTesting ? Icons.close : Icons.speed),
-              tooltip: provider.xrayGroupTesting ? 'Stop all tests' : 'Test all groups',
+              tooltip: context.l10n.text(provider.xrayGroupTesting ? 'Stop all tests' : 'Test all groups'),
               onPressed: provider.xrayGroupTesting
                   ? () => provider.cancelXrayTests()
                   : () {
@@ -541,7 +542,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.add),
-            tooltip: 'Add server',
+            tooltip: context.l10n.text('Add server'),
             onPressed: _showAddDialog,
           ),
         ],
@@ -624,7 +625,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         onPressed: _showAddDialog,
         backgroundColor: accent,
         icon: const Icon(Icons.add),
-        label: const Text('Add Server'),
+        label: const LocalizedText('Add Server'),
       ),
     );
   }
@@ -674,7 +675,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         if (index == shown) {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(
+            child: LocalizedText(
               '…and ${spec.servers.length - shown} more servers',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -789,7 +790,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                                 ),
                               ),
                               const SizedBox(width: 5),
-                              Text(
+                              LocalizedText(
                                 tcpTesting
                                     ? 'TCP ping in progress…'
                                     : 'Ping in progress…',
@@ -801,7 +802,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                               ),
                             ],
                           )
-                        : Text(
+                        : LocalizedText(
                             locked
                                 ? (groupSelected
                                       ? 'Selected — connects to the fastest server'
@@ -822,23 +823,23 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             // Selected indicator for the whole free group
             if (groupSelected)
               Padding(
-                padding: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsetsDirectional.only(end: 4),
                 child: Icon(Icons.check_circle, color: accent),
               ),
             // Export whole group (copy all links to clipboard)
             IconButton(
-              tooltip: 'Export group',
+              tooltip: context.l10n.text('Export group'),
               icon: Icon(Icons.copy_all, color: accent),
               onPressed: () => _exportServers(servers, title),
             ),
             IconButton(
-              tooltip: 'Delete selected servers',
+              tooltip: context.l10n.text('Delete selected servers'),
               icon: Icon(Icons.delete_outline, color: Colors.redAccent),
               onPressed: () => _confirmDeleteGroup(groupKey, title),
             ),
             if (testing || tcpTesting)
               IconButton(
-                tooltip: tcpTesting ? 'Stop TCP tests' : 'Stop URL tests',
+                tooltip: context.l10n.text(tcpTesting ? 'Stop TCP tests' : 'Stop URL tests'),
                 icon: const Icon(Icons.close, color: Colors.redAccent),
                 onPressed: () => provider.cancelXrayTests(
                   group: groupKey,
@@ -846,7 +847,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                 ),
               ),
             PopupMenuButton<String>(
-              tooltip: 'More group actions',
+              tooltip: context.l10n.text('More group actions'),
               icon: Icon(Icons.more_vert, color: accent),
               itemBuilder: (ctx) => [
                 if (isUserSubscription)
@@ -855,7 +856,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     child: ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(Icons.edit_outlined),
-                      title: Text('Edit subscription'),
+                      title: LocalizedText('Edit subscription'),
                     ),
                   ),
                 if (isRefreshable)
@@ -864,7 +865,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                     child: ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(Icons.refresh),
-                      title: Text('Update group'),
+                      title: LocalizedText('Update group'),
                     ),
                   ),
                 const PopupMenuItem(
@@ -872,7 +873,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.sort),
-                    title: Text('Sort by ping'),
+                    title: LocalizedText('Sort by ping'),
                   ),
                 ),
                 PopupMenuItem(
@@ -881,7 +882,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(testing ? Icons.close : Icons.speed),
-                    title: Text(testing ? 'Stop URL tests' : 'URL ping all'),
+                    title: LocalizedText(testing ? 'Stop URL tests' : 'URL ping all'),
                   ),
                 ),
                 PopupMenuItem(
@@ -890,7 +891,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(tcpTesting ? Icons.close : Icons.cable),
-                    title: Text(tcpTesting ? 'Stop TCP tests' : 'TCP ping all'),
+                    title: LocalizedText(tcpTesting ? 'Stop TCP tests' : 'TCP ping all'),
                   ),
                 ),
               ],
@@ -922,7 +923,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             ),
             // Expand / collapse arrow
             IconButton(
-              tooltip: expanded ? 'Collapse' : 'Expand',
+              tooltip: context.l10n.text(expanded ? 'Collapse' : 'Expand'),
               icon: AnimatedRotation(
                 turns: expanded ? 0.5 : 0,
                 duration: MediaQuery.disableAnimationsOf(context)
@@ -955,7 +956,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             color: accent.withValues(alpha: 0.6),
           ),
           const SizedBox(height: 16),
-          Text(
+          LocalizedText(
             'No Xray servers yet',
             style: TextStyle(
               fontSize: 18,
@@ -966,7 +967,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
+            child: LocalizedText(
               'Pull down to load free servers, or tap "Add Server" to paste '
               'a vless://, vmess://, trojan:// or ss:// share link.',
               textAlign: TextAlign.center,
@@ -1046,14 +1047,14 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            tooltip: 'Copy link',
+            tooltip: context.l10n.text('Copy link'),
             icon: Icon(Icons.copy, color: accent, size: 18),
             visualDensity: VisualDensity.compact,
             onPressed: () => _copyOneServer(s),
           ),
           if (testing || tcpTesting)
             IconButton(
-              tooltip: 'Stop test',
+              tooltip: context.l10n.text('Stop test'),
               icon: const Icon(Icons.close, color: Colors.redAccent),
               visualDensity: VisualDensity.compact,
               onPressed: () {
@@ -1065,7 +1066,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             )
           else
           PopupMenuButton<String>(
-            tooltip: 'More server actions',
+            tooltip: context.l10n.text('More server actions'),
             icon: Icon(Icons.more_vert, color: accent),
             itemBuilder: (ctx) => [
               if (!s.encrypted &&
@@ -1076,7 +1077,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.edit_outlined),
-                    title: Text('Edit'),
+                    title: LocalizedText('Edit'),
                   ),
                 ),
               PopupMenuItem(
@@ -1091,7 +1092,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                           child: FourWinLoader(strokeWidth: 2),
                         )
                       : const Icon(Icons.speed),
-                  title: const Text('URL ping'),
+                  title: const LocalizedText('URL ping'),
                 ),
               ),
               PopupMenuItem(
@@ -1106,7 +1107,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
                           child: FourWinLoader(strokeWidth: 2),
                         )
                       : const Icon(Icons.cable),
-                  title: const Text('TCP ping'),
+                  title: const LocalizedText('TCP ping'),
                 ),
               ),
             ],
@@ -1130,7 +1131,7 @@ class _XrayServersScreenState extends State<XrayServersScreen> {
             const Icon(Icons.radio_button_unchecked, color: Colors.grey),
           if (s.group.isEmpty || s.group == XrayServerService.userLinksGroup)
             IconButton(
-              tooltip: 'Delete server',
+              tooltip: context.l10n.text('Delete server'),
               icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
               onPressed: () => _confirmDeleteServer(s),
             )

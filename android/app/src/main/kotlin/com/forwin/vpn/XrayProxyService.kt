@@ -258,11 +258,11 @@ class XrayProxyService : Service() {
         )
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🔌 Xray Proxy (127.0.0.1:4444)")
-            .setContentText("Local proxy running • Reconnect or disconnect")
+            .setContentText(VpnNotificationLabels.localized(this, "Local proxy running • Reconnect or disconnect"))
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_popup_sync, "Reconnect", reconnectPendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
+            .addAction(android.R.drawable.ic_popup_sync, VpnNotificationLabels.localized(this, "Reconnect"), reconnectPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, VpnNotificationLabels.localized(this, "Disconnect"), disconnectPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -278,10 +278,10 @@ class XrayProxyService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Xray Proxy Service",
+                VpnNotificationLabels.localized(this, "Xray Proxy Service"),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Xray local proxy status"
+                description = VpnNotificationLabels.localized(this, "Xray local proxy status")
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java)

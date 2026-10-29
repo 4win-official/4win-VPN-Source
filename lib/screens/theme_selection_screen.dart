@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import 'default_theme_settings_screen.dart';
@@ -22,7 +23,7 @@ class ThemeSelectionScreen extends StatelessWidget {
           ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(
+        title: LocalizedText(
           'VPN Themes',
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
@@ -75,7 +76,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
+                            LocalizedText(
                               themeProvider.isDarkMode
                                   ? 'Night mode'
                                   : 'Day mode',
@@ -86,7 +87,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(height: 4),
-                            Text(
+                            LocalizedText(
                               toggleLocked
                                   ? 'This theme uses a fixed mode'
                                   : 'Switch between light and dark',
@@ -113,7 +114,7 @@ class ThemeSelectionScreen extends StatelessWidget {
 
                 // ── System default theme (with its OWN settings gear) ──────
                 _ThemeCard(
-                  title: 'System Default',
+                  title: context.l10n.text('System Default'),
                   description: 'Use light/dark mode',
                   icon: Icons.brightness_auto,
                   color: Colors.grey,
@@ -132,7 +133,7 @@ class ThemeSelectionScreen extends StatelessWidget {
 
                 // ── Liquid (highlighted, new premium theme) ──────────
                 _ThemeCard(
-                  title: 'Liquid',
+                  title: context.l10n.text('Liquid'),
                   description: 'Modern frosted-glass look (Light + Dark)',
                   icon: Icons.blur_on,
                   color: const Color(0xFF5B8CFF),
@@ -145,7 +146,7 @@ class ThemeSelectionScreen extends StatelessWidget {
 
                 // ── Pixel theme ────────────────────────────────────────────
                 _ThemeCard(
-                  title: 'Pixel Theme 🎮',
+                  title: context.l10n.text('Pixel Theme 🎮'),
                   description: 'Retro 8-bit pixelated style (Light + Dark)',
                   icon: Icons.grid_4x4,
                   color: Colors.purple,
@@ -157,7 +158,7 @@ class ThemeSelectionScreen extends StatelessWidget {
 
                 // ── Pink theme ─────────────────────────────────────────────
                 _ThemeCard(
-                  title: 'Pink Theme 💕',
+                  title: context.l10n.text('Pink Theme 💕'),
                   description: 'Cute pink theme with day & night versions',
                   icon: Icons.favorite,
                   color: const Color(0xFFFF69B4),
@@ -171,7 +172,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                 const SizedBox(height: 24),
 
                 _ThemeCard(
-                  title: 'Cat',
+                  title: context.l10n.text('Cat'),
                   description: 'Cozy paws, quiet company (Light + Dark)',
                   icon: Icons.pets_rounded,
                   color: isDark
@@ -185,8 +186,8 @@ class ThemeSelectionScreen extends StatelessWidget {
 
                 // ── Seasonal Themes group ──────────────────────────────────
                 _GroupHeader(
-                  title: 'Seasonal Themes',
-                  subtitle: 'Rain · Snow · Day & Night · Autumn',
+                  title: context.l10n.text('Seasonal Themes'),
+                  subtitle: context.l10n.text('Rain · Snow · Day & Night · Autumn'),
                   icon: Icons.calendar_today,
                   isDark: isDark,
                 ),
@@ -213,7 +214,7 @@ class ThemeSelectionScreen extends StatelessWidget {
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
+                        child: LocalizedText(
                           'Some themes use a fixed day/night mode, so the toggle '
                           'above is disabled while they are active.',
                           style: TextStyle(
@@ -301,7 +302,7 @@ class _SeasonalGroup extends StatelessWidget {
       child: Column(
         children: [
           _ThemeCard(
-            title: 'Rain Theme 🌧️',
+            title: context.l10n.text('Rain Theme 🌧️'),
             description: 'Rainy day atmosphere (Dark mode only)',
             icon: Icons.water_drop,
             color: Colors.blue,
@@ -311,7 +312,7 @@ class _SeasonalGroup extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _ThemeCard(
-            title: 'Snow Theme ❄️',
+            title: context.l10n.text('Snow Theme ❄️'),
             description: 'Dark mode with falling snow',
             icon: Icons.ac_unit,
             color: Colors.lightBlue,
@@ -322,7 +323,7 @@ class _SeasonalGroup extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _ThemeCard(
-            title: 'Day & Night',
+            title: context.l10n.text('Day & Night'),
             description: 'Golden sun by day, moonlit sky by night',
             icon: isDark ? Icons.nightlight_round : Icons.wb_sunny,
             color: isDark ? const Color(0xFF9AB8FF) : const Color(0xFFFF9800),
@@ -332,7 +333,7 @@ class _SeasonalGroup extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _ThemeCard(
-            title: 'Autumn Theme 🍂',
+            title: context.l10n.text('Autumn Theme 🍂'),
             description: 'Falling leaves (Light + Dark)',
             icon: Icons.park,
             color: const Color(0xFFD35400),
@@ -452,7 +453,7 @@ class _ThemeCard extends StatelessWidget {
                     Icons.settings,
                     color: isDark ? Colors.white54 : Colors.black45,
                   ),
-                  tooltip: 'Theme settings',
+                  tooltip: context.l10n.text('Theme settings'),
                   onPressed: onSettings,
                 ),
 
