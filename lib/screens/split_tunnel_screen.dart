@@ -161,7 +161,7 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const FourWinLoader(
+                    FourWinLoader(
                       size: 52,
                       semanticsLabel: context.l10n.text('Loading installed apps'),
                     ),
@@ -225,7 +225,7 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
                       ),
                       const SizedBox(height: 8),
                       TextField(
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           prefixIcon: Icon(Icons.search),
                           hintText: context.l10n.text('Search apps'),
                           border: OutlineInputBorder(),
