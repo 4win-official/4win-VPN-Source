@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/vpn_provider.dart';
+import '../providers/app_mode_provider.dart';
 import '../widgets/four_win_loader.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/snow_animation.dart';
@@ -38,6 +39,7 @@ import 'xray_servers_screen.dart';
 import 'sstp_servers_screen.dart';
 import 'proxy_servers_screen.dart';
 import 'secret_text_screen.dart';
+import 'simple_mode_screens.dart';
 import '../services/update_service.dart';
 import '../services/update_notification_service.dart';
 import '../widgets/update_dialog.dart';
@@ -86,7 +88,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             _promptOpenVpnCredentials;
       }
       await _checkVpnPermissionOnEntry();
-      await _maybeShowGuide();
+      if (mounted && !context.read<AppModeProvider>().isSimpleMode) {
+        await _maybeShowGuide();
+      }
       await _maybeAskForUpdateNotificationConsent();
       final pendingUpdate = await _updateNotifications.consumePendingUpdate();
       if (pendingUpdate != null) {
@@ -356,6 +360,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    if (context.watch<AppModeProvider>().isSimpleMode) {
+      return const SimpleHomeScreen();
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final themeProvider = context.watch<ThemeProvider>();
@@ -451,6 +458,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
         actions: [
+          IconButton(
+            icon: Icon(Icons.tune, color: iconColor),
+            tooltip: context.l10n.text('Switch to Simple'),
+            onPressed: () {
+              context
+                  .read<AppModeProvider>()
+                  .setMode(AppExperienceMode.simple);
+            },
+          ),
           // Secret Text tool — encode/decode text so only 4win VPN can read it.
           IconButton(
             icon: Icon(Icons.enhanced_encryption_outlined, color: iconColor),

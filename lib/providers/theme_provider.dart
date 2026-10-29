@@ -16,26 +16,34 @@ enum AppTheme {
 
 class ThemeProvider with ChangeNotifier {
   static const String _darkModeKey = 'is_dark_mode';
+  static const String _simpleDarkModeKey = 'simple_is_dark_mode';
   static const String _themeKey = 'selected_theme';
   // Custom background images for the DEFAULT (system) theme only — one per
   // brightness, so day and night can each have their own picture.
   static const String _customBgLightKey = 'custom_bg_light';
   static const String _customBgDarkKey = 'custom_bg_dark';
-
   bool _isDarkMode = false;
+  bool _simpleIsDarkMode = false;
+  bool _simpleMode = false;
   AppTheme _selectedTheme = AppTheme.system;
   String? _customBgLightPath;
   String? _customBgDarkPath;
 
-  bool get isDarkMode => _isDarkMode;
-  AppTheme get selectedTheme => _selectedTheme;
-  bool get isThemeActive => _selectedTheme != AppTheme.system;
+  bool get isDarkMode => _simpleMode ? _simpleIsDarkMode : _isDarkMode;
+  AppTheme get selectedTheme => _simpleMode ? AppTheme.system : _selectedTheme;
+  bool get isThemeActive => selectedTheme != AppTheme.system;
+
+  /// AppModeProvider owns the stored mode. This changes only which appearance
+  /// is rendered; neither Advanced theme value is rewritten on mode switches.
+  void setSimpleMode(bool simpleMode) {
+    _simpleMode = simpleMode;
+  }
 
   /// The custom background image path for the CURRENT brightness — but ONLY for
   /// the default (system) theme. Other themes have their own fixed visuals, so
-  /// this returns null for them. Returns null when the user hasn't set one.
+  /// this returns null when the user hasn't set one or Simple mode is active.
   String? get customBackgroundPath {
-    if (_selectedTheme != AppTheme.system) return null;
+    if (_simpleMode || _selectedTheme != AppTheme.system) return null;
     return _isDarkMode ? _customBgDarkPath : _customBgLightPath;
   }
 
@@ -46,6 +54,7 @@ class ThemeProvider with ChangeNotifier {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     _isDarkMode = prefs.getBool(_darkModeKey) ?? false;
+    _simpleIsDarkMode = prefs.getBool(_simpleDarkModeKey) ?? false;
     final themeIndex = prefs.getInt(_themeKey) ?? AppTheme.system.index;
     _selectedTheme = _themeFromPersistedIndex(themeIndex);
     // Crying was removed from the picker; old saved values safely fall back to
@@ -81,10 +90,12 @@ class ThemeProvider with ChangeNotifier {
   }
 
   Future<void> toggleTheme() async {
-    // Only the weather themes have a fixed brightness.
-    if (isModeLocked) {
+    if (_simpleMode) {
+      await setSimpleDarkMode(!_simpleIsDarkMode);
       return;
     }
+    // Only the weather themes have a fixed brightness.
+    if (isModeLocked) return;
 
     _isDarkMode = !_isDarkMode;
     final prefs = await SharedPreferences.getInstance();
@@ -92,9 +103,18 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Simple mode keeps its own brightness preference so its settings do not
+  /// replace the user's Advanced theme brightness.
+  Future<void> setSimpleDarkMode(bool isDark) async {
+    _simpleIsDarkMode = isDark;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_simpleDarkModeKey, isDark);
+    notifyListeners();
+  }
+
   /// Whether the day/night toggle is locked for the currently-selected theme.
   bool get isModeLocked =>
-      _selectedTheme == AppTheme.snow || _selectedTheme == AppTheme.rain;
+      selectedTheme == AppTheme.snow || selectedTheme == AppTheme.rain;
 
   static AppTheme _themeFromPersistedIndex(int index) {
     if (index < 0 || index >= AppTheme.values.length) {
@@ -126,14 +146,13 @@ class ThemeProvider with ChangeNotifier {
     }
 
     // Day & Night and other adaptive themes preserve the current brightness.
-
     notifyListeners();
   }
 
   /// Accent/seed colour that varies by the selected theme so the whole app
-  /// (buttons, switches, etc.) matches the chosen mood.
+  /// (buttons, switches, etc.) matches the user's appearance.
   Color get _seedColor {
-    switch (_selectedTheme) {
+    switch (selectedTheme) {
       case AppTheme.pink:
         return const Color(0xFFFF69B4);
       case AppTheme.rain:
@@ -141,7 +160,7 @@ class ThemeProvider with ChangeNotifier {
       case AppTheme.snow:
         return const Color(0xFF4FC3F7);
       case AppTheme.summer:
-        return _isDarkMode ? const Color(0xFF9AB8FF) : const Color(0xFFFF9800);
+        return isDarkMode ? const Color(0xFF9AB8FF) : const Color(0xFFFF9800);
       case AppTheme.autumn:
         return const Color(0xFFD35400);
       case AppTheme.liquidGlass:
@@ -149,7 +168,7 @@ class ThemeProvider with ChangeNotifier {
       case AppTheme.crying:
         return const Color(0xFF4CAF50);
       case AppTheme.cat:
-        return _isDarkMode ? const Color(0xFFAFD5C3) : const Color(0xFFAC6549);
+        return isDarkMode ? const Color(0xFFAFD5C3) : const Color(0xFFAC6549);
       case AppTheme.pixel:
       case AppTheme.system:
         return const Color(0xFF4CAF50);
@@ -161,13 +180,13 @@ class ThemeProvider with ChangeNotifier {
       seedColor: _seedColor,
       brightness: Brightness.light,
     ),
-    fontFamily: _selectedTheme == AppTheme.pixel ? 'monospace' : null,
+    fontFamily: selectedTheme == AppTheme.pixel ? 'monospace' : null,
     useMaterial3: true,
-    scaffoldBackgroundColor: _selectedTheme == AppTheme.cat
+    scaffoldBackgroundColor: selectedTheme == AppTheme.cat
         ? const Color(0xFFFFF8EE)
         : Colors.white,
     appBarTheme: AppBarTheme(
-      backgroundColor: _selectedTheme == AppTheme.cat
+      backgroundColor: selectedTheme == AppTheme.cat
           ? const Color(0xFFFFF8EE)
           : Colors.white,
       foregroundColor: Colors.black87,
@@ -180,13 +199,13 @@ class ThemeProvider with ChangeNotifier {
       seedColor: _seedColor,
       brightness: Brightness.dark,
     ),
-    fontFamily: _selectedTheme == AppTheme.pixel ? 'monospace' : null,
+    fontFamily: selectedTheme == AppTheme.pixel ? 'monospace' : null,
     useMaterial3: true,
-    scaffoldBackgroundColor: _selectedTheme == AppTheme.cat
+    scaffoldBackgroundColor: selectedTheme == AppTheme.cat
         ? const Color(0xFF15252B)
         : const Color(0xFF121212),
     appBarTheme: AppBarTheme(
-      backgroundColor: _selectedTheme == AppTheme.cat
+      backgroundColor: selectedTheme == AppTheme.cat
           ? const Color(0xFF15252B)
           : const Color(0xFF1E1E1E),
       foregroundColor: Colors.white,
@@ -194,5 +213,5 @@ class ThemeProvider with ChangeNotifier {
     ),
   );
 
-  ThemeData get currentTheme => _isDarkMode ? darkTheme : lightTheme;
+  ThemeData get currentTheme => isDarkMode ? darkTheme : lightTheme;
 }

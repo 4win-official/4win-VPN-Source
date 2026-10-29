@@ -3,10 +3,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'l10n/app_localizations.dart';
 import 'providers/app_locale_provider.dart';
+import 'providers/app_mode_provider.dart';
 import 'providers/vpn_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/language_selection_screen.dart';
 import 'screens/loading_screen.dart';
+import 'screens/simple_mode_screens.dart';
 import 'screens/openvpn_configs_screen.dart';
 import 'services/ovpn_import_service.dart';
 import 'services/connection_logger.dart';
@@ -79,14 +81,20 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => AppLocaleProvider()),
+        ChangeNotifierProvider(create: (_) => AppModeProvider()),
+        ChangeNotifierProxyProvider<AppModeProvider, ThemeProvider>(
+          create: (_) => ThemeProvider(),
+          update: (_, appMode, themeProvider) =>
+              (themeProvider ?? ThemeProvider())
+                ..setSimpleMode(appMode.isSimpleMode),
+        ),
         ChangeNotifierProvider<VpnProvider>(
           create: (_) => VpnProvider(),
         ),
       ],
-      child: Consumer2<ThemeProvider, AppLocaleProvider>(
-        builder: (context, themeProvider, appLocale, _) {
+      child: Consumer3<ThemeProvider, AppLocaleProvider, AppModeProvider>(
+        builder: (context, themeProvider, appLocale, appMode, _) {
           return MaterialApp(
             navigatorKey: navigatorKey,
             title: context.l10n.text('4win VPN'),
@@ -105,12 +113,15 @@ class _MyAppState extends State<MyApp> {
                 themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
             builder: (context, child) {
               final navigator = child ?? const SizedBox.shrink();
-              if (themeProvider.selectedTheme == AppTheme.pixel) {
+              if (!appMode.isSimpleMode &&
+                  themeProvider.selectedTheme == AppTheme.pixel) {
                 return PixelationFilter(child: navigator);
               }
               return navigator;
             },
-            home: const LanguageGate(child: LoadingScreen()),
+            home: const LanguageGate(
+              child: AppModeGate(child: LoadingScreen()),
+            ),
           );
         },
       ),

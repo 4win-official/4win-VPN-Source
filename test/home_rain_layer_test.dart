@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vpn_swift/models/vpn_server.dart';
 import 'package:vpn_swift/models/openvpn_config.dart';
+import 'package:vpn_swift/providers/app_mode_provider.dart';
 import 'package:vpn_swift/providers/theme_provider.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/screens/home_screen.dart';
@@ -54,7 +55,8 @@ class FakeVpnProvider implements VpnProvider {
   Future<void> connect({bool forceBypassCert = false}) async => connectCalls++;
 
   @override
-  Future<void> disconnect() async => disconnectCalls++;
+  Future<void> disconnect({bool preserveSimpleAttempt = false}) async =>
+      disconnectCalls++;
 
   @override
   noSuchMethod(Invocation invocation) {
@@ -80,10 +82,13 @@ class FakeVpnProvider implements VpnProvider {
 }
 
 Future<void> pumpHome(WidgetTester tester, FakeVpnProvider provider) async {
+  final appMode = AppModeProvider();
+  await appMode.setMode(AppExperienceMode.advanced);
   final themeProvider = ThemeProvider();
   await tester.pumpWidget(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider<AppModeProvider>.value(value: appMode),
         ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
         ChangeNotifierProvider<VpnProvider>.value(value: provider),
       ],

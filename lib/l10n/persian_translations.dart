@@ -148,6 +148,21 @@ const Map<String, String> appPersianTranslations = <String, String>{
   r'''Failed''': r'''ناموفق''',
   r'''Testing...''': r'''در حال آزمایش...''',
   r'''Settings''': r'''تنظیمات''',
+  r'''How would you like to use the app?''':
+      r'''دوست دارید چگونه از برنامه استفاده کنید؟''',
+  r'''Simple''': r'''ساده''',
+  r'''Connect with one tap; the app chooses for you.''':
+      r'''با یک ضربه وصل شوید؛ برنامه خودش انتخاب می‌کند.''',
+  r'''Choose protocols, servers, and detailed settings.''':
+      r'''پروتکل‌ها، سرورها و تنظیمات جزئی را خودتان انتخاب کنید.''',
+  r'''Switch to Advanced''': r'''رفتن به حالت پیشرفته''',
+  r'''Switch to Simple''': r'''رفتن به حالت ساده''',
+  r'''Appearance''': r'''ظاهر''',
+  r'''Light''': r'''روشن''',
+  r'''Dark''': r'''تاریک''',
+  r'''Disconnect''': r'''قطع اتصال''',
+  r'''Could not connect with Plus, WARP, or free Xray.''':
+      r'''اتصال برقرار نشد؛ اتصال Plus، WARP یا Xray رایگان ناموفق بود.''',
   r'''Username''': r'''نام کاربری''',
   r'''Password''': r'''گذرواژه''',
   r'''Secret Text''': r'''متن محرمانه''',
