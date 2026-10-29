@@ -281,7 +281,7 @@ class XrayProxyService : Service() {
                 VpnNotificationLabels.localized(this, "Xray Proxy Service"),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = VpnNotificationLabels.localized(this, "Xray local proxy status")
+                description = VpnNotificationLabels.localized(this@XrayProxyService, "Xray local proxy status")
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java)

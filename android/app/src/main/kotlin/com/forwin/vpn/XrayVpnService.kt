@@ -520,7 +520,7 @@ class XrayVpnService : VpnService() {
                 VpnNotificationLabels.localized(this, "Xray VPN Service"),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = VpnNotificationLabels.localized(this, "Xray VPN connection status")
+                description = VpnNotificationLabels.localized(this@XrayVpnService, "Xray VPN connection status")
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)

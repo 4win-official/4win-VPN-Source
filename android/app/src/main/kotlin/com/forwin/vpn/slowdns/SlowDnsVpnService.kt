@@ -13,6 +13,7 @@ import com.forwin.vpn.R
 import com.forwin.vpn.LiveTrafficNotification
 import com.forwin.vpn.SplitTunnel
 import com.forwin.vpn.VpnStateBroadcast
+import com.forwin.vpn.VpnNotificationLabels
 import go.Seq
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController

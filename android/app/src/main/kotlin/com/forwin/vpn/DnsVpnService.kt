@@ -292,7 +292,7 @@ class DnsVpnService : VpnService() {
                 VpnNotificationLabels.localized(this, "DNS VPN Service"),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = VpnNotificationLabels.localized(this, "Shows when DNS VPN is active")
+                description = VpnNotificationLabels.localized(this@DnsVpnService, "Shows when DNS VPN is active")
             }
             
             val notificationManager = getSystemService(NotificationManager::class.java)

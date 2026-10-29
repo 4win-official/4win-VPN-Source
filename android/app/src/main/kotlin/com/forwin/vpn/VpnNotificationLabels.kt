@@ -173,7 +173,7 @@ object VpnNotificationLabels {
                     val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
                     val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
                     if (title == null && text == null && subText == null && bigText == null) return@runCatching
-                    val builder = NotificationCompat.Builder.recoverBuilder(context, notification)
+                    val builder = NotificationCompat.Builder(context, notification)
                     if (title != null) builder.setContentTitle(localized(context, title))
                     if (text != null) builder.setContentText(localized(context, text))
                     if (subText != null) builder.setSubText(localized(context, subText))
