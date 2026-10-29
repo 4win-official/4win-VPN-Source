@@ -157,6 +157,7 @@ const Map<String, String> appPersianTranslations = <String, String>{
       r'''پروتکل‌ها، سرورها و تنظیمات جزئی را خودتان انتخاب کنید.''',
   r'''Switch to Advanced''': r'''رفتن به حالت پیشرفته''',
   r'''Switch to Simple''': r'''رفتن به حالت ساده''',
+  r'''App Mode''': r'''حالت برنامه''',
   r'''Appearance''': r'''ظاهر''',
   r'''Light''': r'''روشن''',
   r'''Dark''': r'''تاریک''',

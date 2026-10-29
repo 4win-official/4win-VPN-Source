@@ -165,8 +165,8 @@ class _ModeChoice extends StatelessWidget {
   }
 }
 
-/// The intentionally small Simple-mode home: one connection control, one
-/// mode switch, and one settings entry point.
+/// The intentionally small Simple-mode home: one connection control and one
+/// settings entry point. The mode switch lives inside Simple Settings.
 class SimpleHomeScreen extends StatelessWidget {
   const SimpleHomeScreen({super.key});
 
@@ -182,18 +182,6 @@ class SimpleHomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const LocalizedText('4win VPN'),
         actions: [
-          IconButton(
-            tooltip: context.l10n.text('Switch to Advanced'),
-            icon: const Icon(Icons.tune),
-            onPressed: () async {
-              context
-                  .read<VpnProvider>()
-                  .restoreSimpleAdvancedProtocolIfStopped();
-              await context
-                  .read<AppModeProvider>()
-                  .setMode(AppExperienceMode.advanced);
-            },
-          ),
           IconButton(
             tooltip: context.l10n.text('Settings'),
             icon: const Icon(Icons.settings_outlined),
@@ -319,6 +307,23 @@ class SimpleSettingsScreen extends StatelessWidget {
           const SizedBox(height: 20),
           Divider(color: isDark ? Colors.white24 : Colors.black12),
           const AppLanguageSetting(),
+          const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.tune),
+            title: const LocalizedText('Switch to Advanced'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () async {
+              context
+                  .read<VpnProvider>()
+                  .restoreSimpleAdvancedProtocolIfStopped();
+              await context
+                  .read<AppModeProvider>()
+                  .setMode(AppExperienceMode.advanced);
+              if (!context.mounted) return;
+              Navigator.of(context).pop();
+            },
+          ),
         ],
       ),
     );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vpn_swift/providers/app_locale_provider.dart';
 import 'package:vpn_swift/providers/app_mode_provider.dart';
 import 'package:vpn_swift/providers/theme_provider.dart';
 import 'package:vpn_swift/screens/simple_mode_screens.dart';
@@ -41,6 +42,30 @@ void main() {
       ),
       'simple',
     );
+  });
+
+  testWidgets('Simple settings contains the switch to Advanced action', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final theme = ThemeProvider();
+    final locale = AppLocaleProvider();
+    addTearDown(theme.dispose);
+    addTearDown(locale.dispose);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<ThemeProvider>.value(value: theme),
+          ChangeNotifierProvider<AppLocaleProvider>.value(value: locale),
+        ],
+        child: const MaterialApp(home: SimpleSettingsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Switch to Advanced'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   test('mode changes write only the dedicated mode preference', () async {

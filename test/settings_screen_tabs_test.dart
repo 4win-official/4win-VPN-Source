@@ -47,18 +47,21 @@ void main() {
       expect(find.text(label), findsOneWidget);
     }
     expect(find.text('Security'), findsOneWidget);
+    expect(find.text('Switch to Simple'), findsOneWidget);
 
     await tester.ensureVisible(find.text('OpenVPN'));
     await tester.tap(find.text('OpenVPN'));
     await tester.pumpAndSettle();
     expect(find.text('OpenVPN Settings'), findsOneWidget);
     expect(find.text('Security'), findsNothing);
+    expect(find.text('Switch to Simple'), findsNothing);
 
     await tester.ensureVisible(find.text('General'));
     await tester.tap(find.text('General'));
     await tester.pumpAndSettle();
     expect(find.text('Security'), findsOneWidget);
     expect(find.text('Split Tunneling'), findsOneWidget);
+    expect(find.text('Switch to Simple'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());

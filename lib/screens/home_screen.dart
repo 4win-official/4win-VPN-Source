@@ -459,15 +459,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
         actions: [
-          IconButton(
-            icon: Icon(Icons.tune, color: iconColor),
-            tooltip: context.l10n.text('Switch to Simple'),
-            onPressed: () {
-              context
-                  .read<AppModeProvider>()
-                  .setMode(AppExperienceMode.simple);
-            },
-          ),
           // Secret Text tool — encode/decode text so only 4win VPN can read it.
           IconButton(
             icon: Icon(Icons.enhanced_encryption_outlined, color: iconColor),

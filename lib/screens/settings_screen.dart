@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
+import '../providers/app_mode_provider.dart';
 import '../providers/vpn_provider.dart';
 import '../widgets/app_language_setting.dart';
 import '../widgets/four_win_loader.dart';
@@ -2040,6 +2041,32 @@ class _SettingsScreenState extends State<SettingsScreen>
                   _SettingsSection(
                     title: context.l10n.text('Language'),
                     children: const [AppLanguageSetting()],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
+                if (isGeneralTab) ...[
+                  _SettingsSection(
+                    title: context.l10n.text('App Mode'),
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.tune),
+                        title: const LocalizedText('Switch to Simple'),
+                        trailing: const Icon(
+                          Icons.arrow_forward_ios,
+                          size: 16,
+                        ),
+                        onTap: () async {
+                          final navigator = Navigator.of(context);
+                          await context
+                              .read<AppModeProvider>()
+                              .setMode(AppExperienceMode.simple);
+                          if (!mounted) return;
+                          navigator.pop();
+                        },
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 24),
                 ],
