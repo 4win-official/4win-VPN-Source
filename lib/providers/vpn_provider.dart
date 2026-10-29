@@ -46,6 +46,8 @@ part 'vpn_state_sync.dart';
 
 class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   static const _vpnStateChannel = MethodChannel('com.forwin.vpn/vpn_state');
+  static const _xrayMissingExplicitTargetKey =
+      'xray_missing_explicit_target';
   int _vpnStateRevision = 0;
   late final Future<void> _startupLoaded;
   bool _nativeSessionRestored = false;
@@ -195,6 +197,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   // در این حالت موقع اتصال، آن گروه تست و به بهترین سرورش وصل می‌شویم.
   String? _selectedXrayGroup;
   String? get selectedXrayGroup => _selectedXrayGroup;
+  bool _xrayAutoSelectionSuppressed = false;
 
   // The server actually in use this session (for a group target it's the one
   // picked as fastest; for a manual pick it equals _selectedXrayServer). Used
@@ -2210,10 +2213,15 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   Future<void> loadXrayServers() async {
     _xrayServers = await _xrayService.loadServers();
     final prefs = await SharedPreferences.getInstance();
+    final storedServerId = await _xrayService.getSelectedId();
+    final suppressAutoSelection =
+        prefs.getBool(_xrayMissingExplicitTargetKey) ?? false;
     _selectedXrayGroup = prefs.getString('xray_selected_group');
+    var missingSelectedGroup = false;
     // If the selected group no longer exists, drop the selection.
     if (_selectedXrayGroup != null &&
         !_xrayServers.any((s) => s.group == _selectedXrayGroup)) {
+      missingSelectedGroup = true;
       _selectedXrayGroup = null;
       await prefs.remove('xray_selected_group');
     }
@@ -2224,6 +2232,18 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       _selectedXrayServer = null;
     } else {
       _selectedXrayServer = await _xrayService.getSelectedServer();
+    }
+    if (missingSelectedGroup ||
+        (storedServerId != null &&
+            _selectedXrayServer == null &&
+            _selectedXrayGroup == null)) {
+      _xrayAutoSelectionSuppressed = true;
+      await prefs.setBool(_xrayMissingExplicitTargetKey, true);
+    } else if (_selectedXrayGroup != null || _selectedXrayServer != null) {
+      _xrayAutoSelectionSuppressed = false;
+      await prefs.remove(_xrayMissingExplicitTargetKey);
+    } else {
+      _xrayAutoSelectionSuppressed = suppressAutoSelection;
     }
     notifyListeners();
   }
@@ -2261,9 +2281,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   Future<void> selectXrayServer(XrayServer server) async {
     _selectedXrayServer = server;
     _selectedXrayGroup = null;
+    _xrayAutoSelectionSuppressed = false;
     await _xrayService.setSelectedId(server.id);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('xray_selected_group');
+    await prefs.remove(_xrayMissingExplicitTargetKey);
     notifyListeners();
     await _reconnectXrayIfActive();
   }
@@ -2291,9 +2313,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   Future<void> selectXrayGroup(String group) async {
     _selectedXrayGroup = group;
     _selectedXrayServer = null;
+    _xrayAutoSelectionSuppressed = false;
     await _xrayService.setSelectedId(null);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('xray_selected_group', group);
+    await prefs.remove(_xrayMissingExplicitTargetKey);
     notifyListeners();
   }
 
@@ -2808,15 +2832,98 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// Concurrently test the selected group and return its fastest working
   /// server (lowest positive ping). Returns null if none respond.
   Future<XrayServer?> _pickFastestFreeServer() async {
-    final group = _selectedGroupServers();
+    final groupKey = _selectedXrayGroup;
+    if (groupKey == null) return null;
+    return _pickFastestXrayServerFromGroup(
+      groupKey,
+      connectGeneration: _xrayConnectGen,
+    );
+  }
+
+  Future<XrayServer?> _pickFastestXrayServerFromGroup(
+    String groupKey, {
+    required int connectGeneration,
+    bool refreshIfMissing = false,
+  }) async {
+    var group = _xrayServers.where((s) => s.group == groupKey).toList();
+    if (group.isEmpty && refreshIfMissing) {
+      if (_xrayRefreshingGroups.contains(groupKey)) {
+        final refreshDeadline = DateTime.now().add(const Duration(seconds: 45));
+        while (_xrayRefreshingGroups.contains(groupKey) &&
+            DateTime.now().isBefore(refreshDeadline)) {
+          if (connectGeneration != _xrayConnectGen) return null;
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        await loadXrayServers();
+      } else {
+        await refreshXrayOneGroup(groupKey);
+      }
+      if (connectGeneration != _xrayConnectGen) return null;
+      group = _xrayServers.where((s) => s.group == groupKey).toList();
+    }
     if (group.isEmpty) return null;
+
     final rounds = await getXrayGroupTestRounds();
     await testXrayServers(group, rounds: rounds);
-    final g = _selectedXrayGroup;
+    if (connectGeneration != _xrayConnectGen) return null;
     final working =
-        _xrayServers.where((s) => s.group == g && (s.ping ?? -1) > 0).toList()
+        _xrayServers
+            .where((s) => s.group == groupKey && (s.ping ?? -1) > 0)
+            .toList()
           ..sort((a, b) => (a.ping ?? 999999).compareTo(b.ping ?? 999999));
     return working.isNotEmpty ? working.first : null;
+  }
+
+  /// A user with no explicit Xray server/group gets the built-in Plus group
+  /// first, then the built-in Free group. Automatic picks remain session-only.
+  Future<XrayServer?> _pickAutomaticXrayServer(int connectGeneration) async {
+    final refreshDeadline = DateTime.now().add(const Duration(seconds: 45));
+    while (_xrayRefreshing && DateTime.now().isBefore(refreshDeadline)) {
+      if (connectGeneration != _xrayConnectGen) return null;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (connectGeneration != _xrayConnectGen) return null;
+
+    final plus = await _pickFastestXrayServerFromGroup(
+      XrayServer.plusGroup,
+      connectGeneration: connectGeneration,
+    );
+    if (connectGeneration != _xrayConnectGen || plus != null) return plus;
+
+    var freeServers = _xrayServers
+        .where((s) => s.group == XrayServer.freeGroup)
+        .toList();
+    var refreshedBuiltIns = false;
+    if (freeServers.isEmpty) {
+      // If neither built-in group is cached, refresh the existing built-in
+      // subscription sources (Free + Plus) before declaring them unavailable.
+      final hasBuiltInServers = _xrayServers.any(
+        (s) => XrayServer.isBuiltInGroup(s.group),
+      );
+      if (!hasBuiltInServers) {
+        await refreshXrayFreeGroup(force: true, builtInOnly: true);
+        refreshedBuiltIns = true;
+        if (connectGeneration != _xrayConnectGen) return null;
+        final refreshedPlus = await _pickFastestXrayServerFromGroup(
+          XrayServer.plusGroup,
+          connectGeneration: connectGeneration,
+        );
+        if (connectGeneration != _xrayConnectGen || refreshedPlus != null) {
+          return refreshedPlus;
+        }
+        freeServers = _xrayServers
+            .where((s) => s.group == XrayServer.freeGroup)
+            .toList();
+      }
+    }
+
+    // If Free is still absent (including when Plus exists but failed its test),
+    // fetch it directly from its already-configured built-in source URL.
+    return _pickFastestXrayServerFromGroup(
+      XrayServer.freeGroup,
+      connectGeneration: connectGeneration,
+      refreshIfMissing: freeServers.isEmpty && !refreshedBuiltIns,
+    );
   }
 
   // ==================== Proxy Protocol Methods ====================
@@ -3372,16 +3479,6 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// Connect using the real Xray core (libv2ray / v2rayNG) with TLS
   /// ClientHello fragmentation enabled.
   Future<void> _connectXray() async {
-    final groupHasServers =
-        _selectedXrayGroup != null &&
-        _xrayServers.any((s) => s.group == _selectedXrayGroup);
-    if (_selectedXrayServer == null && !groupHasServers) {
-      _status = VpnConnectionStatus.error;
-      _errorMessage = 'Please add and select an Xray server first';
-      notifyListeners();
-      return;
-    }
-
     // Capture this connect attempt's token. If the user taps power to cancel
     // (disconnect) while we're still delay-testing a group, the token changes
     // and every checkpoint below aborts cleanly instead of connecting anyway.
@@ -3392,6 +3489,26 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _status == VpnConnectionStatus.disconnected;
 
     try {
+      // Restore the persisted manual/group target before deciding whether this
+      // connection is eligible for automatic Plus → Free selection.
+      await loadXrayServers();
+      if (cancelled()) return;
+      final automaticSelection =
+          !_xrayAutoSelectionSuppressed &&
+          _selectedXrayServer == null &&
+          _selectedXrayGroup == null;
+      final groupHasServers =
+          _selectedXrayGroup != null &&
+          _xrayServers.any((s) => s.group == _selectedXrayGroup);
+      if (_selectedXrayServer == null &&
+          !groupHasServers &&
+          !automaticSelection) {
+        _status = VpnConnectionStatus.error;
+        _errorMessage = 'Please add and select an Xray server first';
+        notifyListeners();
+        return;
+      }
+
       _status = VpnConnectionStatus.connecting;
       notifyListeners();
 
@@ -3412,6 +3529,20 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         } else {
           _status = VpnConnectionStatus.error;
           _errorMessage = 'No working server found in this group. Try again.';
+          notifyListeners();
+          return;
+        }
+      } else if (automaticSelection) {
+        serverToConnect = await _pickAutomaticXrayServer(myGen);
+        if (cancelled()) {
+          if (kDebugMode) debugPrint('🚫 Xray auto-selection cancelled');
+          return;
+        }
+        if (serverToConnect == null) {
+          _status = VpnConnectionStatus.error;
+          _errorMessage =
+              'No reachable Xray servers found. Check your internet '
+              'connection and try again.';
           notifyListeners();
           return;
         }
@@ -3481,8 +3612,8 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         detail: 'Building the Xray config.',
       );
       // Build the Xray JSON config (incl. TLS ClientHello fragment outbound).
-      final configJson = XrayConfigBuilder.build(
-        serverToConnect!,
+      String buildConfig(XrayServer server) => XrayConfigBuilder.build(
+        server,
         fragmentEnabled: fragEnabled,
         fragmentPackets: fragPackets,
         fragmentLength: fragLength,
@@ -3490,6 +3621,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         fragmentHost: fragHost,
         proxyMode: proxyMode,
       );
+      var configJson = buildConfig(serverToConnect!);
       _setProtocolStep(
         configStep,
         ConnectionStepState.complete,
@@ -3509,10 +3641,55 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         );
       }
 
-      final connected = await XrayConnection.connect(
+      var connected = await XrayConnection.connect(
         configJson,
         proxyMode: proxyMode,
       );
+
+      // If the automatically chosen Plus server could not be started, clean
+      // it up and try the best reachable Free server before reporting failure.
+      if (!connected &&
+          automaticSelection &&
+          serverToConnect!.group == XrayServer.plusGroup &&
+          !cancelled()) {
+        await XrayConnection.disconnect();
+        if (cancelled()) return;
+        final fallbackServer = await _pickFastestXrayServerFromGroup(
+          XrayServer.freeGroup,
+          connectGeneration: myGen,
+          refreshIfMissing: true,
+        );
+        if (cancelled()) return;
+        if (fallbackServer != null) {
+          serverToConnect = fallbackServer;
+          _setProtocolStep(
+            0,
+            ConnectionStepState.complete,
+            detail: 'Selected Xray server ${serverToConnect!.remark}.',
+          );
+          _setProtocolStep(
+            configStep,
+            ConnectionStepState.running,
+            detail: 'Building the Xray config for the Free server.',
+          );
+          configJson = buildConfig(serverToConnect!);
+          _setProtocolStep(
+            configStep,
+            ConnectionStepState.complete,
+            detail: 'Xray config generated for ${serverToConnect!.protocol}.',
+          );
+          _setProtocolStep(
+            startStep,
+            ConnectionStepState.running,
+            detail: 'Starting the best reachable Free Xray server.',
+          );
+          connected = await XrayConnection.connect(
+            configJson,
+            proxyMode: proxyMode,
+          );
+        }
+      }
+
       // If the user cancelled meanwhile, tear the just-started tunnel down and
       // stay disconnected instead of flipping to "connected".
       if (cancelled()) {
@@ -3550,7 +3727,10 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _startXrayTraffic(); // poll proxy up/down bytes from the core
       } else {
         _status = VpnConnectionStatus.error;
-        _errorMessage = 'Failed to start Xray core';
+        _errorMessage = automaticSelection
+            ? 'No reachable Xray servers found. Check your internet '
+                  'connection and try again.'
+            : 'Failed to start Xray core';
       }
       notifyListeners();
     } catch (e) {

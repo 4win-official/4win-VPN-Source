@@ -55,6 +55,11 @@ class MainActivity: FlutterActivity() {
     private var vpnStateReceiver: BroadcastReceiver? = null
     private val VPN_REQUEST_CODE = 100
     private val XRAY_REQUEST_CODE = 101
+    private val VPN_PERMISSION_CHANNEL = "com.forwin.vpn/vpn_permission"
+    private val VPN_PERMISSION_REQUEST_CODE = 103
+    private var pendingVpnPermission: MethodChannel.Result? = null
+    private val XRAY_PERMISSION_REQUEST_CODE = 104
+    private var pendingXrayPermission: MethodChannel.Result? = null
     private var catMeowPlayer: MediaPlayer? = null
     private val activeDelayProbes = ConcurrentHashMap<String, Pair<Thread, MethodChannel.Result>>()
     private val activeDelayConnections = ConcurrentHashMap<String, HttpURLConnection>()
@@ -94,6 +99,16 @@ class MainActivity: FlutterActivity() {
             pendingPsiphonPermission = null
             pending?.success(resultCode == RESULT_OK && VpnService.prepare(applicationContext) == null)
         }
+        if (requestCode == VPN_PERMISSION_REQUEST_CODE) {
+            val pending = pendingVpnPermission
+            pendingVpnPermission = null
+            pending?.success(resultCode == RESULT_OK && VpnService.prepare(applicationContext) == null)
+        }
+        if (requestCode == XRAY_PERMISSION_REQUEST_CODE) {
+            val pending = pendingXrayPermission
+            pendingXrayPermission = null
+            pending?.success(resultCode == RESULT_OK && VpnService.prepare(applicationContext) == null)
+        }
         // OpenVPN permission handler
         OpenVPNFlutterPlugin.connectWhileGranted(requestCode == 24 && resultCode == RESULT_OK)
         super.onActivityResult(requestCode, resultCode, data)
@@ -110,6 +125,12 @@ class MainActivity: FlutterActivity() {
         val pending = pendingPsiphonPermission
         pendingPsiphonPermission = null
         try { pending?.success(false) } catch (_: Throwable) {}
+        val pendingVpn = pendingVpnPermission
+        pendingVpnPermission = null
+        try { pendingVpn?.success(false) } catch (_: Throwable) {}
+        val pendingXray = pendingXrayPermission
+        pendingXrayPermission = null
+        try { pendingXray?.success(false) } catch (_: Throwable) {}
         openvpnStateListener?.let {
             try { VpnStatus.removeStateListener(it) } catch (_: Exception) {}
             openvpnStateListener = null
@@ -127,6 +148,38 @@ class MainActivity: FlutterActivity() {
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            VPN_PERMISSION_CHANNEL
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "checkAndRequestVpnPermission" -> {
+                    val intent = VpnService.prepare(applicationContext)
+                    if (intent == null) {
+                        result.success(true)
+                    } else if (pendingVpnPermission != null) {
+                        result.error(
+                            "VPN_PERMISSION_PENDING",
+                            "VPN consent is already open",
+                            null
+                        )
+                    } else {
+                        pendingVpnPermission = result
+                        try {
+                            startActivityForResult(intent, VPN_PERMISSION_REQUEST_CODE)
+                        } catch (failure: Throwable) {
+                            pendingVpnPermission = null
+                            result.error(
+                                "VPN_PERMISSION",
+                                "Unable to open VPN consent",
+                                failure.message
+                            )
+                        }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.forwin.vpn/app_locale"
@@ -538,11 +591,26 @@ class MainActivity: FlutterActivity() {
             when (call.method) {
                 "requestXrayPermission" -> {
                     val intent = VpnService.prepare(applicationContext)
-                    if (intent != null) {
-                        startActivityForResult(intent, XRAY_REQUEST_CODE)
-                        result.success(false) // Will be granted after user approval
-                    } else {
+                    if (intent == null) {
                         result.success(true) // Already granted
+                    } else if (pendingXrayPermission != null) {
+                        result.error(
+                            "XRAY_PERMISSION_PENDING",
+                            "VPN consent is already open",
+                            null
+                        )
+                    } else {
+                        pendingXrayPermission = result
+                        try {
+                            startActivityForResult(intent, XRAY_PERMISSION_REQUEST_CODE)
+                        } catch (failure: Throwable) {
+                            pendingXrayPermission = null
+                            result.error(
+                                "XRAY_PERMISSION",
+                                "Unable to open VPN consent",
+                                failure.message
+                            )
+                        }
                     }
                 }
                 "getMixDiagnostics" -> {

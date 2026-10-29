@@ -839,6 +839,8 @@ https://example.com/servers.txt''',
       r'''ابتدا یک سرور Xray اضافه و انتخاب کنید''',
   r'''No working server found in this group. Try again.''':
       r'''سرور فعالی در این گروه پیدا نشد. دوباره تلاش کنید.''',
+  r'''No reachable Xray servers found. Check your internet connection and try again.''':
+      r'''هیچ سرور Xray قابل‌دسترسی پیدا نشد. اتصال اینترنت خود را بررسی و دوباره تلاش کنید.''',
   r'''Failed to start Xray core''': r'''شروع هسته Xray ناموفق بود''',
   r'''Disconnect Mix before editing the active strategy.''':
       r'''پیش از ویرایش راهبرد فعال، Mix را قطع کنید.''',

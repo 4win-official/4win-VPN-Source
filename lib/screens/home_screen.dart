@@ -1,6 +1,7 @@
 import '../widgets/mix_chain_diagnostics.dart';
 import '../widgets/protocol_chain_diagnostics.dart';
 import 'mix_strategies_screen.dart';
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
@@ -53,6 +54,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const MethodChannel _catAudioChannel = MethodChannel(
     'com.forwin.vpn/cat_audio',
   );
+  static const MethodChannel _vpnPermissionChannel = MethodChannel(
+    'com.forwin.vpn/vpn_permission',
+  );
 
   final UpdateService _updateService = UpdateService();
   final UpdateNotificationService _updateNotifications =
@@ -63,6 +67,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // "connected" so the HeartBurst widget plays a fresh one-shot animation.
   int _heartBurstTrigger = 0;
   VpnConnectionStatus? _lastStatusForHearts;
+  bool _vpnPermissionCheckInFlight = false;
+  bool _skipPermissionCheckAfterConsentReturn = false;
 
   @override
   void initState() {
@@ -79,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         context.read<VpnProvider>().onOpenVpnCredentialsRequired =
             _promptOpenVpnCredentials;
       }
+      await _checkVpnPermissionOnEntry();
       await _maybeShowGuide();
       await _maybeAskForUpdateNotificationConsent();
       final pendingUpdate = await _updateNotifications.consumePendingUpdate();
@@ -310,12 +317,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
+    if (state == AppLifecycleState.resumed) {
+      if (_skipPermissionCheckAfterConsentReturn) {
+        _skipPermissionCheckAfterConsentReturn = false;
+      } else {
+        unawaited(_checkVpnPermissionOnEntry());
+      }
+      return;
+    }
+
     // Reset app when user exits (only if VPN is NOT connected)
     if (state == AppLifecycleState.paused) {
+      if (_vpnPermissionCheckInFlight) {
+        // Returning from Android's consent screen is not a new app entry. If
+        // the user denied it, wait until the next genuine foreground entry.
+        _skipPermissionCheckAfterConsentReturn = true;
+      }
       final provider = context.read<VpnProvider>();
       if (!provider.isConnected) {
         provider.resetState();
       }
+    }
+  }
+
+  Future<void> _checkVpnPermissionOnEntry() async {
+    if (!Platform.isAndroid || !mounted || _vpnPermissionCheckInFlight) return;
+    _vpnPermissionCheckInFlight = true;
+    try {
+      await _vpnPermissionChannel.invokeMethod<bool>(
+        'checkAndRequestVpnPermission',
+      );
+    } catch (_) {
+      // Permission checks must never prevent the home screen from opening.
+    } finally {
+      _vpnPermissionCheckInFlight = false;
     }
   }
 
