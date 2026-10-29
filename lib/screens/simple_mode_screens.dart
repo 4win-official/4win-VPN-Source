@@ -167,13 +167,126 @@ class _ModeChoice extends StatelessWidget {
 
 /// The intentionally small Simple-mode home: one connection control and one
 /// settings entry point. The mode switch lives inside Simple Settings.
-class SimpleHomeScreen extends StatelessWidget {
+class SimpleHomeScreen extends StatefulWidget {
   const SimpleHomeScreen({super.key});
+
+  @override
+  State<SimpleHomeScreen> createState() => _SimpleHomeScreenState();
+}
+
+class _SimpleHomeScreenState extends State<SimpleHomeScreen>
+    with WidgetsBindingObserver {
+  bool _appInForeground = true;
+  bool _promptScheduled = false;
+  bool _feedbackDialogOpen = false;
+  int? _lastPromptedConnectionGeneration;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _appInForeground =
+        lifecycle == null || lifecycle == AppLifecycleState.resumed;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _appInForeground = true;
+      if (mounted) {
+        _scheduleFeedbackPrompt(context.read<VpnProvider>());
+      }
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _appInForeground = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   Future<void> _openSettings(BuildContext context) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(builder: (_) => const SimpleSettingsScreen()),
     );
+  }
+
+  void _scheduleFeedbackPrompt(VpnProvider provider) {
+    if (!_appInForeground ||
+        !provider.isConnected ||
+        provider.simpleCurrentAttempt == null ||
+        !provider.simpleConnectionNeedsFeedback) {
+      return;
+    }
+    final generation = provider.simpleConnectionGeneration;
+    if (_lastPromptedConnectionGeneration == generation ||
+        _promptScheduled ||
+        _feedbackDialogOpen) {
+      return;
+    }
+
+    _promptScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _promptScheduled = false;
+      if (!mounted || !_appInForeground || _feedbackDialogOpen) return;
+      final currentProvider = context.read<VpnProvider>();
+      if (!currentProvider.isConnected ||
+          currentProvider.simpleCurrentAttempt == null ||
+          !currentProvider.simpleConnectionNeedsFeedback ||
+          currentProvider.simpleConnectionGeneration != generation ||
+          _lastPromptedConnectionGeneration == generation) {
+        return;
+      }
+      _lastPromptedConnectionGeneration = generation;
+      _feedbackDialogOpen = true;
+      unawaited(_showFeedbackDialog(currentProvider, generation));
+    });
+  }
+
+  Future<void> _showFeedbackDialog(
+    VpnProvider provider,
+    int generation,
+  ) async {
+    final changeServer = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const LocalizedText('Are you satisfied with this connection?'),
+          content: const LocalizedText(
+            'If not, the app will try the next available option.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const LocalizedText('Satisfied'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const LocalizedText('Change server'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    _feedbackDialogOpen = false;
+    if (!provider.isConnected ||
+        provider.simpleCurrentAttempt == null ||
+        provider.simpleConnectionGeneration != generation) {
+      return;
+    }
+    if (changeServer == true) {
+      unawaited(provider.cycleSimpleConnection());
+    } else if (changeServer == false) {
+      await provider.markSimpleConnectionSatisfied();
+    }
   }
 
   @override
@@ -192,12 +305,14 @@ class SimpleHomeScreen extends StatelessWidget {
       body: SafeArea(
         child: Consumer<VpnProvider>(
           builder: (context, provider, _) {
+            _scheduleFeedbackPrompt(provider);
             final connected = provider.status == VpnConnectionStatus.connected;
             final connecting = provider.status == VpnConnectionStatus.connecting ||
-                provider.status == VpnConnectionStatus.disconnecting;
+                provider.status == VpnConnectionStatus.disconnecting ||
+                provider.simpleConnectionInProgress;
             final statusText = provider.simpleConnectionFailed
                 ? provider.simpleConnectionFailureMessage ??
-                    'Could not connect with Plus, WARP, or free Xray.'
+                    'Could not connect with WARP, Plus, or free Xray.'
                 : connected
                 ? 'Connected'
                 : connecting

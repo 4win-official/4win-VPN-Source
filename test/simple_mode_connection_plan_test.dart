@@ -71,7 +71,7 @@ Future<void> _expectFallbackIgnoresAdvancedTarget({
   });
 
   expect(result, SimpleConnectionAttemptOutcome.connected);
-  expect(attemptedTargets, ['Plus', 'warp', 'Free']);
+  expect(attemptedTargets, ['warp', 'Plus', 'Free']);
   expect(preferences.getString('selected_protocol'), advancedProtocol);
   expect(preferences.getString('selected_xray_server'), advancedServerId);
   expect(preferences.getString('xray_selected_group'), advancedGroup);
@@ -94,8 +94,34 @@ void main() {
     );
   });
 
-  test('a successful Plus or WARP attempt prevents later fallback attempts', () async {
-    for (final successIndex in [0, 1]) {
+  test('built-in Simple groups expand to every matching server in order', () {
+    final servers = [
+      _server('manual', 'Advanced manual', ''),
+      _server('plus-1', 'Plus 1', XrayServer.plusGroup),
+      _server('free-1', 'Free 1', XrayServer.freeGroup),
+      _server('plus-2', 'Plus 2', XrayServer.plusGroup),
+      _server('custom', 'Custom subscription', 'My Servers'),
+      _server('free-2', 'Free 2', XrayServer.freeGroup),
+    ];
+
+    expect(
+      SimpleConnectionPlan.xrayTargetsForGroup(
+        XrayServer.plusGroup,
+        servers,
+      ).map((attempt) => attempt.xrayServerId),
+      ['plus-1', 'plus-2'],
+    );
+    expect(
+      SimpleConnectionPlan.xrayTargetsForGroup(
+        XrayServer.freeGroup,
+        servers,
+      ).map((attempt) => attempt.xrayServerId),
+      ['free-1', 'free-2'],
+    );
+  });
+
+  test('a successful attempt prevents later fallback attempts', () async {
+    for (final successIndex in [0, 1, 2]) {
       final attempted = <SimpleConnectionAttempt>[];
       var index = 0;
       final result = await SimpleConnectionPlan.execute((attempt) async {
@@ -108,15 +134,109 @@ void main() {
       expect(result, SimpleConnectionAttemptOutcome.connected);
       expect(attempted, hasLength(successIndex + 1));
       if (successIndex == 0) {
-        expect(attempted.single.protocol, 'xray');
-        expect(attempted.single.xrayGroup, XrayServer.plusGroup);
+        expect(attempted.single.protocol, 'warp');
+      } else if (successIndex == 1) {
+        expect(attempted.map((attempt) => attempt.protocol), ['warp', 'xray']);
+        expect(attempted.last.xrayGroup, XrayServer.plusGroup);
       } else {
-        expect(attempted.map((attempt) => attempt.protocol), ['xray', 'warp']);
+        expect(
+          attempted.map((attempt) => attempt.protocol),
+          ['warp', 'xray', 'xray'],
+        );
+        expect(attempted.last.xrayGroup, XrayServer.freeGroup);
       }
     }
   });
 
-  test('Plus, WARP, and Free sessions restore Advanced protocol only after stop', () async {
+  test('feedback advances WARP to Plus and Plus to Free', () {
+    final freeServers = [
+      _server('free-1', 'Free 1', XrayServer.freeGroup),
+      _server('free-2', 'Free 2', XrayServer.freeGroup),
+      _server('free-3', 'Free 3', XrayServer.freeGroup),
+    ];
+    final warpCycle = SimpleConnectionPlan.cycleAfter(
+      current: const SimpleConnectionAttempt(protocol: 'warp'),
+      freeServers: freeServers,
+    );
+    expect(
+      warpCycle.map((attempt) => attempt.protocol == 'warp'
+          ? 'warp'
+          : attempt.xrayGroup),
+      [XrayServer.plusGroup, XrayServer.freeGroup, 'warp'],
+    );
+
+    final plusCycle = SimpleConnectionPlan.cycleAfter(
+      current: const SimpleConnectionAttempt(
+        protocol: 'xray',
+        xrayGroup: XrayServer.plusGroup,
+        xrayServerId: 'plus-2',
+      ),
+      freeServers: freeServers,
+    );
+    expect(
+      plusCycle.map((attempt) => attempt.protocol == 'warp'
+          ? 'warp'
+          : attempt.xrayGroup),
+      [XrayServer.freeGroup, 'warp', XrayServer.plusGroup],
+    );
+  });
+
+  test('feedback advances to the next Free server and wraps through WARP', () {
+    final freeServers = [
+      _server('free-1', 'Free 1', XrayServer.freeGroup),
+      _server('free-2', 'Free 2', XrayServer.freeGroup),
+      _server('free-3', 'Free 3', XrayServer.freeGroup),
+    ];
+    final cycle = SimpleConnectionPlan.cycleAfter(
+      current: const SimpleConnectionAttempt(
+        protocol: 'xray',
+        xrayGroup: XrayServer.freeGroup,
+        xrayServerId: 'free-1',
+      ),
+      freeServers: freeServers,
+    );
+    expect(
+      cycle
+          .where((attempt) => attempt.xrayServerId != null)
+          .map((attempt) => attempt.xrayServerId),
+      ['free-2', 'free-3', 'free-1'],
+    );
+    expect(
+      cycle.map((attempt) => attempt.protocol == 'warp'
+          ? 'warp'
+          : attempt.xrayGroup),
+      [
+        XrayServer.freeGroup,
+        XrayServer.freeGroup,
+        'warp',
+        XrayServer.plusGroup,
+        XrayServer.freeGroup,
+      ],
+    );
+  });
+
+  test('satisfaction survives restoring the same session but not a new one', () {
+    final feedback = SimpleConnectionFeedbackState();
+    feedback.beginSession('simple-session-1');
+    expect(feedback.needsFeedback, isTrue);
+    expect(feedback.markSatisfied(), isTrue);
+    expect(feedback.needsFeedback, isFalse);
+
+    feedback.restore(
+      activeSessionId: 'simple-session-1',
+      satisfiedSessionId: 'simple-session-1',
+    );
+    expect(feedback.needsFeedback, isFalse);
+
+    feedback.restore(
+      activeSessionId: 'simple-session-2',
+      satisfiedSessionId: 'simple-session-1',
+    );
+    expect(feedback.needsFeedback, isTrue);
+  });
+
+  test('WARP, Plus, and Free sessions restore Advanced protocol only after stop',
+      () async {
     SharedPreferences.setMockInitialValues({
       'selected_protocol': 'openvpn',
       'selected_xray_server': 'manual-id',
@@ -151,7 +271,7 @@ void main() {
         isNull,
       );
       await appMode.setMode(AppExperienceMode.advanced);
-      expect(activeProtocol, ['xray', 'warp', 'xray'][successIndex]);
+      expect(activeProtocol, ['warp', 'xray', 'xray'][successIndex]);
       expect(session.hasSavedAdvancedProtocol, isTrue);
       // Restore only after the active Simple tunnel has been stopped.
       activeProtocol = session.restoreAdvancedProtocolIfStopped(

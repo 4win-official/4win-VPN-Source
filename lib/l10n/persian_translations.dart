@@ -162,8 +162,14 @@ const Map<String, String> appPersianTranslations = <String, String>{
   r'''Light''': r'''روشن''',
   r'''Dark''': r'''تاریک''',
   r'''Disconnect''': r'''قطع اتصال''',
-  r'''Could not connect with Plus, WARP, or free Xray.''':
-      r'''اتصال برقرار نشد؛ اتصال Plus، WARP یا Xray رایگان ناموفق بود.''',
+  r'''Could not connect with WARP, Plus, or free Xray.''':
+      r'''اتصال برقرار نشد؛ اتصال WARP، Plus یا Xray رایگان ناموفق بود.''',
+  r'''Are you satisfied with this connection?''':
+      r'''از این اتصال راضی هستید؟''',
+  r'''If not, the app will try the next available option.''':
+      r'''اگر راضی نیستید، برنامه گزینهٔ بعدی را برای اتصال امتحان می‌کند.''',
+  r'''Satisfied''': r'''راضی هستم''',
+  r'''Change server''': r'''تغییر سرور''',
   r'''Username''': r'''نام کاربری''',
   r'''Password''': r'''گذرواژه''',
   r'''Secret Text''': r'''متن محرمانه''',

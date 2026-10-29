@@ -47,8 +47,12 @@ part 'vpn_state_sync.dart';
 
 class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   static const _vpnStateChannel = MethodChannel('com.forwin.vpn/vpn_state');
-  static const _xrayMissingExplicitTargetKey =
-      'xray_missing_explicit_target';
+  static const _xrayMissingExplicitTargetKey = 'xray_missing_explicit_target';
+  static const _simpleActiveProtocolKey = 'simple_active_protocol';
+  static const _simpleActiveXrayGroupKey = 'simple_active_xray_group';
+  static const _simpleActiveXrayServerIdKey = 'simple_active_xray_server_id';
+  static const _simpleActiveSessionIdKey = 'simple_active_session_id';
+  static const _simpleSatisfiedSessionIdKey = 'simple_satisfied_session_id';
   int _vpnStateRevision = 0;
   late final Future<void> _startupLoaded;
   bool _nativeSessionRestored = false;
@@ -190,6 +194,10 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   String get selectedProtocol => _selectedProtocol;
   bool _simpleConnectionAttemptActive = false;
   String? _simpleXrayGroupOverride;
+  String? _simpleXrayServerOverride;
+  SimpleConnectionAttempt? _simpleCurrentAttempt;
+  final SimpleConnectionFeedbackState _simpleFeedbackState =
+      SimpleConnectionFeedbackState();
   final SimpleConnectionSession _simpleConnectionSession =
       SimpleConnectionSession();
   int _simpleConnectGeneration = 0;
@@ -523,8 +531,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   bool get isLoadingServers => _isLoadingServers;
   String? get errorMessage => _errorMessage;
   bool get simpleConnectionFailed => _simpleConnectionFailed;
-  String? get simpleConnectionFailureMessage =>
-      _simpleConnectionFailureMessage;
+  String? get simpleConnectionFailureMessage => _simpleConnectionFailureMessage;
+  bool get simpleConnectionInProgress => _simpleConnectionAttemptActive;
+  int get simpleConnectionGeneration => _simpleConnectGeneration;
+  SimpleConnectionAttempt? get simpleCurrentAttempt => _simpleCurrentAttempt;
+  String? get simpleCurrentSessionId =>
+      _simpleFeedbackState.activeSessionId;
+  bool get simpleConnectionNeedsFeedback => _simpleFeedbackState.needsFeedback;
   Duration get connectionDuration => _connectionDuration;
   bool get isConnected => _status == VpnConnectionStatus.connected;
   bool get isConnecting => _status == VpnConnectionStatus.connecting;
@@ -570,6 +583,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   /// auto-connect — the user must press the power button to connect.
   Future<void> _startupRestore() async {
     await loadSelectedProtocol();
+    var simpleFeedbackSessionNeedsInitialization = false;
     try {
       final prefs = await SharedPreferences.getInstance();
       if (_psiphonSelectionRevision == 0) {
@@ -599,11 +613,53 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         await prefs.setBool('xray_default_v1', true);
         notifyListeners();
       }
+      final simpleProtocol = prefs.getString(_simpleActiveProtocolKey);
+      final simpleGroup = prefs.getString(_simpleActiveXrayGroupKey);
+      final simpleServerId = prefs.getString(_simpleActiveXrayServerIdKey);
+      final simpleSessionId = prefs.getString(_simpleActiveSessionIdKey);
+      if (prefs.getString('app_experience_mode') == 'simple' &&
+          (simpleProtocol == 'warp' ||
+              (simpleProtocol == 'xray' &&
+                  XrayServer.isBuiltInGroup(simpleGroup ?? '')))) {
+        _simpleFeedbackState.restore(
+          activeSessionId: simpleSessionId,
+          satisfiedSessionId: prefs.getString(_simpleSatisfiedSessionIdKey),
+        );
+        if (simpleSessionId == null) {
+          _simpleFeedbackState.beginSession(_newSimpleConnectionSessionId());
+          simpleFeedbackSessionNeedsInitialization = true;
+        }
+        _simpleConnectionSession.captureAdvancedProtocol(_selectedProtocol);
+        _simpleCurrentAttempt = SimpleConnectionAttempt(
+          protocol: simpleProtocol!,
+          xrayGroup: simpleProtocol == 'xray' ? simpleGroup : null,
+          xrayServerId: simpleProtocol == 'xray' ? simpleServerId : null,
+        );
+        _selectedProtocol = simpleProtocol;
+        _simpleConnectGeneration++;
+      }
     } catch (_) {}
     try {
       await loadOpenVpnConfigs();
     } catch (_) {}
     await _refreshNativeVpnState();
+    if (_simpleCurrentAttempt != null) {
+      if (_status == VpnConnectionStatus.connected ||
+          _status == VpnConnectionStatus.connecting) {
+        await _persistSimpleCurrentAttempt(
+          _simpleCurrentAttempt!,
+          clearFeedback: simpleFeedbackSessionNeedsInitialization,
+        );
+      } else {
+        _selectedProtocol = _simpleConnectionSession.restoreAdvancedProtocol(
+          _selectedProtocol,
+        );
+        _simpleCurrentAttempt = null;
+        _simpleFeedbackState.clear();
+        await _persistSimpleCurrentAttempt(null);
+        notifyListeners();
+      }
+    }
     if (_selectedProtocol == 'psiphon' &&
         _status == VpnConnectionStatus.disconnected &&
         !_mixDisposed) {
@@ -1188,7 +1244,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   Future<bool> connectSimple() async {
     await _startupLoaded;
     if (isConnected) return true;
-    if (isConnecting || _status == VpnConnectionStatus.disconnecting) {
+    if (_simpleConnectionAttemptActive ||
+        isConnecting ||
+        _status == VpnConnectionStatus.disconnecting) {
       return false;
     }
 
@@ -1198,55 +1256,104 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     _simpleConnectionFailed = false;
     _simpleConnectionFailureMessage = null;
     _errorMessage = null;
+    _simpleCurrentAttempt = null;
+    _simpleFeedbackState.clear();
+    await _persistSimpleCurrentAttempt(null);
+    if (generation != _simpleConnectGeneration) return false;
 
-    final outcome = await SimpleConnectionPlan.execute((attempt) async {
-      if (generation != _simpleConnectGeneration) {
-        return SimpleConnectionAttemptOutcome.cancelled;
+    return _executeSimpleConnectionPlan(
+      generation,
+      SimpleConnectionPlan.attempts,
+    );
+  }
+
+  Future<void> markSimpleConnectionSatisfied() async {
+    if (!isConnected || _simpleCurrentAttempt == null) return;
+    final sessionId = _simpleFeedbackState.activeSessionId;
+    if (sessionId == null || !_simpleFeedbackState.markSatisfied()) return;
+
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      if (!isConnected ||
+          _simpleCurrentAttempt == null ||
+          _simpleFeedbackState.activeSessionId != sessionId) {
+        return;
       }
-      _selectedProtocol = attempt.protocol;
-      _simpleXrayGroupOverride = attempt.xrayGroup;
-      _status = VpnConnectionStatus.disconnected;
-      _errorMessage = null;
-      notifyListeners();
-
-      try {
-        await connect();
-      } catch (error) {
-        _status = VpnConnectionStatus.error;
-        _errorMessage = error.toString();
-        notifyListeners();
+      await preferences.setString(_simpleSatisfiedSessionIdKey, sessionId);
+      if (!isConnected ||
+          _simpleFeedbackState.activeSessionId != sessionId) {
+        if (preferences.getString(_simpleSatisfiedSessionIdKey) == sessionId) {
+          await preferences.remove(_simpleSatisfiedSessionIdKey);
+        }
+        if (_simpleFeedbackState.activeSessionId != sessionId &&
+            _simpleFeedbackState.satisfiedSessionId == sessionId) {
+          _simpleFeedbackState.clearSatisfiedMarker();
+        }
       }
+    } catch (_) {
+      // Keep the in-memory decision even if the preference store is unavailable.
+    }
+  }
 
-      final attemptError = (_errorMessage ?? '').toLowerCase();
-      final permissionDenied = attemptError.contains('permission') &&
-          (attemptError.contains('denied') ||
-              attemptError.contains('not granted'));
+  /// Advance after a dissatisfied Simple-mode connection. The current target
+  /// is captured before disconnect clears its native session details.
+  Future<bool> cycleSimpleConnection() async {
+    await _startupLoaded;
+    final current = _simpleCurrentAttempt;
+    if (!isConnected || current == null || _simpleConnectionAttemptActive) {
+      return false;
+    }
 
-      // A user disconnect invalidates this sequence; never start a later
-      // fallback after an explicit cancellation.
-      if (generation != _simpleConnectGeneration) {
-        return SimpleConnectionAttemptOutcome.cancelled;
-      }
-      if (isConnected) return SimpleConnectionAttemptOutcome.connected;
+    final generation = ++_simpleConnectGeneration;
+    _simpleConnectionAttemptActive = true;
+    _simpleConnectionFailed = false;
+    _simpleConnectionFailureMessage = null;
+    _errorMessage = null;
+    _simpleFeedbackState.clear();
+    await disconnect(preserveSimpleAttempt: true);
+    if (generation != _simpleConnectGeneration) return false;
 
-      await disconnect(preserveSimpleAttempt: true);
-      if (generation != _simpleConnectGeneration) {
-        return SimpleConnectionAttemptOutcome.cancelled;
-      }
-      if (permissionDenied) {
-        _simpleConnectionFailureMessage = 'VPN permission denied';
-        return SimpleConnectionAttemptOutcome.permissionDenied;
-      }
-      return SimpleConnectionAttemptOutcome.failed;
-    });
+    _simpleCurrentAttempt = null;
+    await _persistSimpleCurrentAttempt(null);
+    if (generation != _simpleConnectGeneration) return false;
 
+    final freeServers = await _loadSimpleXrayGroupCandidates(
+      XrayServer.freeGroup,
+      simpleGeneration: generation,
+    );
+    if (generation != _simpleConnectGeneration) return false;
+    final plan = SimpleConnectionPlan.cycleAfter(
+      current: current,
+      freeServers: freeServers,
+    );
+    return _executeSimpleConnectionPlan(generation, plan);
+  }
+
+  Future<bool> _executeSimpleConnectionPlan(
+    int generation,
+    List<SimpleConnectionAttempt> plan,
+  ) async {
+    final outcome = await SimpleConnectionPlan.execute(
+      (attempt) => _runSimpleConnectionCandidate(attempt, generation),
+      plan: plan,
+    );
     if (generation != _simpleConnectGeneration ||
         outcome == SimpleConnectionAttemptOutcome.cancelled) {
       return false;
     }
+
     if (outcome == SimpleConnectionAttemptOutcome.connected) {
       _simpleConnectionAttemptActive = false;
       _simpleXrayGroupOverride = null;
+      _simpleXrayServerOverride = null;
+      final connectedAttempt = _simpleCurrentAttempt;
+      if (connectedAttempt != null) {
+        await _persistSimpleCurrentAttempt(connectedAttempt);
+      }
+      if (generation != _simpleConnectGeneration || !isConnected) {
+        await _persistSimpleCurrentAttempt(null);
+        return false;
+      }
       notifyListeners();
       return true;
     }
@@ -1256,29 +1363,194 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     );
     _simpleConnectionAttemptActive = false;
     _simpleXrayGroupOverride = null;
+    _simpleXrayServerOverride = null;
+    _simpleCurrentAttempt = null;
+    _simpleFeedbackState.clear();
+    await _persistSimpleCurrentAttempt(null);
+    if (generation != _simpleConnectGeneration) return false;
     _simpleConnectionFailed = true;
     _status = VpnConnectionStatus.error;
     _simpleConnectionFailureMessage ??=
-        'Could not connect with Plus, WARP, or free Xray.';
+        'Could not connect with WARP, Plus, or free Xray.';
     _errorMessage = _simpleConnectionFailureMessage;
     notifyListeners();
     return false;
   }
 
+  Future<SimpleConnectionAttemptOutcome> _runSimpleConnectionCandidate(
+    SimpleConnectionAttempt attempt,
+    int generation,
+  ) async {
+    if (generation != _simpleConnectGeneration) {
+      return SimpleConnectionAttemptOutcome.cancelled;
+    }
+
+    if (attempt.protocol == 'xray' &&
+        attempt.xrayGroup != null &&
+        attempt.xrayServerId == null) {
+      final candidates = await _loadSimpleXrayGroupCandidates(
+        attempt.xrayGroup!,
+        simpleGeneration: generation,
+      );
+      if (generation != _simpleConnectGeneration) {
+        return SimpleConnectionAttemptOutcome.cancelled;
+      }
+      final targets = SimpleConnectionPlan.xrayTargetsForGroup(
+        attempt.xrayGroup!,
+        candidates,
+      );
+      for (final target in targets) {
+        final outcome = await _runSimpleConnectionCandidate(
+          target,
+          generation,
+        );
+        if (outcome != SimpleConnectionAttemptOutcome.failed) return outcome;
+      }
+      return SimpleConnectionAttemptOutcome.failed;
+    }
+
+    _selectedProtocol = attempt.protocol;
+    _simpleXrayGroupOverride = attempt.xrayGroup;
+    _simpleXrayServerOverride = attempt.xrayServerId;
+    _status = VpnConnectionStatus.disconnected;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      await connect();
+    } catch (error) {
+      _status = VpnConnectionStatus.error;
+      _errorMessage = error.toString();
+      notifyListeners();
+    }
+
+    final attemptError = (_errorMessage ?? '').toLowerCase();
+    final permissionDenied =
+        attemptError.contains('permission') &&
+        (attemptError.contains('denied') ||
+            attemptError.contains('not granted'));
+    if (generation != _simpleConnectGeneration) {
+      return SimpleConnectionAttemptOutcome.cancelled;
+    }
+    if (isConnected) {
+      _simpleCurrentAttempt = attempt;
+      _simpleFeedbackState.beginSession(_newSimpleConnectionSessionId());
+      return SimpleConnectionAttemptOutcome.connected;
+    }
+
+    await disconnect(preserveSimpleAttempt: true);
+    if (generation != _simpleConnectGeneration) {
+      return SimpleConnectionAttemptOutcome.cancelled;
+    }
+    if (permissionDenied) {
+      _simpleConnectionFailureMessage = 'VPN permission denied';
+      return SimpleConnectionAttemptOutcome.permissionDenied;
+    }
+    return SimpleConnectionAttemptOutcome.failed;
+  }
+
+  Future<List<XrayServer>> _loadSimpleXrayGroupCandidates(
+    String groupKey, {
+    required int simpleGeneration,
+  }) async {
+    final refreshDeadline = DateTime.now().add(const Duration(seconds: 45));
+    while (_xrayRefreshing && DateTime.now().isBefore(refreshDeadline)) {
+      if (simpleGeneration != _simpleConnectGeneration) return const [];
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (simpleGeneration != _simpleConnectGeneration || _xrayRefreshing) {
+      return const [];
+    }
+
+    try {
+      await loadXrayServers();
+      if (simpleGeneration != _simpleConnectGeneration) return const [];
+      var candidates = _xrayServers
+          .where((server) => server.group == groupKey)
+          .toList();
+      if (candidates.isEmpty && XrayServer.isBuiltInGroup(groupKey)) {
+        await refreshXrayFreeGroup(force: true, builtInOnly: true);
+        if (simpleGeneration != _simpleConnectGeneration) return const [];
+        candidates = _xrayServers
+            .where((server) => server.group == groupKey)
+            .toList();
+      }
+      return candidates;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  String _newSimpleConnectionSessionId() =>
+      '${DateTime.now().microsecondsSinceEpoch}-$_simpleConnectGeneration';
+
+  Future<void> _persistSimpleCurrentAttempt(
+    SimpleConnectionAttempt? attempt, {
+    bool clearFeedback = true,
+  }) async {
+    if (attempt == null) _simpleFeedbackState.clear();
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      if (attempt == null) {
+        await preferences.remove(_simpleActiveProtocolKey);
+        await preferences.remove(_simpleActiveXrayGroupKey);
+        await preferences.remove(_simpleActiveXrayServerIdKey);
+        await preferences.remove(_simpleActiveSessionIdKey);
+        await preferences.remove(_simpleSatisfiedSessionIdKey);
+        return;
+      }
+      if (_simpleFeedbackState.activeSessionId == null) {
+        _simpleFeedbackState.beginSession(_newSimpleConnectionSessionId());
+      }
+      await preferences.setString(_simpleActiveProtocolKey, attempt.protocol);
+      if (attempt.xrayGroup == null) {
+        await preferences.remove(_simpleActiveXrayGroupKey);
+      } else {
+        await preferences.setString(
+          _simpleActiveXrayGroupKey,
+          attempt.xrayGroup!,
+        );
+      }
+      if (attempt.xrayServerId == null) {
+        await preferences.remove(_simpleActiveXrayServerIdKey);
+      } else {
+        await preferences.setString(
+          _simpleActiveXrayServerIdKey,
+          attempt.xrayServerId!,
+        );
+      }
+      await preferences.setString(
+        _simpleActiveSessionIdKey,
+        _simpleFeedbackState.activeSessionId!,
+      );
+      if (clearFeedback) {
+        _simpleFeedbackState.clearSatisfiedMarker();
+        await preferences.remove(_simpleSatisfiedSessionIdKey);
+      }
+    } catch (_) {
+      // Persisting the resume hint must never block the actual VPN session.
+    }
+  }
+
   /// Complete a stopped Simple session before the UI enters Advanced mode.
   /// A live or connecting Simple tunnel is deliberately left untouched.
   void restoreSimpleAdvancedProtocolIfStopped() {
-    final restoredProtocol =
-        _simpleConnectionSession.restoreAdvancedProtocolIfStopped(
+    final restoredProtocol = _simpleConnectionSession
+        .restoreAdvancedProtocolIfStopped(
           _selectedProtocol,
           simpleTunnelActive:
               _simpleConnectionAttemptActive ||
               isConnected ||
               isConnecting ||
               _status == VpnConnectionStatus.disconnecting,
-        );
+    );
     if (restoredProtocol == null) return;
     _selectedProtocol = restoredProtocol;
+    _simpleConnectGeneration++;
+    _simpleCurrentAttempt = null;
+    _simpleXrayGroupOverride = null;
+    _simpleXrayServerOverride = null;
+    unawaited(_persistSimpleCurrentAttempt(null));
     notifyListeners();
   }
 
@@ -2993,9 +3265,8 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     return working.isNotEmpty ? working.first : null;
   }
 
-  /// Selects a configured server for Simple mode without using a latency probe
-  /// as a connection verdict. The native connect routine decides whether this
-  /// attempt succeeded; a failed Plus attempt proceeds to WARP, then Free.
+  /// Selects the exact server for a Simple attempt without changing Advanced
+  /// selections. Native connection success, not a latency probe, is the verdict.
   Future<XrayServer?> _pickSimpleXrayServerFromGroup(
     String groupKey, {
     required int connectGeneration,
@@ -3007,10 +3278,23 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     }
     if (connectGeneration != _xrayConnectGen) return null;
 
-    var server = SimpleConnectionPlan.resolveSimpleXrayTarget(
-      servers: _xrayServers,
-      simpleGroupOverride: groupKey,
-    );
+    XrayServer? resolveTarget() {
+      if (_simpleXrayServerOverride == null) {
+        return SimpleConnectionPlan.resolveSimpleXrayTarget(
+          servers: _xrayServers,
+          simpleGroupOverride: groupKey,
+        );
+      }
+      for (final candidate in _xrayServers) {
+        if (candidate.group == groupKey &&
+            candidate.id == _simpleXrayServerOverride) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+
+    var server = resolveTarget();
     if (server == null) {
       if (XrayServer.isBuiltInGroup(groupKey)) {
         await refreshXrayFreeGroup(force: true, builtInOnly: true);
@@ -3018,10 +3302,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         await refreshXrayOneGroup(groupKey);
       }
       if (connectGeneration != _xrayConnectGen) return null;
-      server = SimpleConnectionPlan.resolveSimpleXrayTarget(
-        servers: _xrayServers,
-        simpleGroupOverride: groupKey,
-      );
+      server = resolveTarget();
     }
     return server;
   }
@@ -3646,12 +3927,10 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       await loadXrayServers();
       if (cancelled()) return;
       final simpleModeAttempt = _simpleConnectionAttemptActive;
-      final simpleGroup = simpleModeAttempt
-          ? _simpleXrayGroupOverride
-          : null;
+      final simpleGroup = simpleModeAttempt ? _simpleXrayGroupOverride : null;
       if (simpleModeAttempt && simpleGroup == null) {
         _status = VpnConnectionStatus.error;
-        _errorMessage = 'Could not connect with Plus, WARP, or free Xray.';
+        _errorMessage = 'Could not connect with WARP, Plus, or free Xray.';
         notifyListeners();
         return;
       }
@@ -3689,7 +3968,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         if (cancelled()) return;
         if (serverToConnect == null) {
           _status = VpnConnectionStatus.error;
-          _errorMessage = 'Could not connect with Plus, WARP, or free Xray.';
+          _errorMessage = 'Could not connect with WARP, Plus, or free Xray.';
           notifyListeners();
           return;
         }
@@ -4126,10 +4405,13 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
 
   /// Disconnect from VPN
   Future<void> disconnect({bool preserveSimpleAttempt = false}) async {
-    if (!preserveSimpleAttempt && _simpleConnectionAttemptActive) {
+    if (!preserveSimpleAttempt) {
       _simpleConnectGeneration++;
       _simpleConnectionAttemptActive = false;
       _simpleXrayGroupOverride = null;
+      _simpleXrayServerOverride = null;
+      _simpleCurrentAttempt = null;
+      unawaited(_persistSimpleCurrentAttempt(null));
     }
     if (_status == VpnConnectionStatus.disconnecting) return;
     // Psiphon can deliberately remain alive in an error state with its

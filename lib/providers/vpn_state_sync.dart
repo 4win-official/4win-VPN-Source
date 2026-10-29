@@ -25,6 +25,7 @@ extension _VpnStateSync on VpnProvider {
   void _adoptStoppedNativeSession() {
     // Reopening the UI is observational, not a disconnect request. Invalidate
     // Dart retry/probe callbacks without sending any command to a service.
+    final stoppedSimpleAttempt = _simpleCurrentAttempt;
     _vpnStateRevision++;
     _sstpConnectGen++;
     _psiphonConnectGen++;
@@ -61,7 +62,18 @@ extension _VpnStateSync on VpnProvider {
     _lastUploadBytes = 0;
     _dnsBaselineRxBytes = -1;
     _dnsBaselineTxBytes = -1;
-    if (_selectedProtocol == 'warp') {
+    if (stoppedSimpleAttempt != null) {
+      _selectedProtocol = _simpleConnectionSession.restoreAdvancedProtocol(
+        _selectedProtocol,
+      );
+      _simpleConnectionAttemptActive = false;
+      _simpleConnectGeneration++;
+      _simpleXrayGroupOverride = null;
+      _simpleXrayServerOverride = null;
+      _simpleCurrentAttempt = null;
+      unawaited(_persistSimpleCurrentAttempt(null));
+    }
+    if (stoppedSimpleAttempt == null && _selectedProtocol == 'warp') {
       _setWarpFailure(
         'WARP tunnel stopped unexpectedly. Check the connection log and retry.',
       );
