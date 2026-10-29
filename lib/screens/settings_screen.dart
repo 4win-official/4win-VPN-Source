@@ -15,33 +15,48 @@ import 'slowdns_configs_screen.dart';
 import 'split_tunnel_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
-  /// When set, the settings page shows ONLY this protocol's section (used by
-  /// the per-protocol gear icon in the protocol selector), independent of the
-  /// currently-selected protocol.
-  final String? initialProtocol;
-
-  /// When true, the page shows only the GLOBAL settings that affect every
-  /// protocol (Security + Updates + About) and hides all protocol-specific
-  /// sections. Used by the gear icon at the top of the protocol selector.
-  final bool generalOnly;
-
-  const SettingsScreen({
-    super.key,
-    this.initialProtocol,
-    this.generalOnly = false,
-  });
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen>
+    with SingleTickerProviderStateMixin {
+  static const List<String> _settingsTabProtocols = [
+    'general',
+    'mix',
+    'xray',
+    'psiphon',
+    'warp',
+    'openvpn',
+    'sstp',
+    'direct_dns',
+    'proxy',
+    'slowdns',
+  ];
+  static const List<String> _settingsTabLabels = [
+    'General',
+    'Mix',
+    'Xray',
+    'Psiphon',
+    'WARP',
+    'OpenVPN',
+    'SSTP',
+    'DNS changer',
+    'Proxy',
+    'Slow DNS',
+  ];
+  late final TabController _tabController;
+  int _activeTabIndex = 0;
+
   final _dnsController = TextEditingController();
   int _concurrentTests = 100;
   bool _parallelConnection = false; // سوییچ اتصال موازی
   bool _killSwitch = false; // Kill Switch
   bool _trafficCompression = false; // فشرده‌سازی ترافیک (فقط OpenVPN)
-  String _connectionMode = 'vpn'; // vpn (تونل کل گوشی) | proxy (لوکال 127.0.0.1:4444)
+  String _connectionMode =
+      'vpn'; // vpn (تونل کل گوشی) | proxy (لوکال 127.0.0.1:4444)
   bool _deepScan = false; // اسکن عمیق (برای اینترنت ضعیف/محدودیت دولتی)
   String _mtuMode = 'off'; // حالت MTU: off | auto | manual
   final _mtuController = TextEditingController(text: '1400'); // مقدار دستی MTU
@@ -79,6 +94,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(
+      length: _settingsTabLabels.length,
+      vsync: this,
+    );
     _loadSettings();
   }
 
@@ -106,7 +125,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: LocalizedText('You are on the latest version (v$currentVersion)'),
+            content: LocalizedText(
+              'You are on the latest version (v$currentVersion)',
+            ),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
           ),
@@ -116,7 +137,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: LocalizedText('Could not check for updates. Try again later.'),
+          content: LocalizedText(
+            'Could not check for updates. Try again later.',
+          ),
           behavior: SnackBarBehavior.floating,
           duration: Duration(seconds: 2),
         ),
@@ -128,6 +151,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _dnsController.dispose();
     _mtuController.dispose();
     _sstpFragSizeController.dispose();
@@ -142,8 +166,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final updateNotificationsEnabled =
-        await _updateNotificationService.areNotificationsEnabled();
+    final updateNotificationsEnabled = await _updateNotificationService
+        .areNotificationsEnabled();
     setState(() {
       _dnsController.text = prefs.getString('custom_dns') ?? '8.8.8.8';
       _updateNotificationsEnabled = updateNotificationsEnabled;
@@ -155,8 +179,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _deepScan = prefs.getBool('deep_scan') ?? false;
       // مهاجرت از سوییچ قدیمی auto_mtu به حالت سه‌گانه جدید
       final legacyAuto = prefs.getBool('auto_mtu');
-      _mtuMode = prefs.getString('mtu_mode') ??
-          (legacyAuto == true ? 'auto' : 'off');
+      _mtuMode =
+          prefs.getString('mtu_mode') ?? (legacyAuto == true ? 'auto' : 'off');
       _mtuController.text = (prefs.getInt('manual_mtu') ?? 1400).toString();
       // SSTP fragment
       _sstpFragment = prefs.getBool('sstp_fragment') ?? false;
@@ -174,11 +198,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getString('xray_fragment_interval') ?? '10-20';
       _xrayFakeHostController.text =
           prefs.getString('xray_fragment_host') ?? '';
-      _xrayConcurrentTests =
-          (prefs.getInt('xray_concurrent_tests') ?? 300).clamp(1, 300);
+      _xrayConcurrentTests = (prefs.getInt('xray_concurrent_tests') ?? 300)
+          .clamp(1, 300);
       _xrayAutoConcurrent = prefs.getBool('xray_auto_concurrent') ?? true;
-      _xrayGroupTestRounds =
-          (prefs.getInt('xray_group_test_rounds') ?? 1).clamp(1, 5);
+      _xrayGroupTestRounds = (prefs.getInt('xray_group_test_rounds') ?? 1)
+          .clamp(1, 5);
       _xrayTestUrlController.text =
           prefs.getString('xray_test_url') ?? 'http://www.google.com/gen_204';
     });
@@ -218,37 +242,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('sstp_fragment', _sstpFragment);
     await prefs.setString(
-        'sstp_fragment_size',
-        _sstpFragSizeController.text.trim().isEmpty
-            ? '1-3'
-            : _sstpFragSizeController.text.trim());
+      'sstp_fragment_size',
+      _sstpFragSizeController.text.trim().isEmpty
+          ? '1-3'
+          : _sstpFragSizeController.text.trim(),
+    );
     await prefs.setString(
-        'sstp_fragment_interval',
-        _sstpFragIntervalController.text.trim().isEmpty
-            ? '10-20'
-            : _sstpFragIntervalController.text.trim());
+      'sstp_fragment_interval',
+      _sstpFragIntervalController.text.trim().isEmpty
+          ? '10-20'
+          : _sstpFragIntervalController.text.trim(),
+    );
   }
 
   Future<void> _saveXrayFragment() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('xray_fragment', _xrayFragment);
     await prefs.setString(
-        'xray_fragment_packets',
-        _xrayFragPacketsController.text.trim().isEmpty
-            ? 'tlshello'
-            : _xrayFragPacketsController.text.trim());
+      'xray_fragment_packets',
+      _xrayFragPacketsController.text.trim().isEmpty
+          ? 'tlshello'
+          : _xrayFragPacketsController.text.trim(),
+    );
     await prefs.setString(
-        'xray_fragment_length',
-        _xrayFragLengthController.text.trim().isEmpty
-            ? '100-200'
-            : _xrayFragLengthController.text.trim());
+      'xray_fragment_length',
+      _xrayFragLengthController.text.trim().isEmpty
+          ? '100-200'
+          : _xrayFragLengthController.text.trim(),
+    );
     await prefs.setString(
-        'xray_fragment_interval',
-        _xrayFragIntervalController.text.trim().isEmpty
-            ? '10-20'
-            : _xrayFragIntervalController.text.trim());
+      'xray_fragment_interval',
+      _xrayFragIntervalController.text.trim().isEmpty
+          ? '10-20'
+          : _xrayFragIntervalController.text.trim(),
+    );
     await prefs.setString(
-        'xray_fragment_host', _xrayFakeHostController.text.trim());
+      'xray_fragment_host',
+      _xrayFakeHostController.text.trim(),
+    );
   }
 
   /// Returns the current Custom DNS value if it matches one of the known DNS
@@ -256,8 +287,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _selectedSstpDnsValue() {
     final current = _dnsController.text.trim();
     if (current.isEmpty) return null;
-    final match = DnsServer.getPublicDnsServers()
-        .any((d) => d.primaryDns == current);
+    final match = DnsServer.getPublicDnsServers().any(
+      (d) => d.primaryDns == current,
+    );
     return match ? current : null;
   }
 
@@ -274,6 +306,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return 'Slow DNS';
       case 'xray':
         return 'Xray';
+      case 'mix':
+        return 'Mix';
+      case 'psiphon':
+        return 'Psiphon';
+      case 'warp':
+        return 'WARP';
+      case 'proxy':
+        return 'Proxy';
       default:
         return protocol;
     }
@@ -311,7 +351,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               TextButton.icon(
                 onPressed: () => _addSubLinkDialog(provider),
                 icon: const Icon(Icons.add, size: 18, color: accent),
-                label: const LocalizedText('Add', style: TextStyle(color: accent)),
+                label: const LocalizedText(
+                  'Add',
+                  style: TextStyle(color: accent),
+                ),
               ),
             ],
           ),
@@ -351,21 +394,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       return ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.cloud_outlined,
-                            size: 18, color: accent),
+                        leading: const Icon(
+                          Icons.cloud_outlined,
+                          size: 18,
+                          color: accent,
+                        ),
                         title: Text(
                           hasName ? custom : u,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 13,
-                            fontWeight:
-                                hasName ? FontWeight.w600 : FontWeight.normal,
+                            fontWeight: hasName
+                                ? FontWeight.w600
+                                : FontWeight.normal,
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                         subtitle: hasName
-                            ? Text(u,
+                            ? Text(
+                                u,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -373,7 +421,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   color: isDark
                                       ? Colors.white38
                                       : Colors.black45,
-                                ))
+                                ),
+                              )
                             : null,
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -389,8 +438,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   _renameSubLinkDialog(provider, u, custom),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline,
-                                  color: Colors.redAccent, size: 20),
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: Colors.redAccent,
+                                size: 20,
+                              ),
                               onPressed: () async {
                                 await provider.removeXraySubUrl(u);
                                 if (mounted) setState(() {});
@@ -439,8 +491,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               maxLines: 3,
               decoration: InputDecoration(
                 labelText: context.l10n.text('Subscription URL or share link'),
-                hintText:
-                    context.l10n.text('https://example.com/sub.txt\nor vless:// , vmess:// , trojan:// , ss://'),
+                hintText: context.l10n.text(
+                  'https://example.com/sub.txt\nor vless:// , vmess:// , trojan:// , ss://',
+                ),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -460,8 +513,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (result == null || result.$1.trim().isEmpty) return;
-    final ok = await provider.addXraySubUrl(result.$1.trim(),
-        name: result.$2.trim());
+    final ok = await provider.addXraySubUrl(
+      result.$1.trim(),
+      name: result.$2.trim(),
+    );
     if (!mounted) return;
     setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
@@ -477,7 +532,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// Edit a subscription link: change BOTH its custom name AND its URL so the
   /// user can fix a wrong/expired link without deleting and re-adding it.
   Future<void> _renameSubLinkDialog(
-      VpnProvider provider, String url, String? current) async {
+    VpnProvider provider,
+    String url,
+    String? current,
+  ) async {
     final nameController = TextEditingController(text: current ?? '');
     final urlController = TextEditingController(text: url);
     final result = await showDialog<(String name, String url)>(
@@ -591,7 +649,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    LocalizedText(
                       'Fragment',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
@@ -599,7 +657,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
-                    LocalizedText(
+                    Text(
                       description,
                       style: TextStyle(
                         fontSize: 12,
@@ -790,7 +848,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('traffic_compression', _trafficCompression);
     await prefs.setString('connection_mode', _connectionMode);
     await PsiphonService().setKillSwitchEnabled(_killSwitch);
-    
+
     if (mounted) {
       ScaffoldMessenger.of(
         context,
@@ -801,9 +859,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF000000) : Colors.white, // Pure black
+      backgroundColor: isDark
+          ? const Color(0xFF000000)
+          : Colors.white, // Pure black
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -814,29 +874,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: LocalizedText(
-          widget.generalOnly
-              ? 'General Settings'
-              : (widget.initialProtocol != null
-                    ? '${_protocolDisplayName(widget.initialProtocol!)} Settings'
-                    : 'Settings'),
-          style: TextStyle(
-            color: isDark ? Colors.white : Colors.black87,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
+        title: const LocalizedText('Settings'),
+        bottom: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          labelColor: isDark ? Colors.white : Colors.black87,
+          unselectedLabelColor: isDark ? Colors.white60 : Colors.black54,
+          indicatorColor: isDark ? const Color(0xFF00FF88) : Colors.blue,
+          dividerColor: Colors.transparent,
+          onTap: (index) => setState(() => _activeTabIndex = index),
+          tabs: _settingsTabLabels
+              .map((label) => Tab(text: context.l10n.text(label)))
+              .toList(),
+        ),
+        titleTextStyle: TextStyle(
+          color: isDark ? Colors.white : Colors.black87,
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
         ),
       ),
       body: SafeArea(
         child: Consumer<VpnProvider>(
           builder: (context, provider, _) {
-            // The protocol whose section we show. When opened from a
-            // per-protocol gear, it's fixed to that protocol; otherwise it
-            // follows the currently-selected protocol. When [generalOnly] is
-            // set (top gear = global settings) we hide ALL protocol sections.
-            final String effProto =
-                widget.initialProtocol ?? provider.selectedProtocol;
-            final bool showProto = !widget.generalOnly;
+            final String effProto = _settingsTabProtocols[_activeTabIndex];
+            final bool isGeneralTab = _activeTabIndex == 0;
+            final bool showProto = !isGeneralTab;
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -872,8 +934,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               value: _selectedSstpDnsValue(),
                               isExpanded: true,
                               underline: const SizedBox.shrink(),
-                              dropdownColor:
-                                  isDark ? const Color(0xFF1A1A1A) : Colors.white,
+                              dropdownColor: isDark
+                                  ? const Color(0xFF1A1A1A)
+                                  : Colors.white,
                               style: TextStyle(
                                 color: isDark ? Colors.white : Colors.black87,
                                 fontSize: 14,
@@ -881,13 +944,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               hint: LocalizedText(
                                 'Select a DNS server',
                                 style: TextStyle(
-                                  color: isDark ? Colors.white38 : Colors.black38,
+                                  color: isDark
+                                      ? Colors.white38
+                                      : Colors.black38,
                                 ),
                               ),
                               items: DnsServer.getPublicDnsServers().map((dns) {
                                 return DropdownMenuItem<String>(
                                   value: dns.primaryDns,
-                                  child: Text('${dns.name}  •  ${dns.primaryDns}'),
+                                  child: Text(
+                                    '${dns.name}  •  ${dns.primaryDns}',
+                                  ),
                                 );
                               }).toList(),
                               onChanged: (value) {
@@ -933,7 +1000,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderSide: BorderSide(
-                              color: isDark ? const Color(0xFF00FF88) : Colors.blue,
+                              color: isDark
+                                  ? const Color(0xFF00FF88)
+                                  : Colors.blue,
                             ),
                           ),
                           disabledBorder: OutlineInputBorder(
@@ -944,14 +1013,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // ⚙️ MTU - تنظیم واقعی MTU پروتکل SSTP (Off / Auto / Manual)
                       Row(
                         children: [
                           Icon(
                             Icons.tune,
                             color: _mtuMode != 'off'
-                                ? (isDark ? const Color(0xFF00FF88) : Colors.blue)
+                                ? (isDark
+                                      ? const Color(0xFF00FF88)
+                                      : Colors.blue)
                                 : (isDark ? Colors.white38 : Colors.black38),
                             size: 22,
                           ),
@@ -963,7 +1034,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 LocalizedText(
                                   'MTU',
                                   style: TextStyle(
-                                    color: isDark ? Colors.white : Colors.black87,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
                                     fontSize: 15,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -973,11 +1046,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   _mtuMode == 'auto'
                                       ? 'Auto: detects the best MTU (1280–1500) before connecting'
                                       : _mtuMode == 'manual'
-                                          ? 'Manual: uses your value (1280–1500)'
-                                          : 'Off: default MTU (1500). Use Auto/Manual if data does not pass',
+                                      ? 'Manual: uses your value (1280–1500)'
+                                      : 'Off: default MTU (1500). Use Auto/Manual if data does not pass',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: isDark ? Colors.white38 : Colors.black54,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black54,
                                   ),
                                 ),
                               ],
@@ -989,9 +1064,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       // انتخاب حالت MTU با سه دکمه
                       SegmentedButton<String>(
                         segments: const [
-                          ButtonSegment(value: 'off', label: LocalizedText('Off')),
-                          ButtonSegment(value: 'auto', label: LocalizedText('Auto')),
-                          ButtonSegment(value: 'manual', label: LocalizedText('Manual')),
+                          ButtonSegment(
+                            value: 'off',
+                            label: LocalizedText('Off'),
+                          ),
+                          ButtonSegment(
+                            value: 'auto',
+                            label: LocalizedText('Auto'),
+                          ),
+                          ButtonSegment(
+                            value: 'manual',
+                            label: LocalizedText('Manual'),
+                          ),
                         ],
                         selected: {_mtuMode},
                         showSelectedIcon: false,
@@ -1011,8 +1095,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 mode == 'auto'
                                     ? '⚙️ Auto MTU on — best MTU detected on connect'
                                     : mode == 'manual'
-                                        ? '⚙️ Manual MTU on — set your value below'
-                                        : 'MTU set to default (1500)',
+                                    ? '⚙️ Manual MTU on — set your value below'
+                                    : 'MTU set to default (1500)',
                               ),
                               duration: const Duration(seconds: 2),
                             ),
@@ -1029,12 +1113,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                           decoration: InputDecoration(
-                            labelText: context.l10n.text('MTU value (1280 – 1500)'),
+                            labelText: context.l10n.text(
+                              'MTU value (1280 – 1500)',
+                            ),
                             labelStyle: TextStyle(
                               color: isDark ? Colors.white54 : Colors.black54,
                             ),
-                            helperText:
-                                context.l10n.text('Lower values help when data does not pass'),
+                            helperText: context.l10n.text(
+                              'Lower values help when data does not pass',
+                            ),
                             helperStyle: TextStyle(
                               fontSize: 11,
                               color: isDark ? Colors.white38 : Colors.black45,
@@ -1048,17 +1135,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             suffixIcon: IconButton(
                               icon: Icon(
                                 Icons.save,
-                                color: isDark ? const Color(0xFF00FF88) : Colors.blue,
+                                color: isDark
+                                    ? const Color(0xFF00FF88)
+                                    : Colors.blue,
                               ),
                               tooltip: context.l10n.text('Save MTU'),
                               onPressed: () async {
                                 final messenger = ScaffoldMessenger.of(context);
-                                final parsed = int.tryParse(_mtuController.text.trim());
-                                final value = (parsed ?? 1400).clamp(1280, 1500);
+                                final parsed = int.tryParse(
+                                  _mtuController.text.trim(),
+                                );
+                                final value = (parsed ?? 1400).clamp(
+                                  1280,
+                                  1500,
+                                );
                                 setState(() {
                                   _mtuController.text = value.toString();
                                 });
-                                final prefs = await SharedPreferences.getInstance();
+                                final prefs =
+                                    await SharedPreferences.getInstance();
                                 await prefs.setInt('manual_mtu', value);
                                 messenger.showSnackBar(
                                   SnackBar(
@@ -1115,7 +1210,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Icon(
                             Icons.travel_explore,
                             color: _deepScan
-                                ? (isDark ? const Color(0xFF00FF88) : Colors.blue)
+                                ? (isDark
+                                      ? const Color(0xFF00FF88)
+                                      : Colors.blue)
                                 : (isDark ? Colors.white38 : Colors.black38),
                             size: 22,
                           ),
@@ -1127,7 +1224,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 LocalizedText(
                                   'Deep Scan',
                                   style: TextStyle(
-                                    color: isDark ? Colors.white : Colors.black87,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
                                     fontSize: 15,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -1139,7 +1238,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       : 'Turn on for weak internet or heavy censorship',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: isDark ? Colors.white38 : Colors.black54,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black54,
                                   ),
                                 ),
                               ],
@@ -1152,7 +1253,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               setState(() {
                                 _deepScan = value;
                               });
-                              final prefs = await SharedPreferences.getInstance();
+                              final prefs =
+                                  await SharedPreferences.getInstance();
                               await prefs.setBool('deep_scan', value);
                               messenger.showSnackBar(
                                 SnackBar(
@@ -1165,8 +1267,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               );
                             },
-                            activeTrackColor:
-                                isDark ? const Color(0xFF00FF88) : Colors.blue,
+                            activeTrackColor: isDark
+                                ? const Color(0xFF00FF88)
+                                : Colors.blue,
                           ),
                         ],
                       ),
@@ -1215,12 +1318,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
-                              color: (isDark
-                                      ? const Color(0xFF00FF88)
-                                      : Colors.blue)
-                                  .withValues(alpha: 0.15),
+                              color:
+                                  (isDark
+                                          ? const Color(0xFF00FF88)
+                                          : Colors.blue)
+                                      .withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
@@ -1242,22 +1348,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         max: 300,
                         divisions: 299,
                         label: '$_concurrentTests',
-                        activeColor:
-                            isDark ? const Color(0xFF00FF88) : Colors.blue,
+                        activeColor: isDark
+                            ? const Color(0xFF00FF88)
+                            : Colors.blue,
                         onChanged: (v) =>
                             setState(() => _concurrentTests = v.round()),
                         onChangeEnd: (v) async {
-                          final prefs =
-                              await SharedPreferences.getInstance();
+                          final prefs = await SharedPreferences.getInstance();
                           await prefs.setInt(
-                              'concurrent_tests', _concurrentTests);
+                            'concurrent_tests',
+                            _concurrentTests,
+                          );
                         },
                       ),
                     ],
                   ),
                   const SizedBox(height: 24),
                 ],
-                
+
                 // DNS-specific settings
                 if (showProto && effProto == 'direct_dns') ...[
                   _SettingsSection(
@@ -1274,7 +1382,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 24),
                 ],
-                
+
                 // OpenVPN-specific settings
                 if (showProto && effProto == 'openvpn') ...[
                   _SettingsSection(
@@ -1301,7 +1409,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     LocalizedText(
                                       'Manage Configurations',
                                       style: TextStyle(
-                                        color: isDark ? Colors.white : Colors.black87,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
                                         fontSize: 16,
                                         fontWeight: FontWeight.w500,
                                       ),
@@ -1310,7 +1420,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     LocalizedText(
                                       'Add, edit, or delete OpenVPN config files',
                                       style: TextStyle(
-                                        color: isDark ? Colors.white70 : Colors.black54,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black54,
                                         fontSize: 13,
                                       ),
                                     ),
@@ -1387,7 +1499,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const SlowDnsConfigsScreen(),
+                              builder: (context) =>
+                                  const SlowDnsConfigsScreen(),
                             ),
                           );
                         },
@@ -1408,7 +1521,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     LocalizedText(
                                       'Manage Configurations',
                                       style: TextStyle(
-                                        color: isDark ? Colors.white : Colors.black87,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
                                         fontSize: 16,
                                         fontWeight: FontWeight.w500,
                                       ),
@@ -1417,7 +1532,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     LocalizedText(
                                       'Add, edit, or delete Slow DNS configs',
                                       style: TextStyle(
-                                        color: isDark ? Colors.white70 : Colors.black54,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black54,
                                         fontSize: 13,
                                       ),
                                     ),
@@ -1464,8 +1581,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               : Colors.black.withValues(alpha: 0.03),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: const Color(0xFF1DE9B6)
-                                .withValues(alpha: 0.3),
+                            color: const Color(
+                              0xFF1DE9B6,
+                            ).withValues(alpha: 0.3),
                           ),
                         ),
                         child: Column(
@@ -1473,8 +1591,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.link,
-                                    color: Color(0xFF1DE9B6), size: 20),
+                                const Icon(
+                                  Icons.link,
+                                  color: Color(0xFF1DE9B6),
+                                  size: 20,
+                                ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: LocalizedText(
@@ -1498,9 +1619,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               '(e.g. https://eset.com) to check which configs can '
                               'reach it. Default: http://www.google.com/gen_204',
                               style: TextStyle(
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.black54,
+                                color: isDark ? Colors.white60 : Colors.black54,
                                 fontSize: 12,
                               ),
                             ),
@@ -1514,7 +1633,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                               decoration: InputDecoration(
                                 isDense: true,
-                                hintText: context.l10n.text('http://www.google.com/gen_204'),
+                                hintText: context.l10n.text(
+                                  'http://www.google.com/gen_204',
+                                ),
                                 filled: true,
                                 fillColor: isDark
                                     ? Colors.white.withValues(alpha: 0.05)
@@ -1525,7 +1646,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                                 suffixIcon: IconButton(
                                   icon: const Icon(Icons.restore, size: 20),
-                                  tooltip: context.l10n.text('Reset to default'),
+                                  tooltip: context.l10n.text(
+                                    'Reset to default',
+                                  ),
                                   color: const Color(0xFF1DE9B6),
                                   onPressed: () {
                                     setState(() {
@@ -1546,28 +1669,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       // ⚙️ Auto concurrent: pick the count from device power.
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 6),
+                          horizontal: 14,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
                           color: _xrayAutoConcurrent
                               ? const Color(0xFF1DE9B6).withValues(alpha: 0.10)
                               : (isDark
-                                  ? Colors.white.withValues(alpha: 0.05)
-                                  : Colors.black.withValues(alpha: 0.03)),
+                                    ? Colors.white.withValues(alpha: 0.05)
+                                    : Colors.black.withValues(alpha: 0.03)),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: const Color(0xFF1DE9B6)
-                                .withValues(alpha: 0.3),
+                            color: const Color(
+                              0xFF1DE9B6,
+                            ).withValues(alpha: 0.3),
                           ),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.auto_awesome,
-                                color: Color(0xFF1DE9B6), size: 20),
+                            const Icon(
+                              Icons.auto_awesome,
+                              color: Color(0xFF1DE9B6),
+                              size: 20,
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   LocalizedText(
                                     'Auto (by device power)',
@@ -1614,8 +1742,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               : Colors.black.withValues(alpha: 0.03),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: const Color(0xFF1DE9B6)
-                                .withValues(alpha: 0.3),
+                            color: const Color(
+                              0xFF1DE9B6,
+                            ).withValues(alpha: 0.3),
                           ),
                         ),
                         child: Column(
@@ -1623,11 +1752,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.speed,
-                                    color: Color(0xFF1DE9B6), size: 20),
+                                const Icon(
+                                  Icons.speed,
+                                  color: Color(0xFF1DE9B6),
+                                  size: 20,
+                                ),
                                 const SizedBox(width: 8),
                                 Expanded(
-                                  child: Text(
+                                  child: LocalizedText(
                                     'Concurrent Delay Test',
                                     style: TextStyle(
                                       color: isDark
@@ -1640,10 +1772,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF1DE9B6)
-                                        .withValues(alpha: 0.15),
+                                    color: const Color(
+                                      0xFF1DE9B6,
+                                    ).withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
@@ -1663,8 +1798,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               'when testing a group. Higher = faster but needs '
                               'a more powerful phone. Default 30, max 300.',
                               style: TextStyle(
-                                color:
-                                    isDark ? Colors.white60 : Colors.black54,
+                                color: isDark ? Colors.white60 : Colors.black54,
                                 fontSize: 12,
                               ),
                             ),
@@ -1678,29 +1812,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               onChanged: _xrayAutoConcurrent
                                   ? null
                                   : (v) {
-                                      setState(() =>
-                                          _xrayConcurrentTests = v.round());
+                                      setState(
+                                        () => _xrayConcurrentTests = v.round(),
+                                      );
                                     },
                               onChangeEnd: _xrayAutoConcurrent
                                   ? null
                                   : (v) => _saveXrayConcurrentTests(),
                             ),
                             Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('1',
-                                    style: TextStyle(
-                                        color: isDark
-                                            ? Colors.white38
-                                            : Colors.black38,
-                                        fontSize: 11)),
-                                Text('300',
-                                    style: TextStyle(
-                                        color: isDark
-                                            ? Colors.white38
-                                            : Colors.black38,
-                                        fontSize: 11)),
+                                Text(
+                                  '1',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black38,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                Text(
+                                  '300',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black38,
+                                    fontSize: 11,
+                                  ),
+                                ),
                               ],
                             ),
                           ],
@@ -1716,8 +1856,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               : Colors.black.withValues(alpha: 0.03),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: const Color(0xFF1DE9B6)
-                                .withValues(alpha: 0.3),
+                            color: const Color(
+                              0xFF1DE9B6,
+                            ).withValues(alpha: 0.3),
                           ),
                         ),
                         child: Column(
@@ -1725,8 +1866,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.repeat,
-                                    color: Color(0xFF1DE9B6), size: 20),
+                                const Icon(
+                                  Icons.repeat,
+                                  color: Color(0xFF1DE9B6),
+                                  size: 20,
+                                ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: LocalizedText(
@@ -1742,13 +1886,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF1DE9B6)
-                                        .withValues(alpha: 0.15),
+                                    color: const Color(
+                                      0xFF1DE9B6,
+                                    ).withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: LocalizedText(
+                                  child: Text(
                                     '$_xrayGroupTestRounds×',
                                     style: const TextStyle(
                                       color: Color(0xFF1DE9B6),
@@ -1766,8 +1913,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               'used. Higher = more accurate best pick but slower. '
                               '1–5, default 1.',
                               style: TextStyle(
-                                color:
-                                    isDark ? Colors.white60 : Colors.black54,
+                                color: isDark ? Colors.white60 : Colors.black54,
                                 fontSize: 12,
                               ),
                             ),
@@ -1779,25 +1925,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               activeColor: const Color(0xFF1DE9B6),
                               label: '$_xrayGroupTestRounds×',
                               onChanged: (v) => setState(
-                                  () => _xrayGroupTestRounds = v.round()),
+                                () => _xrayGroupTestRounds = v.round(),
+                              ),
                               onChangeEnd: (v) => _saveXrayGroupTestRounds(),
                             ),
                             Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('1',
-                                    style: TextStyle(
-                                        color: isDark
-                                            ? Colors.white38
-                                            : Colors.black38,
-                                        fontSize: 11)),
-                                Text('5',
-                                    style: TextStyle(
-                                        color: isDark
-                                            ? Colors.white38
-                                            : Colors.black38,
-                                        fontSize: 11)),
+                                Text(
+                                  '1',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black38,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                Text(
+                                  '5',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black38,
+                                    fontSize: 11,
+                                  ),
+                                ),
                               ],
                             ),
                           ],
@@ -1824,23 +1976,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(height: 8),
                       _ConnModeTile(
                         title: context.l10n.text('VPN mode'),
-                        subtitle: context.l10n.text('Tunnel the whole device (system VPN)'),
+                        subtitle: context.l10n.text(
+                          'Tunnel the whole device (system VPN)',
+                        ),
                         icon: Icons.vpn_lock,
                         selected: _connectionMode == 'vpn',
                         isDark: isDark,
-                        onTap: () =>
-                            setState(() => _connectionMode = 'vpn'),
+                        onTap: () => setState(() => _connectionMode = 'vpn'),
                       ),
                       const SizedBox(height: 8),
                       _ConnModeTile(
                         title: context.l10n.text('Proxy mode'),
-                        subtitle:
-                            context.l10n.text('Local proxy 127.0.0.1:4444 (no VPN icon) • Xray only'),
+                        subtitle: context.l10n.text(
+                          'Local proxy 127.0.0.1:4444 (no VPN icon) • Xray only',
+                        ),
                         icon: Icons.dns,
                         selected: _connectionMode == 'proxy',
                         isDark: isDark,
-                        onTap: () =>
-                            setState(() => _connectionMode = 'proxy'),
+                        onTap: () => setState(() => _connectionMode = 'proxy'),
                       ),
                       const SizedBox(height: 8),
                       LocalizedText(
@@ -1866,7 +2019,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 24),
                 ],
 
-                if (widget.generalOnly) ...[
+                if (showProto &&
+                    (effProto == 'mix' ||
+                        effProto == 'warp' ||
+                        effProto == 'proxy')) ...[
+                  _SettingsSection(
+                    title: context.l10n.text(
+                      '${_protocolDisplayName(effProto)} Settings',
+                    ),
+                    children: const [
+                      LocalizedText(
+                        'This protocol has no additional settings on this page.',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
+                if (isGeneralTab) ...[
                   _SettingsSection(
                     title: context.l10n.text('Language'),
                     children: const [AppLanguageSetting()],
@@ -1874,74 +2044,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 24),
                 ],
 
-                // Kill Switch
-                _SettingsSection(
-                  title: context.l10n.text('Security'),
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              LocalizedText(
-                                'Kill Switch',
-                                style: TextStyle(
-                                  color: isDark ? Colors.white : Colors.black87,
-                                  fontSize: 16,
+                if (isGeneralTab) ...[
+                  // Kill Switch
+                  _SettingsSection(
+                    title: context.l10n.text('Security'),
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                LocalizedText(
+                                  'Kill Switch',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    fontSize: 16,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              LocalizedText(
-                                _killSwitch
-                                    ? 'ON: Psiphon failures blackhole traffic (no leaks) and auto-retry'
-                                    : 'OFF: Psiphon failures restore normal internet',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isDark ? Colors.white38 : Colors.black38,
+                                const SizedBox(height: 4),
+                                LocalizedText(
+                                  _killSwitch
+                                      ? 'ON: Psiphon failures blackhole traffic (no leaks) and auto-retry'
+                                      : 'OFF: Psiphon failures restore normal internet',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.black38,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                        Switch(
-                          value: _killSwitch,
-                          onChanged: (value) {
-                            setState(() {
-                              _killSwitch = value;
-                            });
-                          },
-                          activeTrackColor: isDark ? const Color(0xFF00FF88) : Colors.blue,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                
-                const SizedBox(height: 24),
+                          Switch(
+                            value: _killSwitch,
+                            onChanged: (value) {
+                              setState(() {
+                                _killSwitch = value;
+                              });
+                            },
+                            activeTrackColor: isDark
+                                ? const Color(0xFF00FF88)
+                                : Colors.blue,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
 
                 // Split Tunneling — global setting (per-app tunnel selection).
-                if (widget.generalOnly) ...[
+                if (isGeneralTab) ...[
                   _SettingsSection(
                     title: context.l10n.text('Split Tunneling'),
                     children: [
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.call_split,
-                            color: Colors.tealAccent.shade700),
-                        title: Text(
-                          'Choose apps',
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        leading: Icon(
+                          Icons.call_split,
+                          color: Colors.tealAccent.shade700,
                         ),
-                        subtitle: Text(
-                          'Pick which apps use the VPN or bypass it',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark ? Colors.white54 : Colors.black45,
-                          ),
+                        title: LocalizedText('Choose apps & websites'),
+                        subtitle: LocalizedText(
+                          'Select apps or websites to bypass the VPN',
                         ),
                         trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                         onTap: () => Navigator.push(
@@ -1958,7 +2127,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                 // Updates — global setting shown only in the general/global
                 // settings page (moved here from the home screen top-left icon).
-                if (widget.generalOnly) ...[
+                if (isGeneralTab) ...[
                   _SettingsSection(
                     title: context.l10n.text('Updates'),
                     children: [
@@ -1984,7 +2153,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           if (enabled) {
                             final granted = await _updateNotificationService
                                 .enableNotificationsAfterConsent();
-                            if (!mounted) return;
+                            if (!mounted || !context.mounted) return;
                             setState(
                               () => _updateNotificationsEnabled = granted,
                             );
@@ -2025,7 +2194,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 )
                               : const Icon(Icons.system_update),
                           label: LocalizedText(
-                            _checkingUpdate ? 'Checking…' : 'Check for update'),
+                            _checkingUpdate ? 'Checking…' : 'Check for update',
+                          ),
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             backgroundColor: isDark
@@ -2044,28 +2214,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
 
                 // App Info
-                _SettingsSection(
-                  title: context.l10n.text('About'),
-                  children: [
-                    if (widget.generalOnly) ...[
-                      // General settings apply to ALL protocols — make that
-                      // explicit instead of showing a single protocol name
-                      // (which made users think it was one protocol's settings).
+                if (isGeneralTab)
+                  _SettingsSection(
+                    title: context.l10n.text('About'),
+                    children: [
                       _InfoRow('Applies to', 'All protocols', isDark),
                       _InfoRow('App', '4win VPN', isDark),
-                    ] else ...[
-                      _InfoRow(
-                          'Protocol', _protocolDisplayName(effProto), isDark),
-                      // Show servers only for SSTP
-                      if (effProto == 'sstp')
-                        _InfoRow('Servers',
-                            '${provider.servers.length} available', isDark),
                     ],
-                  ],
-                ),
-                
+                  ),
+
                 const SizedBox(height: 32),
-                
+
                 // Save Button
                 SizedBox(
                   width: double.infinity,
@@ -2073,7 +2232,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: ElevatedButton(
                     onPressed: _saveSettings,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: isDark 
+                      backgroundColor: isDark
                           ? const Color(0xFF00FF88)
                           : Colors.blue,
                       foregroundColor: Colors.black,
@@ -2133,13 +2292,17 @@ class _ConnModeTile extends StatelessWidget {
                 : (isDark ? Colors.white24 : Colors.black26),
             width: selected ? 2 : 1,
           ),
-          color: selected
-              ? accent.withValues(alpha: 0.08)
-              : Colors.transparent,
+          color: selected ? accent.withValues(alpha: 0.08) : Colors.transparent,
         ),
         child: Row(
           children: [
-            Icon(icon, color: selected ? accent : (isDark ? Colors.white54 : Colors.black45), size: 24),
+            Icon(
+              icon,
+              color: selected
+                  ? accent
+                  : (isDark ? Colors.white54 : Colors.black45),
+              size: 24,
+            ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -2166,7 +2329,9 @@ class _ConnModeTile extends StatelessWidget {
             ),
             Icon(
               selected ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: selected ? accent : (isDark ? Colors.white38 : Colors.black26),
+              color: selected
+                  ? accent
+                  : (isDark ? Colors.white38 : Colors.black26),
               size: 22,
             ),
           ],
@@ -2180,15 +2345,12 @@ class _SettingsSection extends StatelessWidget {
   final String title;
   final List<Widget> children;
 
-  const _SettingsSection({
-    required this.title,
-    required this.children,
-  });
+  const _SettingsSection({required this.title, required this.children});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2201,17 +2363,18 @@ class _SettingsSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark 
-                ? Colors.white.withValues(alpha: 0.05)
-                : Colors.black.withValues(alpha: 0.03),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: children,
+        Material(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.black.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: children,
+            ),
           ),
         ),
       ],
@@ -2235,9 +2398,7 @@ class _InfoRow extends StatelessWidget {
         children: [
           Text(
             label,
-            style: TextStyle(
-              color: isDark ? Colors.white70 : Colors.black54,
-            ),
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
           ),
           Text(
             value,

@@ -757,6 +757,9 @@ https://example.com/servers.txt''',
   r'''$title settings''': r'''تنظیمات $title''',
   r'''Close protocol selector''': r'''بستن انتخاب‌گر پروتکل''',
   r'''General settings (all protocols)''': r'''تنظیمات عمومی (همه پروتکل‌ها)''',
+  r'''General''': r'''عمومی''',
+  r'''This protocol has no additional settings on this page.''':
+      r'''برای این پروتکل، تنظیمات اضافه‌ای در این صفحه وجود ندارد.''',
   r'''Mix''': r'''Mix''',
   r'''Ordered, real multi-hop strategies''':
       r'''راهبردهای چندجهشی واقعی و مرتب‌شده''',

@@ -508,23 +508,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               );
             },
           ),
-
-          // Refresh Button
-          Consumer<VpnProvider>(
-            builder: (context, provider, _) {
-              return IconButton(
-                icon: provider.isLoadingServers
-                    ? SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: FourWinLoader(strokeWidth: 2, color: iconColor),
-                      )
-                    : Icon(Icons.refresh, color: iconColor),
-                onPressed: provider.isLoadingServers
-                    ? null
-                    : () => provider.refreshServers(),
-              );
-            },
+          IconButton(
+            icon: Icon(Icons.settings_outlined, color: iconColor),
+            tooltip: context.l10n.text('Settings'),
+            onPressed: () => _openSettings(context),
           ),
         ],
       ),
@@ -1003,7 +990,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             provider,
                                           ),
                                           onLongPress: () =>
-                                              _handleLongPress(context),
+                                              _openSettings(context),
                                           child: KeyedSubtree(
                                             key: const ValueKey('power-button'),
                                             child: Container(
@@ -2386,10 +2373,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     provider.connect();
   }
 
-  void _handleLongPress(BuildContext context) async {
-    // Show a quick rotating-gear indicator so the user knows a long-press is
-    // taking them to settings (works for every protocol). After the short
-    // animation we navigate to the Settings screen.
+  void _openSettings(BuildContext context) async {
+    // Show a quick rotating-gear indicator before opening the settings screen.
     HapticFeedback.mediumImpact();
     final navigator = Navigator.of(context);
     await _showSettingsTransition(context);

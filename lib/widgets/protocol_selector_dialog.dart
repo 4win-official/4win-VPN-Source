@@ -4,80 +4,9 @@ import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import '../providers/vpn_provider.dart';
 import 'protocol_glass_surface.dart';
-import '../screens/settings_screen.dart';
-import '../screens/mix_strategies_screen.dart';
 
 class ProtocolSelectorDialog extends StatelessWidget {
   const ProtocolSelectorDialog({super.key});
-
-  void _openProtocolSettings(BuildContext context, String protocol) {
-    if (protocol == 'mix') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const MixStrategiesScreen()),
-      );
-      return;
-    }
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SettingsScreen(initialProtocol: protocol),
-      ),
-    );
-  }
-
-  void _openGlobalSettings(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const SettingsScreen(generalOnly: true),
-      ),
-    );
-  }
-
-  Widget _gearButton(
-    BuildContext context, {
-    required VoidCallback onTap,
-    required bool isDark,
-    required String tooltip,
-    bool outlined = false,
-    Color? color,
-  }) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(30),
-        child: Ink(
-          key: outlined
-              ? const ValueKey('protocol-general-settings-ring')
-              : null,
-          decoration: outlined
-              ? BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.black.withValues(alpha: 0.035),
-                  border: Border.all(
-                    width: 1.25,
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.72)
-                        : const Color(0xFF465457).withValues(alpha: 0.72),
-                  ),
-                )
-              : null,
-          child: Padding(
-            padding: EdgeInsets.all(outlined ? 13 : 11),
-            child: Icon(
-              Icons.settings_outlined,
-              size: 22,
-              color: color ?? (isDark ? Colors.white54 : Colors.black54),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _titleText(
     BuildContext context,
@@ -188,19 +117,9 @@ class ProtocolSelectorDialog extends StatelessWidget {
                 style: TextStyle(fontSize: 12, color: secondaryInk),
               ),
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (selected) Icon(Icons.check_rounded, color: ink, size: 20),
-                _gearButton(
-                  context,
-                  isDark: isDark,
-                  color: ink.withValues(alpha: 0.78),
-                  tooltip: context.l10n.text('$title settings'),
-                  onTap: () => _openProtocolSettings(context, protocol),
-                ),
-              ],
-            ),
+            trailing: selected
+                ? Icon(Icons.check_rounded, color: ink, size: 20)
+                : null,
             onTap: () {
               provider.switchProtocol(protocol);
               Navigator.pop(context);
@@ -258,14 +177,7 @@ class ProtocolSelectorDialog extends StatelessWidget {
                             ),
                           ),
                         ),
-                        _gearButton(
-                          context,
-                          isDark: isDark,
-                          tooltip: context.l10n.text('General settings (all protocols)'),
-                          outlined: true,
-                          color: isDark ? Colors.white : Colors.black87,
-                          onTap: () => _openGlobalSettings(context),
-                        ),
+                        const SizedBox(width: 48),
                       ],
                     ),
                     Padding(
