@@ -9,6 +9,7 @@ import '../providers/theme_provider.dart';
 import '../providers/vpn_provider.dart';
 import '../services/vpn_service.dart';
 import '../widgets/app_language_setting.dart';
+import 'split_tunnel_screen.dart';
 
 /// Shows the mode chooser once, after the language gate has completed.
 class AppModeGate extends StatefulWidget {
@@ -422,6 +423,19 @@ class SimpleSettingsScreen extends StatelessWidget {
           const SizedBox(height: 20),
           Divider(color: isDark ? Colors.white24 : Colors.black12),
           const AppLanguageSetting(),
+          const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.call_split),
+            title: const LocalizedText('Split Tunneling'),
+            subtitle: const LocalizedText('Choose apps & websites'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => const SplitTunnelScreen(),
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
           ListTile(
             contentPadding: EdgeInsets.zero,
