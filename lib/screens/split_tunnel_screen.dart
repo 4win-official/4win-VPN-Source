@@ -80,6 +80,18 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
   }
 
   Future<void> _load() async {
+    final minimumLoadingTime = Future<void>.delayed(
+      const Duration(milliseconds: 2300),
+    );
+    try {
+      await _loadSettingsAndApps();
+    } finally {
+      await minimumLoadingTime;
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadSettingsAndApps() async {
     final prefs = await SharedPreferences.getInstance();
     final savedMode = prefs.getString(_modeKey);
     final modeMigrated = prefs.getBool(_modeMigratedKey) ?? false;
@@ -128,8 +140,6 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
     await prefs.setString(_modeKey, _mode);
     await prefs.setBool(_modeMigratedKey, true);
     await prefs.setString(_appsKey, _selected.join(','));
-
-    if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _save() async {
