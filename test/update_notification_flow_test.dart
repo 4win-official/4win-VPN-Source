@@ -35,11 +35,11 @@ void main() {
 
     await notifications.showAvailableUpdate(
       updateInfo: UpdateInfo(
-        latestVersion: '1.5.0',
-        tagName: 'v1.5.0',
+        latestVersion: '1.5.1',
+        tagName: 'v1.5.1',
         releaseUrl: UpdateService.releasesPageUrl,
       ),
-      currentVersion: '1.4.9',
+      currentVersion: '1.5.0',
     );
 
     expect(notificationChannelCalled, isFalse);
@@ -51,8 +51,8 @@ void main() {
     tester,
   ) async {
     final updateInfo = UpdateInfo(
-      latestVersion: '1.5.0',
-      tagName: 'v1.5.0',
+      latestVersion: '1.5.1',
+      tagName: 'v1.5.1',
       releaseUrl: UpdateService.releasesPageUrl,
     );
 
@@ -65,7 +65,7 @@ void main() {
                 UpdateDialog.show(
                   context,
                   updateInfo: updateInfo,
-                  currentVersion: '1.4.9',
+                  currentVersion: '1.5.0',
                   autoDownload: true,
                 );
               },
