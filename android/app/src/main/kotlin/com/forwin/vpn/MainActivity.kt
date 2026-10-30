@@ -35,6 +35,7 @@ import java.net.Socket
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 
 class MainActivity: FlutterActivity() {
     private val DNS_CHANNEL = "com.forwin.vpn/dns"
@@ -63,6 +64,9 @@ class MainActivity: FlutterActivity() {
     private var catMeowPlayer: MediaPlayer? = null
     private val activeDelayProbes = ConcurrentHashMap<String, Pair<Thread, MethodChannel.Result>>()
     private val activeDelayConnections = ConcurrentHashMap<String, HttpURLConnection>()
+    private val installedAppsExecutor = Executors.newSingleThreadExecutor { worker ->
+        Thread(worker, "InstalledAppsLookup")
+    }
 
     // Holds an .ovpn file that the user opened/shared into the app (via VIEW or
     // SEND intents) until the Flutter side pulls it with getPendingOvpnImport.
@@ -143,6 +147,7 @@ class MainActivity: FlutterActivity() {
         openvpnConnected = false
         catMeowPlayer?.release()
         catMeowPlayer = null
+        installedAppsExecutor.shutdownNow()
         super.onDestroy()
     }
     
@@ -316,29 +321,33 @@ class MainActivity: FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "getInstalledApps" -> {
-                        try {
-                            val pm = applicationContext.packageManager
-                            val apps = pm.getInstalledApplications(0)
-                            val out = ArrayList<Map<String, String>>()
-                            for (ai in apps) {
-                                // Only apps that can access the internet are useful
-                                // to tunnel/bypass; skip our own package.
-                                if (ai.packageName == packageName) continue
-                                val label = try {
-                                    pm.getApplicationLabel(ai).toString()
-                                } catch (_: Throwable) { ai.packageName }
-                                out.add(
-                                    mapOf(
-                                        "package" to ai.packageName,
-                                        "name" to label,
-                                        "system" to
-                                            ((ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0).toString()
+                        installedAppsExecutor.execute {
+                            try {
+                                val pm = applicationContext.packageManager
+                                val apps = pm.getInstalledApplications(0)
+                                val out = ArrayList<Map<String, String>>()
+                                for (ai in apps) {
+                                    // Only apps that can access the internet are useful
+                                    // to tunnel/bypass; skip our own package.
+                                    if (ai.packageName == packageName) continue
+                                    val label = try {
+                                        pm.getApplicationLabel(ai).toString()
+                                    } catch (_: Throwable) { ai.packageName }
+                                    out.add(
+                                        mapOf(
+                                            "package" to ai.packageName,
+                                            "name" to label,
+                                            "system" to
+                                                ((ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0).toString()
+                                        )
                                     )
-                                )
+                                }
+                                runOnUiThread { result.success(out) }
+                            } catch (e: Throwable) {
+                                runOnUiThread {
+                                    result.error("APPS_ERR", e.message, null)
+                                }
                             }
-                            result.success(out)
-                        } catch (e: Throwable) {
-                            result.error("APPS_ERR", e.message, null)
                         }
                     }
                     else -> result.notImplemented()
@@ -1560,6 +1569,11 @@ class MainActivity: FlutterActivity() {
         val out = hashMapOf<String, Any>(
             "running" to running, "reconnecting" to reconnecting, "connected" to connected
         )
+        if (protocol == "psiphon") {
+            PsiphonStatusStore.region().takeIf { it.isNotBlank() }?.let {
+                out["region"] = it
+            }
+        }
         if (protocol == "warp") WarpConnectionState.snapshot().error?.let { out["error"] = it }
         snap?.let {
             out["sessionId"] = it.sessionId

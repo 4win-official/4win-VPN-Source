@@ -156,6 +156,12 @@ extension _VpnStateSync on VpnProvider {
           state == null) {
         return;
       }
+      if (protocol == 'psiphon') {
+        final region = state['region'];
+        _psiphonConnectedRegion = region is String && region.trim().isNotEmpty
+            ? region.trim()
+            : null;
+      }
       final connected = state['connected'] == true;
       final active = state['running'] == true || state['reconnecting'] == true;
       final nativeError = state['error'];

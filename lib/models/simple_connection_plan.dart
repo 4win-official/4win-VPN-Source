@@ -129,34 +129,54 @@ class SimpleConnectionPlan {
 class SimpleConnectionFeedbackState {
   String? _activeSessionId;
   String? _satisfiedSessionId;
+  String? _leftAppSessionId;
 
   String? get activeSessionId => _activeSessionId;
   String? get satisfiedSessionId => _satisfiedSessionId;
+  String? get leftAppSessionId => _leftAppSessionId;
   bool get needsFeedback =>
       _activeSessionId != null && _activeSessionId != _satisfiedSessionId;
+  bool get feedbackReadyOnReturn =>
+      needsFeedback && _leftAppSessionId == _activeSessionId;
 
-  void restore({String? activeSessionId, String? satisfiedSessionId}) {
+  void restore({
+    String? activeSessionId,
+    String? satisfiedSessionId,
+    String? leftAppSessionId,
+  }) {
     _activeSessionId = activeSessionId;
     _satisfiedSessionId = satisfiedSessionId;
+    _leftAppSessionId = leftAppSessionId;
   }
 
   void beginSession(String sessionId) {
     _activeSessionId = sessionId;
     _satisfiedSessionId = null;
+    _leftAppSessionId = null;
+  }
+
+  bool markAppLeft() {
+    if (!needsFeedback) return false;
+    _leftAppSessionId = _activeSessionId;
+    return true;
   }
 
   bool markSatisfied() {
     final sessionId = _activeSessionId;
     if (sessionId == null) return false;
     _satisfiedSessionId = sessionId;
+    _leftAppSessionId = null;
     return true;
   }
 
-  void clearSatisfiedMarker() => _satisfiedSessionId = null;
+  void clearSatisfiedMarker() {
+    _satisfiedSessionId = null;
+  }
 
   void clear() {
     _activeSessionId = null;
     _satisfiedSessionId = null;
+    _leftAppSessionId = null;
   }
 }
 

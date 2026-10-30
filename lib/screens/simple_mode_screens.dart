@@ -196,13 +196,26 @@ class _SimpleHomeScreenState extends State<SimpleHomeScreen>
     if (state == AppLifecycleState.resumed) {
       _appInForeground = true;
       if (mounted) {
-        _scheduleFeedbackPrompt(context.read<VpnProvider>());
+        final provider = context.read<VpnProvider>();
+        unawaited(_refreshAndScheduleFeedbackPrompt(provider));
       }
     } else if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       _appInForeground = false;
+      if (mounted &&
+          (state == AppLifecycleState.paused ||
+              state == AppLifecycleState.hidden ||
+              state == AppLifecycleState.detached)) {
+        unawaited(context.read<VpnProvider>().markSimpleAppLeft());
+      }
     }
+  }
+
+  Future<void> _refreshAndScheduleFeedbackPrompt(VpnProvider provider) async {
+    await provider.refreshConnectionState();
+    if (mounted) _scheduleFeedbackPrompt(provider);
   }
 
   @override

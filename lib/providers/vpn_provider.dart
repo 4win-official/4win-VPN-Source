@@ -53,6 +53,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   static const _simpleActiveXrayServerIdKey = 'simple_active_xray_server_id';
   static const _simpleActiveSessionIdKey = 'simple_active_session_id';
   static const _simpleSatisfiedSessionIdKey = 'simple_satisfied_session_id';
+  static const _simpleLeftAppSessionIdKey = 'simple_left_app_session_id';
   int _vpnStateRevision = 0;
   late final Future<void> _startupLoaded;
   bool _nativeSessionRestored = false;
@@ -152,6 +153,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   final ProxyServerService _proxyService = ProxyServerService();
   final PsiphonService _psiphonService = PsiphonService();
   String? _selectedPsiphonServerId;
+  String? _psiphonConnectedRegion;
   int _psiphonSelectionRevision = 0;
   String? get selectedPsiphonServerId => _selectedPsiphonServerId;
 
@@ -538,9 +540,71 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   String? get simpleCurrentSessionId =>
       _simpleFeedbackState.activeSessionId;
   bool get simpleConnectionNeedsFeedback => _simpleFeedbackState.needsFeedback;
+  bool get simpleConnectionFeedbackReadyOnReturn =>
+      _simpleFeedbackState.feedbackReadyOnReturn;
   Duration get connectionDuration => _connectionDuration;
   bool get isConnected => _status == VpnConnectionStatus.connected;
   bool get isConnecting => _status == VpnConnectionStatus.connecting;
+
+  /// A label for the active target, using the server's own metadata rather
+  /// than guessing a country from its IP address.
+  String? get connectedLocationLabel {
+    if (!isConnected) return null;
+    String? nonEmpty(String? value) =>
+        value?.trim().isNotEmpty == true ? value!.trim() : null;
+
+    switch (_selectedProtocol) {
+      case 'xray':
+        final server = activeXrayServer;
+        return server == null
+            ? null
+            : nonEmpty(server.remark) ?? server.address;
+      case 'proxy':
+        final server = activeProxyServer;
+        return server == null
+            ? null
+            : nonEmpty(server.remark) ?? server.address;
+      case 'sstp':
+        return _connectedServer?.fullAddress;
+      case 'openvpn':
+        final config = _selectedOpenVpnConfig;
+        if (config == null) return null;
+        return nonEmpty(config.name) ??
+            nonEmpty(config.serverAddress) ??
+            'OpenVPN';
+      case 'psiphon':
+        return nonEmpty(_psiphonConnectedRegion) ?? 'Psiphon';
+      case 'warp':
+        return 'Cloudflare WARP';
+      case 'direct_dns':
+        final server = _selectedDnsServer;
+        return server == null
+            ? null
+            : nonEmpty(server.country) ?? nonEmpty(server.name);
+      case 'slowdns':
+        return nonEmpty(_selectedSlowDnsConfig?.name);
+      case 'mix':
+        return nonEmpty(selectedMixStrategy?.name) ?? 'Mix';
+      default:
+        return null;
+    }
+  }
+
+  Future<void> markSimpleAppLeft() async {
+    if (!isConnected || !_simpleFeedbackState.markAppLeft()) return;
+    final sessionId = _simpleFeedbackState.activeSessionId;
+    if (sessionId == null) return;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      if (!isConnected || _simpleFeedbackState.activeSessionId != sessionId) {
+        return;
+      }
+      await preferences.setString(_simpleLeftAppSessionIdKey, sessionId);
+    } catch (_) {
+      // An unavailable preference store must not affect the live VPN session.
+    }
+  }
+
   int? get currentPing => _currentPing;
   bool get pingFailed => _pingFailed; // نمایش Failed در UI
 
@@ -624,6 +688,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _simpleFeedbackState.restore(
           activeSessionId: simpleSessionId,
           satisfiedSessionId: prefs.getString(_simpleSatisfiedSessionIdKey),
+          leftAppSessionId: prefs.getString(_simpleLeftAppSessionIdKey),
         );
         if (simpleSessionId == null) {
           _simpleFeedbackState.beginSession(_newSimpleConnectionSessionId());
@@ -1280,8 +1345,8 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         return;
       }
       await preferences.setString(_simpleSatisfiedSessionIdKey, sessionId);
-      if (!isConnected ||
-          _simpleFeedbackState.activeSessionId != sessionId) {
+      await preferences.remove(_simpleLeftAppSessionIdKey);
+      if (!isConnected || _simpleFeedbackState.activeSessionId != sessionId) {
         if (preferences.getString(_simpleSatisfiedSessionIdKey) == sessionId) {
           await preferences.remove(_simpleSatisfiedSessionIdKey);
         }
@@ -1497,6 +1562,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         await preferences.remove(_simpleActiveXrayServerIdKey);
         await preferences.remove(_simpleActiveSessionIdKey);
         await preferences.remove(_simpleSatisfiedSessionIdKey);
+        await preferences.remove(_simpleLeftAppSessionIdKey);
         return;
       }
       if (_simpleFeedbackState.activeSessionId == null) {
@@ -1526,6 +1592,16 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       if (clearFeedback) {
         _simpleFeedbackState.clearSatisfiedMarker();
         await preferences.remove(_simpleSatisfiedSessionIdKey);
+        final leftAppSessionId = _simpleFeedbackState.leftAppSessionId;
+        if (leftAppSessionId == _simpleFeedbackState.activeSessionId &&
+            leftAppSessionId != null) {
+          await preferences.setString(
+            _simpleLeftAppSessionIdKey,
+            leftAppSessionId,
+          );
+        } else {
+          await preferences.remove(_simpleLeftAppSessionIdKey);
+        }
       }
     } catch (_) {
       // Persisting the resume hint must never block the actual VPN session.

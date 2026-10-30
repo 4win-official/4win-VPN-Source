@@ -831,8 +831,64 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             height: 28,
                                             child: Column(
                                               children: [
+                                                if (provider.isConnected &&
+                                                    provider.connectedLocationLabel !=
+                                                        null) ...[
+                                                  const SizedBox(height: 6),
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 24,
+                                                        ),
+                                                    child: Row(
+                                                      key: const ValueKey(
+                                                        'connected-location-label',
+                                                      ),
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons
+                                                              .location_on_outlined,
+                                                          size: 15,
+                                                          color: isDark
+                                                              ? Colors.white54
+                                                              : Colors.black45,
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 6,
+                                                        ),
+                                                        Flexible(
+                                                          child: LocalizedText(
+                                                            'Connected to ${provider.connectedLocationLabel}',
+                                                            maxLines: 1,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            textAlign: TextAlign
+                                                                .center,
+                                                            style: TextStyle(
+                                                              fontSize:
+                                                                  isMascotTheme
+                                                                  ? 12
+                                                                  : 13,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              color: isDark
+                                                                  ? Colors.white
+                                                                  : Colors
+                                                                        .black87,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
                                                 // Active Proxy server name (under the status text).
-                                                if (provider.selectedProtocol ==
+                                                if (!provider.isConnected &&
+                                                    provider.selectedProtocol ==
                                                         'proxy' &&
                                                     provider.activeProxyServer !=
                                                         null) ...[

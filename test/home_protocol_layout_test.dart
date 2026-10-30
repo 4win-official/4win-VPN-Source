@@ -33,6 +33,8 @@ class _LayoutProvider extends FakeVpnProvider {
   @override
   Duration get connectionDuration =>
       connected ? const Duration(seconds: 65) : Duration.zero;
+  @override
+  String? get connectedLocationLabel => connected ? location : null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -208,6 +210,23 @@ void main() {
       TextDirection.ltr,
     );
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('shows the connected server location in Advanced mode', (
+    tester,
+  ) async {
+    final provider = _LayoutProvider()
+      ..connected = true
+      ..protocol = 'xray'
+      ..location = 'Germany · Frankfurt';
+    await pumpHome(tester, provider);
+
+    expect(
+      find.byKey(const ValueKey('connected-location-label')),
+      findsOneWidget,
+    );
+    expect(find.text('Connected to Germany · Frankfurt'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
