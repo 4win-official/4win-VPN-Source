@@ -64,6 +64,22 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
     'ir.resaneh1.iptv',
     'com.app.shadplus',
     'com.bestapps.shadimadareswebbrowser',
+    'ir.nasim',
+    'com.farsitel.bazaar',
+    'com.digikala',
+    'com.mydigipay.app.android',
+    'ir.divar',
+    'com.fidibo.app',
+    'com.myirancell',
+    'ir.mci.ecareapp',
+    'ir.mservices.market',
+    'org.rajman.neshan.traffic.tehran.navigator',
+    'cab.snapp.passenger',
+    'ir.torob',
+    'com.dotin.wepod',
+    'com.pdpsoft.android.saapa',
+    'com.delfan.madp',
+    'net.pajal.nili.hamta',
   };
 
   String _mode = 'exclude';
@@ -161,6 +177,17 @@ class _SplitTunnelScreenState extends State<SplitTunnelScreen> {
       return (a['name'] ?? '').toLowerCase().contains(q) ||
           (a['package'] ?? '').toLowerCase().contains(q);
     }).toList();
+    filtered.sort((a, b) {
+      final aChecked = _selected.contains(a['package'] ?? '');
+      final bChecked = _selected.contains(b['package'] ?? '');
+      if (aChecked != bChecked) return aChecked ? -1 : 1;
+
+      final nameOrder = (a['name'] ?? '').toLowerCase().compareTo(
+        (b['name'] ?? '').toLowerCase(),
+      );
+      if (nameOrder != 0) return nameOrder;
+      return (a['package'] ?? '').compareTo(b['package'] ?? '');
+    });
 
     return Scaffold(
       appBar: AppBar(title: const LocalizedText('Split Tunneling')),

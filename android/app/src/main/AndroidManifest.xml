@@ -532,7 +532,7 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
-        <!-- Explicit visibility for supported bank apps in the split-tunneling picker. -->
+        <!-- Explicit visibility for supported apps in the split-tunneling picker. -->
         <package android:name="com.isc.bminew" />
         <package android:name="com.isc.bsinew" />
         <package android:name="mob.banking.android.pasargad" />
@@ -572,6 +572,22 @@
         <package android:name="ir.resaneh1.iptv" />
         <package android:name="com.app.shadplus" />
         <package android:name="com.bestapps.shadimadareswebbrowser" />
+        <package android:name="ir.nasim" />
+        <package android:name="com.farsitel.bazaar" />
+        <package android:name="com.digikala" />
+        <package android:name="com.mydigipay.app.android" />
+        <package android:name="ir.divar" />
+        <package android:name="com.fidibo.app" />
+        <package android:name="com.myirancell" />
+        <package android:name="ir.mci.ecareapp" />
+        <package android:name="ir.mservices.market" />
+        <package android:name="org.rajman.neshan.traffic.tehran.navigator" />
+        <package android:name="cab.snapp.passenger" />
+        <package android:name="ir.torob" />
+        <package android:name="com.dotin.wepod" />
+        <package android:name="com.pdpsoft.android.saapa" />
+        <package android:name="com.delfan.madp" />
+        <package android:name="net.pajal.nili.hamta" />
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />

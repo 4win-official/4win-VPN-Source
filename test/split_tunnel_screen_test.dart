@@ -34,7 +34,9 @@ void main() {
 
   Future<void> pumpScreen(WidgetTester tester) async {
     await tester.pumpWidget(const MaterialApp(home: SplitTunnelScreen()));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 2300));
+    await tester.pump();
   }
 
   testWidgets(

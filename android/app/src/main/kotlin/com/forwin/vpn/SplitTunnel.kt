@@ -60,6 +60,22 @@ object SplitTunnel {
         "ir.resaneh1.iptv",
         "com.app.shadplus",
         "com.bestapps.shadimadareswebbrowser",
+        "ir.nasim",
+        "com.farsitel.bazaar",
+        "com.digikala",
+        "com.mydigipay.app.android",
+        "ir.divar",
+        "com.fidibo.app",
+        "com.myirancell",
+        "ir.mci.ecareapp",
+        "ir.mservices.market",
+        "org.rajman.neshan.traffic.tehran.navigator",
+        "cab.snapp.passenger",
+        "ir.torob",
+        "com.dotin.wepod",
+        "com.pdpsoft.android.saapa",
+        "com.delfan.madp",
+        "net.pajal.nili.hamta",
     )
     /**
      * One-time migration makes old "off" and "include" preferences safe by
