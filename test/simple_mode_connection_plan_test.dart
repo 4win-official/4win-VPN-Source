@@ -139,14 +139,79 @@ void main() {
         expect(attempted.map((attempt) => attempt.protocol), ['warp', 'xray']);
         expect(attempted.last.xrayGroup, XrayServer.plusGroup);
       } else {
-        expect(
-          attempted.map((attempt) => attempt.protocol),
-          ['warp', 'xray', 'xray'],
-        );
+        expect(attempted.map((attempt) => attempt.protocol), [
+          'warp',
+          'xray',
+          'xray',
+        ]);
         expect(attempted.last.xrayGroup, XrayServer.freeGroup);
       }
     }
   });
+
+  test(
+    'native readiness waits for confirmation instead of start acknowledgement',
+    () async {
+      var reads = 0;
+      final ready = await SimpleConnectionPlan.waitForReadiness(
+        () async => ++reads >= 3,
+        isCurrent: () => true,
+        timeout: const Duration(seconds: 1),
+        pollInterval: Duration.zero,
+      );
+
+      expect(ready, isTrue);
+      expect(reads, 3);
+    },
+  );
+
+  test(
+    'native readiness times out and stops when the attempt is stale',
+    () async {
+      var reads = 0;
+      final timedOut = await SimpleConnectionPlan.waitForReadiness(
+        () async {
+          reads++;
+          return false;
+        },
+        isCurrent: () => true,
+        timeout: Duration.zero,
+      );
+      expect(timedOut, isFalse);
+      expect(reads, 1);
+
+      final stale = await SimpleConnectionPlan.waitForReadiness(
+        () async => true,
+        isCurrent: () => false,
+        timeout: const Duration(seconds: 1),
+      );
+      expect(stale, isFalse);
+    },
+  );
+
+  test(
+    'fallback continues after a candidate fails native readiness',
+    () async {
+      final attempted = <SimpleConnectionAttempt>[];
+      final result = await SimpleConnectionPlan.execute((attempt) async {
+        attempted.add(attempt);
+        final nativeReady = await SimpleConnectionPlan.waitForReadiness(
+          () async => attempted.length == 3,
+          isCurrent: () => true,
+          timeout: Duration.zero,
+        );
+        return nativeReady
+            ? SimpleConnectionAttemptOutcome.connected
+            : SimpleConnectionAttemptOutcome.failed;
+      });
+
+      expect(result, SimpleConnectionAttemptOutcome.connected);
+      expect(
+        attempted.map((attempt) => attempt.xrayGroup ?? attempt.protocol),
+        ['warp', XrayServer.plusGroup, XrayServer.freeGroup],
+      );
+    },
+  );
 
   test('feedback advances WARP to Plus and Plus to Free', () {
     final freeServers = [

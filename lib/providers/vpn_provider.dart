@@ -1378,6 +1378,31 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     await disconnect(preserveSimpleAttempt: true);
     if (generation != _simpleConnectGeneration) return false;
 
+    final previousXrayStopped = await SimpleConnectionPlan.waitForReadiness(
+      () async {
+        final state = await VpnProvider._vpnStateChannel
+            .invokeMapMethod<String, dynamic>(
+              'getState',
+              {'protocol': 'xray'},
+            );
+        return state?['running'] != true &&
+            state?['connected'] != true &&
+            state?['reconnecting'] != true;
+      },
+      isCurrent: () => generation == _simpleConnectGeneration,
+    );
+    if (generation != _simpleConnectGeneration) return false;
+    if (!previousXrayStopped) {
+      _simpleConnectionAttemptActive = false;
+      _simpleConnectionFailed = true;
+      _simpleConnectionFailureMessage =
+          'Could not confirm the previous VPN connection stopped.';
+      _status = VpnConnectionStatus.error;
+      _errorMessage = _simpleConnectionFailureMessage;
+      notifyListeners();
+      return false;
+    }
+
     _simpleCurrentAttempt = null;
     await _persistSimpleCurrentAttempt(null);
     if (generation != _simpleConnectGeneration) return false;
@@ -4223,14 +4248,67 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         }
       }
 
+      String? simpleValidationFailure;
+      if (connected && simpleModeAttempt && !proxyMode) {
+        final simpleGeneration = _simpleConnectGeneration;
+        final nativeReady = await SimpleConnectionPlan.waitForReadiness(
+          () async {
+            final state = await VpnProvider._vpnStateChannel
+                .invokeMapMethod<String, dynamic>(
+                  'getState',
+                  {'protocol': 'xray'},
+                );
+            return state?['running'] == true &&
+                state?['connected'] == true &&
+                state?['reconnecting'] != true;
+          },
+          isCurrent: () =>
+              simpleGeneration == _simpleConnectGeneration &&
+              myGen == _xrayConnectGen &&
+              _status == VpnConnectionStatus.connecting,
+        );
+        if (!nativeReady) {
+          connected = false;
+          simpleValidationFailure = 'Xray VPN service did not become ready.';
+        } else {
+          try {
+            final delayConfig = await _buildDelayConfig(serverToConnect);
+            final testUrl = await getXrayTestUrl();
+            final delay = await XrayConnection.measureDelay(
+              delayConfig,
+              url: testUrl,
+            ).timeout(const Duration(seconds: 6), onTimeout: () => -1);
+            connected = delay >= 0;
+            if (!connected) {
+              simpleValidationFailure =
+                  'Xray server did not pass the reachability test.';
+            } else {
+              _setProtocolStep(
+                4,
+                ConnectionStepState.complete,
+                detail:
+                    'The native Xray service is running and an HTTP request '
+                    'through the server succeeded.',
+              );
+            }
+          } catch (_) {
+            connected = false;
+            simpleValidationFailure =
+                'Xray server did not pass the reachability test.';
+          }
+        }
+      }
+
       // If the user cancelled meanwhile, tear the just-started tunnel down and
       // stay disconnected instead of flipping to "connected".
       if (cancelled()) {
         if (kDebugMode)
           debugPrint('🚫 Xray connected late after cancel — tearing down');
-        try {
-          await XrayConnection.disconnect();
-        } catch (_) {}
+        if (!simpleModeAttempt || myGen == _xrayConnectGen) {
+          try {
+            await XrayConnection.disconnect();
+          } catch (_) {}
+        }
         return;
       }
       if (connected) {
@@ -4260,10 +4338,12 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _startXrayTraffic(); // poll proxy up/down bytes from the core
       } else {
         _status = VpnConnectionStatus.error;
-        _errorMessage = automaticSelection
-            ? 'No reachable Xray servers found. Check your internet '
-                  'connection and try again.'
-            : 'Failed to start Xray core';
+        _errorMessage =
+            simpleValidationFailure ??
+            (automaticSelection
+                ? 'No reachable Xray servers found. Check your internet '
+                      'connection and try again.'
+                : 'Failed to start Xray core');
       }
       notifyListeners();
     } catch (e) {

@@ -40,6 +40,30 @@ class SimpleConnectionPlan {
     return SimpleConnectionAttemptOutcome.failed;
   }
 
+  /// Polls a native readiness check without accepting a stale attempt result.
+  static Future<bool> waitForReadiness(
+    Future<bool> Function() isReady, {
+    required bool Function() isCurrent,
+    Duration timeout = const Duration(seconds: 12),
+    Duration pollInterval = const Duration(milliseconds: 250),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    do {
+      if (!isCurrent()) return false;
+      var ready = false;
+      try {
+        ready = await isReady();
+      } catch (_) {
+        // Native state can be briefly unavailable while a service is starting.
+      }
+      if (!isCurrent()) return false;
+      if (ready) return true;
+      if (!DateTime.now().isBefore(deadline)) break;
+      await Future<void>.delayed(pollInterval);
+    } while (DateTime.now().isBefore(deadline));
+    return false;
+  }
+
   static List<SimpleConnectionAttempt> xrayTargetsForGroup(
     String group,
     Iterable<XrayServer> servers,
