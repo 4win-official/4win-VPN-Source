@@ -159,6 +159,7 @@ const Map<String, String> appPersianTranslations = <String, String>{
   r'''Switch to Simple''': r'''رفتن به حالت ساده''',
   r'''App Mode''': r'''حالت برنامه''',
   r'''Appearance''': r'''ظاهر''',
+  r'''Private connection''': r'''اتصال خصوصی''',
   r'''Light''': r'''روشن''',
   r'''Dark''': r'''تاریک''',
   r'''Disconnect''': r'''قطع اتصال''',
