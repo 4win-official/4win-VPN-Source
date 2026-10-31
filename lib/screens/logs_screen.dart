@@ -26,8 +26,14 @@ class _LogsScreenState extends State<LogsScreen> {
   @override
   void initState() {
     super.initState();
-    _protocolFilter = widget.initialProtocol ?? 'all';
-    ConnectionLogger.instance.addListener(_onLogChanged);
+    final logger = ConnectionLogger.instance;
+    final initialProtocol = widget.initialProtocol;
+    _protocolFilter = initialProtocol != null &&
+            logger.entries.any((entry) => entry.protocol == initialProtocol)
+        ? initialProtocol
+        : 'all';
+    logger.addListener(_onLogChanged);
+    logger.loadPersisted();
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 

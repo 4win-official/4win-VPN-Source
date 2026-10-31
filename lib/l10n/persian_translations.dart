@@ -182,6 +182,7 @@ const Map<String, String> appPersianTranslations = <String, String>{
   r'''Testing ${provider.servers.length} servers...''':
       r'''در حال آزمایش ${provider.servers.length} سرور...''',
   r'''Version $_appVersion''': r'''نسخه $_appVersion''',
+  r'''Diagnostics''': r'''عیب‌یابی''',
   r'''Connection Logs''': r'''گزارش‌های اتصال''',
   r'''No logs yet''': r'''هنوز گزارشی وجود ندارد''',
   r'''Connect to VPN to see logs''': r'''برای دیدن گزارش‌ها به VPN متصل شوید''',

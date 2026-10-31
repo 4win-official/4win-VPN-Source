@@ -425,6 +425,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       attemptId: '${DateTime.now().microsecondsSinceEpoch}-${++_protocolAttempt}',
       proxyMode: false,
     ).updateStep(0, ConnectionStepState.running, detail: 'Preparing this connection attempt.');
+    ConnectionLogger.instance.info(protocol, 'Connection attempt started');
   }
 
   int _protocolAttempt = 0;
@@ -469,6 +470,19 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     final existing = current.steps[index];
     if (existing.state == state && existing.detail == detail) return;
     _protocolDiagnostics = current.updateStep(index, state, detail: detail);
+    final level = switch (state) {
+      ConnectionStepState.complete => ConnectionLogLevel.success,
+      ConnectionStepState.failed => ConnectionLogLevel.error,
+      ConnectionStepState.unverified => ConnectionLogLevel.warning,
+      ConnectionStepState.pending ||
+      ConnectionStepState.running ||
+      ConnectionStepState.skipped => ConnectionLogLevel.info,
+    };
+    final detailText = detail?.trim();
+    final message = detailText == null || detailText.isEmpty
+        ? '${existing.title}: ${state.name}'
+        : '${existing.title}: ${state.name} — $detailText';
+    ConnectionLogger.instance.log(current.protocol, message, level);
     if (notify && !_mixDisposed) notifyListeners();
   }
 
@@ -498,6 +512,26 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     final current = _protocolDiagnostics;
     if (current == null || current.protocol != _selectedProtocol) return;
     _protocolDiagnostics = current.updateOutcome(outcome, message: message);
+    _logProtocolOutcome(current.protocol, outcome, message);
+  }
+
+  void _logProtocolOutcome(
+    String protocol,
+    ConnectionAttemptOutcome outcome,
+    String? message,
+  ) {
+    final level = switch (outcome) {
+      ConnectionAttemptOutcome.connected => ConnectionLogLevel.success,
+      ConnectionAttemptOutcome.failed => ConnectionLogLevel.error,
+      ConnectionAttemptOutcome.cancelled ||
+      ConnectionAttemptOutcome.disconnected => ConnectionLogLevel.warning,
+      ConnectionAttemptOutcome.connecting => ConnectionLogLevel.info,
+    };
+    final detail = message?.trim();
+    final summary = detail == null || detail.isEmpty
+        ? 'Connection ${outcome.name}'
+        : 'Connection ${outcome.name}: $detail';
+    ConnectionLogger.instance.log(protocol, summary, level);
   }
 
   void _syncProtocolDiagnosticsWithStatus() {
@@ -508,12 +542,19 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       return;
     }
     if (_status == VpnConnectionStatus.error) {
-      _protocolDiagnostics = current.failCurrent(
+      final failed = current.failCurrent(
         _errorMessage ?? 'The connection attempt failed.',
       );
+      _protocolDiagnostics = failed;
+      _logProtocolOutcome(current.protocol, failed.outcome, failed.message);
     } else if (_status == VpnConnectionStatus.connected) {
       _protocolDiagnostics = current.updateOutcome(
         ConnectionAttemptOutcome.connected,
+      );
+      _logProtocolOutcome(
+        current.protocol,
+        ConnectionAttemptOutcome.connected,
+        current.message,
       );
     }
   }
@@ -1684,6 +1725,8 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     if (_selectedProtocol == 'sstp') _errorMessage = null;
     if (_selectedProtocol != 'mix') {
       _beginProtocolDiagnostics(_selectedProtocol);
+    } else {
+      ConnectionLogger.instance.info('mix', 'Connection attempt started');
     }
     // ⚡ CRITICAL: Set to connecting immediately so user sees feedback
     _status = VpnConnectionStatus.connecting;
@@ -1724,6 +1767,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       _errorMessage =
           'Proxy mode only supports Xray. Switch to the Xray protocol, '
           'or turn on VPN mode in Settings to use this protocol.';
+      ConnectionLogger.instance.error(
+        _selectedProtocol,
+        'Connection mode validation failed: this protocol requires VPN mode; '
+            'local Proxy mode is not available.',
+      );
       notifyListeners();
       return;
     }

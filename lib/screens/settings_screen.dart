@@ -14,6 +14,7 @@ import '../widgets/update_dialog.dart';
 import '../widgets/psiphon_server_list_status.dart';
 import 'slowdns_configs_screen.dart';
 import 'split_tunnel_screen.dart';
+import 'logs_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -2065,6 +2066,26 @@ class _SettingsScreenState extends State<SettingsScreen>
                           if (!mounted) return;
                           navigator.pop();
                         },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
+                if (isGeneralTab) ...[
+                  _SettingsSection(
+                    title: context.l10n.text('Diagnostics'),
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.article_outlined),
+                        title: const LocalizedText('Connection Logs'),
+                        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const LogsScreen(),
+                          ),
+                        ),
                       ),
                     ],
                   ),
