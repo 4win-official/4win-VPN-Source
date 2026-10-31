@@ -2434,24 +2434,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _openSettings(BuildContext context) async {
-    // Show a quick rotating-gear indicator before opening the settings screen.
     HapticFeedback.mediumImpact();
-    final navigator = Navigator.of(context);
-    await _showSettingsTransition(context);
-    if (!mounted) return;
-    await navigator.push(
-      MaterialPageRoute(builder: (context) => const SettingsScreen()),
-    );
-  }
-
-  /// Displays a brief animated gear (cog) overlay indicating navigation to
-  /// settings. Resolves after the animation completes (~700ms).
-  Future<void> _showSettingsTransition(BuildContext context) {
-    return showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.black54,
-      builder: (dialogContext) => const _SettingsTransitionOverlay(),
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
   }
 
@@ -2460,115 +2445,5 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
     final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
     return '$hours:$minutes:$seconds';
-  }
-}
-
-/// A short-lived overlay shown when the user opens Settings from the toolbar.
-/// It displays a rotating gear (cog) with a scale/fade-in animation plus a
-/// "Settings" label so the user understands they are heading to settings.
-/// It automatically closes itself once the animation completes.
-class _SettingsTransitionOverlay extends StatefulWidget {
-  const _SettingsTransitionOverlay();
-
-  @override
-  State<_SettingsTransitionOverlay> createState() =>
-      _SettingsTransitionOverlayState();
-}
-
-class _SettingsTransitionOverlayState extends State<_SettingsTransitionOverlay>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final Animation<double> _rotation;
-  late final Animation<double> _scale;
-  late final Animation<double> _fade;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    // Spin the gear ~1.25 turns while it appears.
-    _rotation = Tween<double>(
-      begin: 0.0,
-      end: 1.25,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-    _scale = Tween<double>(
-      begin: 0.4,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.elasticOut));
-    _fade = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.0, 0.4, curve: Curves.easeIn),
-      ),
-    );
-
-    _controller.forward().whenComplete(() {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: FadeTransition(
-        opacity: _fade,
-        child: ScaleTransition(
-          scale: _scale,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.78),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF00FF88).withValues(alpha: 0.35),
-                  blurRadius: 30,
-                  spreadRadius: 4,
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AnimatedBuilder(
-                  animation: _rotation,
-                  builder: (context, child) {
-                    return Transform.rotate(
-                      angle: _rotation.value * 2 * 3.1415926535,
-                      child: child,
-                    );
-                  },
-                  child: const Icon(
-                    Icons.settings,
-                    size: 56,
-                    color: Color(0xFF00FF88),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const LocalizedText(
-                  'Settings',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
