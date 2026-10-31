@@ -305,8 +305,13 @@ class _SimpleHomeScreenState extends State<SimpleHomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
         title: const LocalizedText('4win VPN'),
         actions: [
           IconButton(
@@ -316,84 +321,127 @@ class _SimpleHomeScreenState extends State<SimpleHomeScreen>
           ),
         ],
       ),
-      body: SafeArea(
-        child: Consumer<VpnProvider>(
-          builder: (context, provider, _) {
-            _scheduleFeedbackPrompt(provider);
-            final connected = provider.status == VpnConnectionStatus.connected;
-            final connecting = provider.status == VpnConnectionStatus.connecting ||
-                provider.status == VpnConnectionStatus.disconnecting ||
-                provider.simpleConnectionInProgress;
-            final statusText = provider.simpleConnectionFailed
-                ? provider.simpleConnectionFailureMessage ??
+      body: Consumer<VpnProvider>(
+        builder: (context, provider, _) {
+          _scheduleFeedbackPrompt(provider);
+          final connected = provider.status == VpnConnectionStatus.connected;
+          final connecting =
+              provider.status == VpnConnectionStatus.connecting ||
+              provider.status == VpnConnectionStatus.disconnecting ||
+              provider.simpleConnectionInProgress;
+          final statusText = provider.simpleConnectionFailed
+              ? provider.simpleConnectionFailureMessage ??
                     'Could not connect with WARP, Plus, or free Xray.'
-                : connected
-                ? 'Connected'
-                : connecting
-                ? 'Connecting...'
-                : 'Disconnected';
-            final buttonText = connected
-                ? 'Disconnect'
-                : connecting
-                ? 'Cancel'
-                : 'Connect';
+              : connected
+              ? 'Connected'
+              : connecting
+              ? 'Connecting...'
+              : 'Disconnected';
+          final buttonText = connected
+              ? 'Disconnect'
+              : connecting
+              ? 'Cancel'
+              : 'Connect';
 
-            return Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 360),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Icon(
-                        connected
-                            ? Icons.shield
-                            : Icons.shield_outlined,
-                        size: 74,
-                        color: connected
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(height: 18),
-                      LocalizedText(
-                        statusText,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: provider.simpleConnectionFailed ? 15 : 18,
-                          fontWeight: FontWeight.w600,
-                          color: provider.simpleConnectionFailed
-                              ? Theme.of(context).colorScheme.error
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(height: 28),
-                      SizedBox(
-                        height: 58,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            if (connected || connecting) {
-                              unawaited(provider.disconnect());
-                            } else {
-                              unawaited(provider.connectSimple());
-                            }
-                          },
-                          icon: Icon(
-                            connected || connecting
-                                ? Icons.power_settings_new
-                                : Icons.power,
+          final backgroundColors = isDark
+              ? connecting
+                    ? const [Color(0xFF5B4918), Color(0xFF382E11)]
+                    : connected
+                    ? const [Color(0xFF1A583A), Color(0xFF103524)]
+                    : const [Color(0xFF173D6A), Color(0xFF102744)]
+              : connecting
+              ? const [Color(0xFFFFE59A), Color(0xFFFFF4CF)]
+              : connected
+              ? const [Color(0xFFB9E7C6), Color(0xFFE6F6E9)]
+              : const [Color(0xFFB7D8FF), Color(0xFFEAF4FF)];
+
+          return AnimatedContainer(
+            key: const ValueKey('simple-status-background'),
+            duration: const Duration(milliseconds: 700),
+            curve: Curves.easeInOutCubic,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: backgroundColors,
+              ),
+            ),
+            child: SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 108,
+                            height: 108,
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(
+                                alpha: isDark ? 0.16 : 0.78,
+                              ),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.65),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.08),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: Image.asset(
+                              'assets/icons/app_icon.png',
+                              fit: BoxFit.contain,
+                            ),
                           ),
-                          label: LocalizedText(buttonText),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 18),
+                        LocalizedText(
+                          statusText,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: provider.simpleConnectionFailed ? 15 : 18,
+                            fontWeight: FontWeight.w600,
+                            color: provider.simpleConnectionFailed
+                                ? Theme.of(context).colorScheme.error
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        SizedBox(
+                          height: 58,
+                          child: FilledButton.icon(
+                            onPressed: () {
+                              if (connected || connecting) {
+                                unawaited(provider.disconnect());
+                              } else {
+                                unawaited(provider.connectSimple());
+                              }
+                            },
+                            icon: Icon(
+                              connected || connecting
+                                  ? Icons.power_settings_new
+                                  : Icons.power,
+                            ),
+                            label: LocalizedText(buttonText),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        },
       ),
     );
   }

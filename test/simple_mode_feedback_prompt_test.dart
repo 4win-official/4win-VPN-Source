@@ -10,6 +10,7 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   bool leftApp = false;
   bool satisfied = false;
   int refreshCalls = 0;
+  VpnConnectionStatus currentStatus = VpnConnectionStatus.connected;
 
   @override
   void addListener(VoidCallback listener) => _listeners.add(listener);
@@ -17,14 +18,20 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   @override
   void removeListener(VoidCallback listener) => _listeners.remove(listener);
 
-  @override
-  bool get isConnected => true;
+  void emit() {
+    for (final listener in _listeners.toList()) {
+      listener();
+    }
+  }
 
   @override
-  bool get isConnecting => false;
+  bool get isConnected => currentStatus == VpnConnectionStatus.connected;
 
   @override
-  VpnConnectionStatus get status => VpnConnectionStatus.connected;
+  bool get isConnecting => currentStatus == VpnConnectionStatus.connecting;
+
+  @override
+  VpnConnectionStatus get status => currentStatus;
 
   @override
   bool get simpleConnectionFailed => false;
@@ -73,6 +80,122 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets(
+    'shows the app logo and animates disconnected, connecting, connected colors',
+    (tester) async {
+      final provider = _FakeVpnProvider()
+        ..currentStatus = VpnConnectionStatus.disconnected;
+      await tester.pumpWidget(
+        ChangeNotifierProvider<VpnProvider>.value(
+          value: provider,
+          child: const MaterialApp(home: SimpleHomeScreen()),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Image &&
+              widget.image is AssetImage &&
+              (widget.image as AssetImage).assetName ==
+                  'assets/icons/app_icon.png',
+        ),
+        findsOneWidget,
+      );
+      final background = find.byKey(const ValueKey('simple-status-background'));
+      expect(background, findsOneWidget);
+      final disconnectedDecoration =
+          tester.widget<AnimatedContainer>(background).decoration
+              as BoxDecoration;
+      expect(
+        (disconnectedDecoration.gradient! as LinearGradient).colors.first,
+        const Color(0xFFB7D8FF),
+      );
+
+      provider.currentStatus = VpnConnectionStatus.connecting;
+      provider.emit();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      final backgroundDecoration = tester
+          .widgetList<DecoratedBox>(
+            find.descendant(
+              of: background,
+              matching: find.byType(DecoratedBox),
+            ),
+          )
+          .firstWhere(
+            (box) =>
+                box.decoration is BoxDecoration &&
+                (box.decoration as BoxDecoration).gradient is LinearGradient,
+          );
+      final inTransition =
+          (backgroundDecoration.decoration as BoxDecoration).gradient!
+              as LinearGradient;
+      expect(inTransition.colors.first, isNot(const Color(0xFFB7D8FF)));
+      expect(inTransition.colors.first, isNot(const Color(0xFFFFE59A)));
+      final connectingTarget =
+          tester.widget<AnimatedContainer>(background).decoration
+              as BoxDecoration;
+      expect(
+        (connectingTarget.gradient! as LinearGradient).colors.first,
+        const Color(0xFFFFE59A),
+      );
+      await tester.pump(const Duration(milliseconds: 350));
+      final connectingDecoration = tester
+          .widgetList<DecoratedBox>(
+            find.descendant(
+              of: background,
+              matching: find.byType(DecoratedBox),
+            ),
+          )
+          .firstWhere(
+            (box) =>
+                box.decoration is BoxDecoration &&
+                (box.decoration as BoxDecoration).gradient is LinearGradient,
+          );
+      expect(
+        ((connectingDecoration.decoration as BoxDecoration).gradient!
+                as LinearGradient)
+            .colors
+            .first,
+        const Color(0xFFFFE59A),
+      );
+
+      provider.currentStatus = VpnConnectionStatus.connected;
+      provider.emit();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      final changingToGreen = tester
+          .widgetList<DecoratedBox>(
+            find.descendant(
+              of: background,
+              matching: find.byType(DecoratedBox),
+            ),
+          )
+          .firstWhere(
+            (box) =>
+                box.decoration is BoxDecoration &&
+                (box.decoration as BoxDecoration).gradient is LinearGradient,
+          );
+      final yellowToGreen =
+          (changingToGreen.decoration as BoxDecoration).gradient!
+              as LinearGradient;
+      expect(yellowToGreen.colors.first, isNot(const Color(0xFFFFE59A)));
+      expect(yellowToGreen.colors.first, isNot(const Color(0xFFB9E7C6)));
+      await tester.pump(const Duration(milliseconds: 700));
+      final connectedDecoration =
+          tester.widget<AnimatedContainer>(background).decoration
+              as BoxDecoration;
+      expect(
+        (connectedDecoration.gradient! as LinearGradient).colors.first,
+        const Color(0xFFB9E7C6),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   test('feedback becomes ready only after leaving the same session', () {
     final feedback = SimpleConnectionFeedbackState()
