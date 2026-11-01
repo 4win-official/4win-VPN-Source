@@ -19,6 +19,7 @@ class _LayoutProvider extends FakeVpnProvider {
   String? error;
   bool connected = false;
   ProxyServer? proxy;
+  String? location;
 
   @override
   String get selectedProtocol => protocol;
@@ -213,7 +214,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('shows the connected server location in Advanced mode', (
+  testWidgets('does not show the connected server location in Advanced mode', (
     tester,
   ) async {
     final provider = _LayoutProvider()
@@ -222,11 +223,8 @@ void main() {
       ..location = 'Germany · Frankfurt';
     await pumpHome(tester, provider);
 
-    expect(
-      find.byKey(const ValueKey('connected-location-label')),
-      findsOneWidget,
-    );
-    expect(find.text('Connected to Germany · Frankfurt'), findsOneWidget);
+    expect(find.byKey(const ValueKey('connected-location-label')), findsNothing);
+    expect(find.text('Connected to Germany · Frankfurt'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
