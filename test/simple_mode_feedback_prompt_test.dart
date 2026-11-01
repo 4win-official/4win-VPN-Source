@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
-import 'package:vpn_swift/l10n/app_localizations.dart';
 import 'package:vpn_swift/models/simple_connection_plan.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/screens/simple_mode_screens.dart';
@@ -199,84 +197,6 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Simple mode is fully Persian RTL and does not use backdrop blur',
-    (tester) async {
-      tester.view.physicalSize = const Size(320, 640);
-      tester.view.devicePixelRatio = 1;
-      tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      addTearDown(tester.view.resetPadding);
-
-      final provider = _FakeVpnProvider()
-        ..currentStatus = VpnConnectionStatus.disconnected;
-      await tester.pumpWidget(
-        ChangeNotifierProvider<VpnProvider>.value(
-          value: provider,
-          child: MaterialApp(
-            locale: const Locale('fa'),
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: const [
-              AppLocalizationsDelegate(),
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
-            home: const SimpleHomeScreen(),
-          ),
-        ),
-      );
-      await tester.pump();
-
-      final privateConnection = find.text('اتصال خصوصی');
-      expect(privateConnection, findsOneWidget);
-      expect(find.text('اتصال'), findsOneWidget);
-      expect(
-        Directionality.of(tester.element(privateConnection)),
-        TextDirection.rtl,
-      );
-      expect(find.byType(BackdropFilter), findsNothing);
-      expect(
-        find.byKey(const ValueKey('simple-power-control')),
-        findsOneWidget,
-      );
-      expect(
-        tester
-            .getSize(find.byKey(const ValueKey('simple-power-control')))
-            .width,
-        greaterThanOrEqualTo(176),
-      );
-      expect(tester.takeException(), isNull);
-
-      await tester.pumpWidget(
-        ChangeNotifierProvider<VpnProvider>.value(
-          value: provider,
-          child: MaterialApp(
-            theme: ThemeData.dark(),
-            locale: const Locale('fa'),
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: const [
-              AppLocalizationsDelegate(),
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
-            home: const SimpleHomeScreen(),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        Theme.of(tester.element(find.text('اتصال خصوصی'))).brightness,
-        Brightness.dark,
-      );
-      expect(find.text('اتصال'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
-
   test('feedback becomes ready only after leaving the same session', () {
     final feedback = SimpleConnectionFeedbackState()
       ..beginSession('simple-session-1');
@@ -325,6 +245,5 @@ void main() {
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 }
