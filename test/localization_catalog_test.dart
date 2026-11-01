@@ -12,6 +12,12 @@ void main() {
       expect(english.text('Settings'), 'Settings');
       expect(persian.text('Settings'), 'تنظیمات');
       expect(persian.text('Connecting...'), 'در حال اتصال...');
+      expect(persian.text('Connection stats'), 'آمار اتصال');
+      expect(persian.text('Upload'), 'آپلود');
+      expect(
+        persian.text('Your VPN, one tap away.'),
+        'VPN شما، تنها با یک لمس.',
+      );
     },
   );
 

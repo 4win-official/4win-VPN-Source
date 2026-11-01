@@ -7,8 +7,8 @@ import '../l10n/app_localizations.dart';
 import '../providers/app_mode_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/vpn_provider.dart';
-import '../services/vpn_service.dart';
 import '../widgets/app_language_setting.dart';
+import 'simple_mode_home_layout.dart';
 import 'split_tunnel_screen.dart';
 
 /// Shows the mode chooser once, after the language gate has completed.
@@ -82,7 +82,8 @@ class AppModeSelectionScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   _ModeChoice(
                     modeName: 'Simple',
-                    description: 'Connect with one tap; the app chooses for you.',
+                    description:
+                        'Connect with one tap; the app chooses for you.',
                     icon: Icons.power_settings_new,
                     isDark: isDark,
                     onPressed: () => _choose(context, AppExperienceMode.simple),
@@ -90,7 +91,8 @@ class AppModeSelectionScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   _ModeChoice(
                     modeName: 'Advanced',
-                    description: 'Choose protocols, servers, and detailed settings.',
+                    description:
+                        'Choose protocols, servers, and detailed settings.',
                     icon: Icons.settings_suggest_outlined,
                     isDark: isDark,
                     onPressed: () =>
@@ -264,10 +266,7 @@ class _SimpleHomeScreenState extends State<SimpleHomeScreen>
     });
   }
 
-  Future<void> _showFeedbackDialog(
-    VpnProvider provider,
-    int generation,
-  ) async {
+  Future<void> _showFeedbackDialog(VpnProvider provider, int generation) async {
     final changeServer = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -307,144 +306,17 @@ class _SimpleHomeScreenState extends State<SimpleHomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        title: const LocalizedText('4win VPN'),
-        actions: [
-          IconButton(
-            tooltip: context.l10n.text('Settings'),
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => _openSettings(context),
+    return Consumer<VpnProvider>(
+      builder: (context, provider, _) {
+        _scheduleFeedbackPrompt(provider);
+        return SimpleModeHomeLayout(
+          provider: provider,
+          onSettings: () => _openSettings(context),
+          onSplitTunnel: () => Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(builder: (_) => const SplitTunnelScreen()),
           ),
-        ],
-      ),
-      body: Consumer<VpnProvider>(
-        builder: (context, provider, _) {
-          _scheduleFeedbackPrompt(provider);
-          final connected = provider.status == VpnConnectionStatus.connected;
-          final connecting =
-              provider.status == VpnConnectionStatus.connecting ||
-              provider.status == VpnConnectionStatus.disconnecting ||
-              provider.simpleConnectionInProgress;
-          final statusText = provider.simpleConnectionFailed
-              ? provider.simpleConnectionFailureMessage ??
-                    'Could not connect with WARP, Plus, or free Xray.'
-              : connected
-              ? 'Connected'
-              : connecting
-              ? 'Connecting...'
-              : 'Disconnected';
-          final buttonText = connected
-              ? 'Disconnect'
-              : connecting
-              ? 'Cancel'
-              : 'Connect';
-
-          final backgroundColors = isDark
-              ? connecting
-                    ? const [Color(0xFF5B4918), Color(0xFF382E11)]
-                    : connected
-                    ? const [Color(0xFF1A583A), Color(0xFF103524)]
-                    : const [Color(0xFF173D6A), Color(0xFF102744)]
-              : connecting
-              ? const [Color(0xFFFFE59A), Color(0xFFFFF4CF)]
-              : connected
-              ? const [Color(0xFFB9E7C6), Color(0xFFE6F6E9)]
-              : const [Color(0xFFB7D8FF), Color(0xFFEAF4FF)];
-
-          return AnimatedContainer(
-            key: const ValueKey('simple-status-background'),
-            duration: const Duration(milliseconds: 700),
-            curve: Curves.easeInOutCubic,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: backgroundColors,
-              ),
-            ),
-            child: SafeArea(
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 360),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Center(
-                          child: Container(
-                            width: 108,
-                            height: 108,
-                            padding: const EdgeInsets.all(18),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(
-                                alpha: isDark ? 0.16 : 0.78,
-                              ),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.65),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.08),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 8),
-                                ),
-                              ],
-                            ),
-                            child: Image.asset(
-                              'assets/icons/app_icon.png',
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        LocalizedText(
-                          statusText,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: provider.simpleConnectionFailed ? 15 : 18,
-                            fontWeight: FontWeight.w600,
-                            color: provider.simpleConnectionFailed
-                                ? Theme.of(context).colorScheme.error
-                                : null,
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        SizedBox(
-                          height: 58,
-                          child: FilledButton.icon(
-                            onPressed: () {
-                              if (connected || connecting) {
-                                unawaited(provider.disconnect());
-                              } else {
-                                unawaited(provider.connectSimple());
-                              }
-                            },
-                            icon: Icon(
-                              connected || connecting
-                                  ? Icons.power_settings_new
-                                  : Icons.power,
-                            ),
-                            label: LocalizedText(buttonText),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
+        );
+      },
     );
   }
 }
@@ -509,9 +381,9 @@ class SimpleSettingsScreen extends StatelessWidget {
               context
                   .read<VpnProvider>()
                   .restoreSimpleAdvancedProtocolIfStopped();
-              await context
-                  .read<AppModeProvider>()
-                  .setMode(AppExperienceMode.advanced);
+              await context.read<AppModeProvider>().setMode(
+                AppExperienceMode.advanced,
+              );
               if (!context.mounted) return;
               Navigator.of(context).pop();
             },

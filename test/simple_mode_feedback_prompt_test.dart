@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:vpn_swift/l10n/app_localizations.dart';
 import 'package:vpn_swift/models/simple_connection_plan.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
 import 'package:vpn_swift/screens/simple_mode_screens.dart';
@@ -10,7 +12,12 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   bool leftApp = false;
   bool satisfied = false;
   int refreshCalls = 0;
+  int connectCalls = 0;
+  int disconnectCalls = 0;
   VpnConnectionStatus currentStatus = VpnConnectionStatus.connected;
+  int? ping = 42;
+  String downloaded = '12.3 MB';
+  String uploaded = '5.6 MB';
 
   @override
   void addListener(VoidCallback listener) => _listeners.add(listener);
@@ -32,6 +39,18 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
 
   @override
   VpnConnectionStatus get status => currentStatus;
+
+  @override
+  int? get currentPing => ping;
+
+  @override
+  bool get pingFailed => false;
+
+  @override
+  String get downloadDataUsage => downloaded;
+
+  @override
+  String get uploadDataUsage => uploaded;
 
   @override
   bool get simpleConnectionFailed => false;
@@ -61,6 +80,17 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   }
 
   @override
+  Future<bool> connectSimple() async {
+    connectCalls++;
+    return true;
+  }
+
+  @override
+  Future<void> disconnect({bool preserveSimpleAttempt = false}) async {
+    disconnectCalls++;
+  }
+
+  @override
   Future<void> markSimpleAppLeft() async {
     if (!satisfied) leftApp = true;
   }
@@ -82,7 +112,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'shows the app logo and animates disconnected, connecting, connected colors',
+    'uses the app logo as its connection control and shows live session stats',
     (tester) async {
       final provider = _FakeVpnProvider()
         ..currentStatus = VpnConnectionStatus.disconnected;
@@ -104,6 +134,11 @@ void main() {
         ),
         findsOneWidget,
       );
+      expect(
+        find.byKey(const ValueKey('simple-logo-connect-control')),
+        findsOneWidget,
+      );
+      expect(find.text('—'), findsNWidgets(3));
       final background = find.byKey(const ValueKey('simple-status-background'));
       expect(background, findsOneWidget);
       final disconnectedDecoration =
@@ -111,7 +146,7 @@ void main() {
               as BoxDecoration;
       expect(
         (disconnectedDecoration.gradient! as LinearGradient).colors.first,
-        const Color(0xFFB7D8FF),
+        const Color(0xFFF8F9FB),
       );
 
       provider.currentStatus = VpnConnectionStatus.connecting;
@@ -133,14 +168,14 @@ void main() {
       final inTransition =
           (backgroundDecoration.decoration as BoxDecoration).gradient!
               as LinearGradient;
-      expect(inTransition.colors.first, isNot(const Color(0xFFB7D8FF)));
-      expect(inTransition.colors.first, isNot(const Color(0xFFFFE59A)));
+      expect(inTransition.colors.first, isNot(const Color(0xFFF8F9FB)));
+      expect(inTransition.colors.first, isNot(const Color(0xFFFFF5D9)));
       final connectingTarget =
           tester.widget<AnimatedContainer>(background).decoration
               as BoxDecoration;
       expect(
         (connectingTarget.gradient! as LinearGradient).colors.first,
-        const Color(0xFFFFE59A),
+        const Color(0xFFFFF5D9),
       );
       await tester.pump(const Duration(milliseconds: 350));
       final connectingDecoration = tester
@@ -160,7 +195,7 @@ void main() {
                 as LinearGradient)
             .colors
             .first,
-        const Color(0xFFFFE59A),
+        const Color(0xFFFFF5D9),
       );
 
       provider.currentStatus = VpnConnectionStatus.connected;
@@ -182,16 +217,19 @@ void main() {
       final yellowToGreen =
           (changingToGreen.decoration as BoxDecoration).gradient!
               as LinearGradient;
-      expect(yellowToGreen.colors.first, isNot(const Color(0xFFFFE59A)));
-      expect(yellowToGreen.colors.first, isNot(const Color(0xFFB9E7C6)));
+      expect(yellowToGreen.colors.first, isNot(const Color(0xFFFFF5D9)));
+      expect(yellowToGreen.colors.first, isNot(const Color(0xFFE9F7ED)));
       await tester.pump(const Duration(milliseconds: 700));
       final connectedDecoration =
           tester.widget<AnimatedContainer>(background).decoration
               as BoxDecoration;
       expect(
         (connectedDecoration.gradient! as LinearGradient).colors.first,
-        const Color(0xFFB9E7C6),
+        const Color(0xFFE9F7ED),
       );
+      expect(find.text('42 ms'), findsOneWidget);
+      expect(find.text('12.3 MB'), findsOneWidget);
+      expect(find.text('5.6 MB'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -216,6 +254,82 @@ void main() {
     restored.beginSession('simple-session-2');
     expect(restored.feedbackReadyOnReturn, isFalse);
   });
+
+  testWidgets('the logo control connects and disconnects with the VPN state', (
+    tester,
+  ) async {
+    final provider = _FakeVpnProvider()
+      ..currentStatus = VpnConnectionStatus.disconnected;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<VpnProvider>.value(
+        value: provider,
+        child: const MaterialApp(home: SimpleHomeScreen()),
+      ),
+    );
+    await tester.pump();
+
+    final logoControl = find.byKey(
+      const ValueKey('simple-logo-connect-control'),
+    );
+    await tester.tap(logoControl);
+    await tester.pump();
+    expect(provider.connectCalls, 1);
+
+    provider.currentStatus = VpnConnectionStatus.connected;
+    provider.emit();
+    await tester.pump();
+    await tester.tap(logoControl);
+    await tester.pump();
+    expect(provider.disconnectCalls, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'Simple dashboard translates stats and preserves LTR values in RTL',
+    (tester) async {
+      final provider = _FakeVpnProvider();
+      await tester.pumpWidget(
+        ChangeNotifierProvider<VpnProvider>.value(
+          value: provider,
+          child: MaterialApp(
+            locale: const Locale('fa'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: const [
+              AppLocalizationsDelegate(),
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            home: const SimpleHomeScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('آمار اتصال'), findsOneWidget);
+      expect(find.text('پینگ'), findsOneWidget);
+      expect(find.text('دانلود'), findsOneWidget);
+      expect(find.text('آپلود'), findsOneWidget);
+      expect(find.text('42 ms'), findsOneWidget);
+      expect(find.text('12.3 MB'), findsOneWidget);
+      expect(find.text('5.6 MB'), findsOneWidget);
+      final downloadDirections = tester.widgetList<Directionality>(
+        find.ancestor(
+          of: find.byKey(const ValueKey('simple-download-value')),
+          matching: find.byType(Directionality),
+        ),
+      );
+      expect(
+        downloadDirections.any(
+          (direction) => direction.textDirection == TextDirection.ltr,
+        ),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('satisfaction prompt waits until the user returns to the app', (
     tester,
