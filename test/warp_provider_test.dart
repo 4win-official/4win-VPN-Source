@@ -67,6 +67,8 @@ void main() {
           return true;
         case 'disconnectXray':
           return true;
+        case 'pingWarp':
+          return 37;
         default:
           return null;
       }
@@ -301,7 +303,7 @@ void main() {
   );
 
   test(
-    'successful WARP connect uses saved account and supports cancellation',
+    'successful WARP connect waits for a tap before measuring tunnel RTT',
     () async {
       final provider = await makeProvider();
       await provider.connect();
@@ -310,9 +312,44 @@ void main() {
       expect(provider.warpError, isNull);
       expect(xrayCalls, contains('requestXrayPermission'));
       expect(xrayCalls, contains('connectXray'));
+      expect(provider.currentPing, isNull);
+      expect(provider.xrayPingAwaitingFirstTap, isTrue);
+      expect(xrayCalls, isNot(contains('pingWarp')));
+      await provider.manualXrayPing();
+      expect(xrayCalls, contains('pingWarp'));
+      expect(provider.currentPing, 37);
+      expect(provider.xrayPingAwaitingFirstTap, isFalse);
+      expect(xrayCalls, isNot(contains('getWarpRtt')));
+      expect(xrayCalls, isNot(contains('measureDelay')));
       await provider.disconnect();
       expect(provider.status, VpnConnectionStatus.disconnected);
       expect(xrayCalls, contains('disconnectXray'));
+      provider.dispose();
+    },
+  );
+
+  test(
+    'missing WARP DNS response fails without using direct internet',
+    () async {
+      xrayBehavior = (call) async {
+        xrayCalls.add(call.method);
+        if (call.method == 'requestXrayPermission') return true;
+        if (call.method == 'connectXray') return true;
+        if (call.method == 'pingWarp') return -1;
+        return null;
+      };
+      final provider = await makeProvider();
+
+      await provider.connect();
+      expect(provider.status, VpnConnectionStatus.connected);
+      expect(provider.pingFailed, isFalse);
+      await provider.manualXrayPing();
+      expect(xrayCalls, contains('pingWarp'));
+      expect(provider.currentPing, isNull);
+      expect(provider.pingFailed, isTrue);
+      expect(xrayCalls, isNot(contains('getWarpRtt')));
+      expect(xrayCalls, isNot(contains('measureDelay')));
+      await provider.disconnect();
       provider.dispose();
     },
   );

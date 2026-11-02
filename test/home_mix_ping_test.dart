@@ -66,7 +66,8 @@ void main() {
       await pumpHome(tester, provider);
       await tester.ensureVisible(find.text('42ms'));
       await tester.tap(find.text('42ms'));
-      expect(provider.pingCalls, protocol == 'proxy' ? 0 : 1);
+      await tester.tap(find.text('42ms'));
+      expect(provider.pingCalls, protocol == 'proxy' ? 0 : 2);
       await tester.pumpWidget(const SizedBox.shrink());
     });
   }

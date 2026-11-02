@@ -12,6 +12,16 @@ use tokio::sync::mpsc;
 use crate::error::{AetherError, Result};
 use crate::ffi;
 
+#[cfg(unix)]
+struct WarpPingChannelGuard(u64);
+
+#[cfg(unix)]
+impl Drop for WarpPingChannelGuard {
+    fn drop(&mut self) {
+        ffi::unregister_warp_ping_channel(self.0);
+    }
+}
+
 /// Drives the exit-IP measurement while the bridge runs.
 ///
 /// Split out of [bridge] so the packet loop stays readable and so the state
@@ -359,6 +369,14 @@ pub async fn bridge(
     let mut clamped_syns = 0u64;
     // Measures the exit IP from inside the tunnel. See [exitprobe].
     let mut exit_probe = exitprobe::ExitProbe::new(local_ipv4);
+    let (ping_tx, mut ping_rx) = mpsc::channel(1);
+    let ping_channel_id = ffi::register_warp_ping_channel(ping_tx);
+    let _ping_channel_guard = WarpPingChannelGuard(ping_channel_id);
+    let mut pending_ping: Option<(
+        crate::exitip::Probe,
+        std::time::Instant,
+        std::sync::mpsc::SyncSender<i64>,
+    )> = None;
     // Wakes the loop so a due probe is sent even while the tunnel is silent —
     // otherwise `select!` could block in recv() past the probe's schedule.
     //
@@ -377,6 +395,16 @@ pub async fn bridge(
             tunnel_packet = inbound_rx.recv() => match tunnel_packet {
                 Some(mut packet) => {
                     rx_total += packet.len() as u64;
+                    if pending_ping
+                        .as_ref()
+                        .is_some_and(|(probe, _, _)| probe.matches(&packet))
+                    {
+                        if let Some((_, started, reply)) = pending_ping.take() {
+                            let elapsed = started.elapsed().as_millis().min(i64::MAX as u128) as i64;
+                            let _ = reply.send(elapsed);
+                        }
+                        continue;
+                    }
                     // Our own DNS replies must be swallowed: Android never asked
                     // these questions, so handing them up would be an unsolicited
                     // datagram to a resolver with no matching request.
@@ -407,6 +435,27 @@ pub async fn bridge(
                     .map_err(|_| AetherError::Other("tunnel outbound channel closed".into()))?;
             },
             _ = probe_tick.tick(), if probing => {},
+            request = ping_rx.recv() => match request {
+                Some(request) => {
+                    if let Some((_, _, reply)) = pending_ping.take() {
+                        let _ = reply.send(-1);
+                    }
+                    if local_ipv4.is_unspecified() {
+                        let _ = request.reply.send(-1);
+                    } else {
+                        let probe = crate::exitip::Probe::whoami(local_ipv4);
+                        let outbound = probe.packet.clone();
+                        pending_ping = Some((probe, std::time::Instant::now(), request.reply));
+                        if outbound_tx.send(outbound).await.is_err() {
+                            if let Some((_, _, reply)) = pending_ping.take() {
+                                let _ = reply.send(-1);
+                            }
+                            return Err(AetherError::Other("tunnel outbound channel closed".into()));
+                        }
+                    }
+                },
+                None => {},
+            },
         }
 
         // Sent outside the select! arms so it happens on every wake-up, whichever

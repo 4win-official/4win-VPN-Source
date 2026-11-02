@@ -205,8 +205,25 @@ class XrayConnection {
     }
   }
 
+  /// Measures a fresh Cloudflare DNS round trip through the active WARP TUN.
+  /// The native bridge injects the query into the live tunnel; this never uses
+  /// direct Activity HTTP. Returns milliseconds, or -1 if no reply arrives.
+  static Future<int> measureWarpPing() async {
+    try {
+      final result = await platform
+          .invokeMethod('pingWarp')
+          .timeout(const Duration(seconds: 8));
+      if (result is int) return result;
+      if (result is num) return result.toInt();
+      return -1;
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ WARP tunnel ping error: $e');
+      return -1;
+    }
+  }
+
   /// Reads Aether's validated WireGuard endpoint RTT from tunnel startup.
-  /// This is not a new probe and must never be described as tap-to-refresh.
+  /// This is a handshake/endpoint metric, not the home-screen tunnel ping.
   static Future<int> getWarpRtt() async {
     try {
       final result = await platform

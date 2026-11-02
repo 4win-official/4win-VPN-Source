@@ -1060,8 +1060,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   // Ping timer - every 3 seconds for protocols that support periodic probes.
-  // Xray is tap-to-ping. WARP instead reads Aether's validated connect-time
-  // WireGuard endpoint RTT once; that value is not a fresh tap-triggered test.
+  // Xray and WARP use fresh, tap-triggered probes through their active paths.
   bool _xrayPingAwaitingFirstTap = false;
   bool get xrayPingAwaitingFirstTap => _xrayPingAwaitingFirstTap;
   bool _xrayPinging = false;
@@ -1071,10 +1070,10 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     _stopPingTimer();
 
     if (_selectedProtocol == 'warp') {
-      _xrayPingAwaitingFirstTap = false;
+      _xrayPingAwaitingFirstTap = true;
       _currentPing = null;
       _pingFailed = false;
-      unawaited(_updateCurrentPing());
+      notifyListeners();
       return;
     }
 
@@ -1095,15 +1094,18 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     });
   }
 
-  /// Manual, tap-triggered real-delay measurement for Xray and live Mix.
+  /// Manual, tap-triggered measurement through the active Xray, WARP, or Mix path.
   Future<void> manualXrayPing() async {
     if (_selectedProtocol == 'mix') return _manualMixPing();
-    if (_selectedProtocol != 'xray') return;
+    if (!const {'xray', 'warp'}.contains(_selectedProtocol) ||
+        _status != VpnConnectionStatus.connected) {
+      return;
+    }
     if (_xrayPinging) return; // ignore rapid double taps
     _xrayPingAwaitingFirstTap = false;
     _xrayPinging = true;
-    // Clear the previous result before every request. This makes repeated
-    // taps visible even when the native WARP RTT happens to be unchanged.
+    // Clear the previous result before every request so repeated taps always
+    // visibly start a new measurement.
     _currentPing = null;
     _pingFailed = false;
     notifyListeners();
@@ -1171,12 +1173,11 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       return;
     }
 
-    // WARP's displayed value is only the validated endpoint RTT captured by
-    // Aether during connection startup. It is read from NativeCore and is not
-    // freshly retested here; unknown or inactive state returns -1.
+    // WARP ping: time a fresh DNS query and matching response carried through
+    // the live Aether TUN. The app UID's direct HTTP path is never used.
     if (_selectedProtocol == 'warp') {
       try {
-        final delay = await XrayConnection.getWarpRtt();
+        final delay = await XrayConnection.measureWarpPing();
         if (_mixDisposed ||
             _status != VpnConnectionStatus.connected ||
             _selectedProtocol != 'warp') {
@@ -1193,6 +1194,12 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
         _currentPing = null;
         _pingFailed = true;
       }
+      _recordProtocolReachabilityProbe(
+        succeeded: !_pingFailed,
+        detail: _pingFailed
+            ? 'The latest Cloudflare DNS round trip through the live WARP data plane failed.'
+            : 'A fresh Cloudflare DNS round trip through the live WARP data plane succeeded.',
+      );
       notifyListeners();
       return;
     }

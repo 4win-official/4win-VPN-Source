@@ -18,6 +18,7 @@ int aether_stop();
 int aether_is_running();
 int aether_is_ready();
 long long aether_last_rtt_ms();
+long long aether_ping_ms();
 const char* aether_last_error();
 const char* aether_last_log();
 void aether_set_socket_protector(int (*protector)(int));
@@ -161,7 +162,10 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_com_forwin_vpn_NativeCore_nativeLastRttMs(JNIEnv*, jobject) {
     return static_cast<jlong>(aether_last_rtt_ms());
 }
-
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_forwin_vpn_NativeCore_nativePingMs(JNIEnv*, jobject) {
+    return static_cast<jlong>(aether_ping_ms());
+}
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_forwin_vpn_NativeCore_nativeLastError(JNIEnv* env, jobject) {
     return last_string(env, aether_last_error());

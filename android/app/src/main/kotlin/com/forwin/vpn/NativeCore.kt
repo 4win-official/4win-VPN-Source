@@ -25,6 +25,8 @@ object NativeCore {
     fun isRunning(): Boolean = nativeIsRunning()
     fun isReady(): Boolean = nativeIsReady()
     fun lastRttMs(): Long = nativeLastRttMs()
+    /** Blocks briefly; call from a worker thread, never from Android's main thread. */
+    fun pingMs(): Long = nativePingMs()
     fun lastError(): String = nativeLastError()
     fun lastLog(): String = nativeLastLog()
     fun attach(service: XrayVpnService) = nativeAttach(service)
@@ -38,6 +40,7 @@ object NativeCore {
     @JvmStatic private external fun nativeIsRunning(): Boolean
     @JvmStatic private external fun nativeIsReady(): Boolean
     @JvmStatic private external fun nativeLastRttMs(): Long
+    @JvmStatic private external fun nativePingMs(): Long
     @JvmStatic private external fun nativeLastError(): String
     @JvmStatic private external fun nativeLastLog(): String
     @JvmStatic private external fun nativeAttach(service: XrayVpnService)

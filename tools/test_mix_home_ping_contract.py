@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import re
 import unittest
+from pathlib import Path
 
 from tools.test_mix_notification_contract import source
 from tools.test_vpn_background_contract import method_body
 
 
 class MixHomePingContractTest(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[1]
+
     def test_mix_probe_captures_exact_startup_probe_and_reuses_it(self):
         text = source("mix/MixCoordinatorService.kt")
         self.assertIn("private data class DelayProbe(val request: Request, val config: String)", text)
@@ -131,6 +134,23 @@ class MixHomePingContractTest(unittest.TestCase):
         dns = method_body(activity, "pingDnsServer")
         for path in ("pingViaService", "pingIcmp", "pingTcp", "pingDnsUdp"):
             self.assertIn(path, dns)
+
+    def test_warp_ping_uses_the_live_tun_and_never_direct_http(self):
+        activity = source("MainActivity.kt")
+        body = method_body(activity, "configureFlutterEngine")
+        handler = body.split('"pingWarp" -> {', 1)[1].split('"getWarpRtt" -> {', 1)[0]
+        self.assertIn("WarpConnectionState.snapshot().connected", handler)
+        self.assertIn("XrayVpnService.isAetherActive()", handler)
+        self.assertIn("NativeCore.pingMs()", handler)
+        self.assertNotRegex(handler, r"(?i)HttpURLConnection|URL\(|openConnection|measureXrayDelay")
+
+        ffi = (self.ROOT / "core/aether/src/ffi.rs").read_text(encoding="utf-8")
+        self.assertIn("pub extern \"C\" fn aether_ping_ms()", ffi)
+        self.assertIn("recv_timeout(std::time::Duration::from_secs(6))", ffi)
+        bridge = (self.ROOT / "core/aether/src/tun.rs").read_text(encoding="utf-8")
+        self.assertIn("ffi::register_warp_ping_channel(ping_tx)", bridge)
+        self.assertIn("crate::exitip::Probe::whoami(local_ipv4)", bridge)
+        self.assertIn("probe.matches(&packet)", bridge)
 
 
 if __name__ == "__main__":

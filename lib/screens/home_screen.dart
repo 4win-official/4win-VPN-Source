@@ -2167,15 +2167,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// The ping row under the timer. For Xray, WARP and Mix this is a tappable button
-  /// (tap-to-ping); the first time it shows "click to ping". Every subsequent
-  /// tap runs a fresh measurement. Other protocols keep the auto display.
+  /// The ping row under the timer. Xray, WARP, and Mix run fresh probes on tap.
   Widget _buildPingIndicator(VpnProvider provider, bool isDark) {
     final ping = provider.currentPing;
 
     if (provider.selectedProtocol == 'xray' ||
-        provider.selectedProtocol == 'warp' ||
-        provider.selectedProtocol == 'mix') {
+        provider.selectedProtocol == 'mix' ||
+        provider.selectedProtocol == 'warp') {
       final pinging = provider.xrayPinging;
       final awaitingFirst = provider.xrayPingAwaitingFirstTap;
 
@@ -2256,12 +2254,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       }
 
-      return InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: pinging ? null : () => provider.manualXrayPing(),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: content,
+      return Tooltip(
+        message: context.l10n.text(
+          provider.selectedProtocol == 'warp'
+              ? 'Fresh RTT to Cloudflare’s 1.1.1.1 resolver through the active WARP data plane.'
+              : 'Test Ping',
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: pinging ? null : () => provider.manualXrayPing(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: content,
+          ),
         ),
       );
     }

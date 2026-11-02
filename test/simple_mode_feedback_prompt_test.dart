@@ -372,10 +372,11 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('WARP shows a read-only validated endpoint RTT', (tester) async {
+  testWidgets('WARP ping runs only after a tap in Simple mode', (tester) async {
     final provider = _FakeVpnProvider()
       ..protocol = 'warp'
-      ..ping = 37;
+      ..ping = null
+      ..awaitingInitialPing = true;
     await tester.pumpWidget(
       ChangeNotifierProvider<VpnProvider>.value(
         value: provider,
@@ -387,9 +388,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('WARP RTT'), findsOneWidget);
-    expect(find.text('37 ms'), findsOneWidget);
-    expect(find.byKey(const ValueKey('simple-ping-tap')), findsNothing);
+    expect(find.text('click to ping'), findsOneWidget);
+    expect(find.byKey(const ValueKey('simple-ping-tap')), findsOneWidget);
     expect(provider.pingCalls, 0);
+    await tester.tap(find.byKey(const ValueKey('simple-ping-tap')));
+    await tester.pumpAndSettle();
+    expect(provider.pingCalls, 1);
+    expect(find.text('41 ms'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -442,7 +447,7 @@ void main() {
           )
           .first,
     );
-    expect(tooltip.message, contains('RTT ثبت‌شدهٔ Aether'));
+    expect(tooltip.message, contains('RTT تازه تا DNS کلادفلر'));
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

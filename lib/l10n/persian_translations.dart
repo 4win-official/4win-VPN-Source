@@ -145,8 +145,8 @@ const Map<String, String> appPersianTranslations = <String, String>{
   r'''Pinging…''': r'''در حال پینگ…''',
   r'''click to ping''': r'''برای پینگ کلیک کنید''',
   r'''WARP RTT''': r'''RTT وارپ''',
-  r'''Aether’s connect-time RTT for successful WireGuard endpoint handshake and data-plane validation. Not refreshed on tap.''':
-      r'''RTT ثبت‌شدهٔ Aether هنگام اعتبارسنجی موفقِ دست‌دهی endpoint وایرگارد و مسیر داده؛ با لمس تازه نمی‌شود.''',
+  r'''Fresh RTT to Cloudflare’s 1.1.1.1 resolver through the active WARP data plane.''':
+      r'''RTT تازه تا DNS کلادفلر ۱.۱.۱.۱ از مسیر دادهٔ تونل فعال وارپ.''',
   r'''${ping}ms''': r'''${ping}ms''',
   r'''Failed''': r'''ناموفق''',
   r'''Testing...''': r'''در حال آزمایش...''',

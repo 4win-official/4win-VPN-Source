@@ -841,6 +841,26 @@ class MainActivity: FlutterActivity() {
                         runOnUiThread { result.success(delay) }
                     }.start()
                 }
+                "pingWarp" -> {
+                    Thread {
+                        val initiallyReady = WarpConnectionState.snapshot().connected &&
+                            XrayVpnService.isServiceRunning &&
+                            !XrayVpnService.isMixModeRunning &&
+                            XrayVpnService.isAetherActive() &&
+                            runCatching { NativeCore.isReady() }.getOrDefault(false)
+                        val delay = if (initiallyReady) {
+                            runCatching { NativeCore.pingMs() }.getOrDefault(-1L)
+                        } else {
+                            -1L
+                        }
+                        val stillReady = WarpConnectionState.snapshot().connected &&
+                            XrayVpnService.isServiceRunning &&
+                            !XrayVpnService.isMixModeRunning &&
+                            XrayVpnService.isAetherActive() &&
+                            runCatching { NativeCore.isReady() }.getOrDefault(false)
+                        runOnUiThread { result.success(if (stillReady && delay >= 0) delay else -1L) }
+                    }.start()
+                }
                 "getWarpRtt" -> {
                     // This is the real WireGuard endpoint RTT Aether measured
                     // while validating the live tunnel at connect time. Do not

@@ -396,6 +396,7 @@ class SimpleModeHomeLayout extends StatelessWidget {
                               const {
                                 'xray',
                                 'mix',
+                                'warp',
                               }.contains(provider.selectedProtocol)
                               ? () => unawaited(provider.manualXrayPing())
                               : null,
@@ -471,6 +472,7 @@ class _ConnectionStatsCardState extends State<_ConnectionStatsCard> {
     if (_initialPingStarted ||
         !widget.connected ||
         !widget.awaitingFirstPing ||
+        widget.protocol == 'warp' ||
         widget.pinging ||
         widget.onPingTap == null) {
       return;
@@ -480,6 +482,7 @@ class _ConnectionStatsCardState extends State<_ConnectionStatsCard> {
       if (!mounted ||
           !widget.connected ||
           !widget.awaitingFirstPing ||
+          widget.protocol == 'warp' ||
           widget.pinging) {
         return;
       }
@@ -507,7 +510,7 @@ class _ConnectionStatsCardState extends State<_ConnectionStatsCard> {
     final valueIsLocalized =
         widget.pinging ||
         widget.pingFailed ||
-        (widget.awaitingFirstPing && widget.protocol != 'warp');
+        widget.awaitingFirstPing;
     final pingMetric = _MetricColumn(
       key: const ValueKey('simple-ping-metric'),
       label: LocalizedText(widget.protocol == 'warp' ? 'WARP RTT' : 'Ping'),
@@ -518,18 +521,15 @@ class _ConnectionStatsCardState extends State<_ConnectionStatsCard> {
       secondary: secondary,
     );
     final Widget pingCell;
-    if (widget.protocol == 'warp' && widget.connected) {
-      pingCell = Tooltip(
-        message: context.l10n.text(
-          'Aether’s connect-time RTT for successful WireGuard endpoint handshake and data-plane validation. Not refreshed on tap.',
-        ),
-        child: pingMetric,
-      );
-    } else if (widget.onPingTap == null || !widget.connected) {
+    if (widget.onPingTap == null || !widget.connected) {
       pingCell = pingMetric;
     } else {
       pingCell = Tooltip(
-        message: context.l10n.text('Test Ping'),
+        message: context.l10n.text(
+          widget.protocol == 'warp'
+              ? 'Fresh RTT to Cloudflare’s 1.1.1.1 resolver through the active WARP data plane.'
+              : 'Test Ping',
+        ),
         child: InkWell(
           key: const ValueKey('simple-ping-tap'),
           borderRadius: BorderRadius.circular(12),

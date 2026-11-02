@@ -44,11 +44,12 @@ fn last_error_for_test() -> String {
         .unwrap_or("")
         .to_string()
 }
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{LazyLock, Mutex, OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::Notify;
+use tokio::sync::{mpsc, Notify};
 
 use crate::{
     platform, EndpointDiscovery, IpScan, MasqueTransport, Protocol, ScanMode, StartOptions,
@@ -99,6 +100,31 @@ static READY: AtomicBool = AtomicBool::new(false);
 static LAST_RTT_MS: AtomicI64 = AtomicI64::new(-1);
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static STOP_NOTIFY: OnceLock<Notify> = OnceLock::new();
+static NEXT_WARP_PING_CHANNEL_ID: AtomicU64 = AtomicU64::new(1);
+static WARP_PING_CHANNEL: LazyLock<Mutex<Option<(u64, mpsc::Sender<WarpPingRequest>)>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// A request to time one DNS round trip through the active Android TUN.
+pub(crate) struct WarpPingRequest {
+    pub reply: std::sync::mpsc::SyncSender<i64>,
+}
+
+/// Publishes the live TUN bridge's command channel to the synchronous JNI API.
+pub(crate) fn register_warp_ping_channel(sender: mpsc::Sender<WarpPingRequest>) -> u64 {
+    let id = NEXT_WARP_PING_CHANNEL_ID.fetch_add(1, Ordering::Relaxed);
+    *WARP_PING_CHANNEL.lock().unwrap() = Some((id, sender));
+    id
+}
+
+pub(crate) fn unregister_warp_ping_channel(id: u64) {
+    let mut channel = WARP_PING_CHANNEL.lock().unwrap();
+    if channel
+        .as_ref()
+        .is_some_and(|(active_id, _)| *active_id == id)
+    {
+        *channel = None;
+    }
+}
 
 #[no_mangle]
 pub extern "C" fn aether_set_event_callback(callback: Option<EventCallback>) {
@@ -717,6 +743,30 @@ pub extern "C" fn aether_is_ready() -> i32 {
 #[no_mangle]
 pub extern "C" fn aether_last_rtt_ms() -> i64 {
     LAST_RTT_MS.load(Ordering::Acquire)
+}
+
+/// Measures a fresh DNS round trip through the live WARP TUN data plane.
+/// Returns milliseconds, or -1 if the tunnel cannot complete the probe.
+/// The caller must use a worker thread: this API waits for the native bridge.
+#[no_mangle]
+pub extern "C" fn aether_ping_ms() -> i64 {
+    if !RUNNING.load(Ordering::Acquire) || !READY.load(Ordering::Acquire) {
+        return -1;
+    }
+    let sender = WARP_PING_CHANNEL
+        .lock()
+        .ok()
+        .and_then(|channel| channel.as_ref().map(|(_, sender)| sender.clone()));
+    let Some(sender) = sender else {
+        return -1;
+    };
+    let (reply, response) = std::sync::mpsc::sync_channel(1);
+    if sender.try_send(WarpPingRequest { reply }).is_err() {
+        return -1;
+    }
+    response
+        .recv_timeout(std::time::Duration::from_secs(6))
+        .unwrap_or(-1)
 }
 
 pub(crate) fn mark_ready() {
