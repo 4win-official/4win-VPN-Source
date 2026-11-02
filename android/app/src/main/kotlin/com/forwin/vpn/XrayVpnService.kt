@@ -38,6 +38,7 @@ class XrayVpnService : VpnService() {
     @Volatile private var aetherConnected = false
     @Volatile private var aetherActive = false
     @Volatile private var aetherGeneration: Long? = null
+    @Volatile private var warpExitIp: String? = null
     @Volatile private var warpRequest = 0L
     private val lifecycleLock = Any()
     @Volatile private var generation = System.nanoTime()
@@ -87,6 +88,18 @@ class XrayVpnService : VpnService() {
         @Volatile private var mixDelayProbe: MixDelayProbe? = null
 
         @Volatile private var activeAetherService: XrayVpnService? = null
+
+        fun currentWarpExitIp(): String? = activeAetherService?.let { service ->
+            if (service.aetherActive && service.isRunning &&
+                service.aetherGeneration == service.generation) {
+                service.warpExitIp
+            } else null
+        }
+
+        fun isAetherActive(): Boolean = activeAetherService?.let { service ->
+            service.aetherActive && service.isRunning &&
+                service.aetherGeneration == service.generation
+        } == true
 
         /** Morning builds read native readiness directly. Keep that path, but
          * only through the service that owns this standalone WARP request. */
@@ -300,6 +313,7 @@ class XrayVpnService : VpnService() {
         try {
             val config = rawConfig.replace("__APP_FILES__", filesDir.absolutePath)
             aetherGeneration = token
+            warpExitIp = null
             aetherActive = true
             activeAetherService = this
             NativeCore.attach(this)
@@ -383,8 +397,24 @@ class XrayVpnService : VpnService() {
                     nativeTrafficAvailable = totalUplink >= 0L && totalDownlink >= 0L
                 }
             }
+            if (event.optString("type") == "exit_ip" && aetherActive &&
+                aetherGeneration == generation) {
+                warpExitIp = event.optString("ip").takeIf(::isValidPublicIpv4)
+            }
             android.util.Log.d(TAG, "Aether event: $json")
         }
+    }
+
+    private fun isValidPublicIpv4(value: String): Boolean {
+        if (!value.matches(Regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$"))) return false
+        val octets = value.split('.').map { it.toIntOrNull() ?: return false }
+        if (octets.size != 4 || octets.any { it !in 0..255 }) return false
+        val (a, b) = octets
+        return a !in setOf(0, 10, 127) && a < 224 &&
+            !(a == 169 && b == 254) &&
+            !(a == 172 && b in 16..31) &&
+            !(a == 192 && b == 168) &&
+            !(a == 100 && b in 64..127)
     }
 
     fun protectSocket(fd: Int): Boolean = protect(fd)
@@ -430,6 +460,7 @@ class XrayVpnService : VpnService() {
         liveTraffic.stop()
         runCatching { com.example.sstp_flutter.VpnConnectionObserver.notifyState(this, false) }
         aetherConnected=false; nativeTrafficAvailable=false
+        warpExitIp = null
         isRunning=false; isServiceRunning=false; isMixModeRunning=false; isMixModeReconnecting=false
         mixDelayProbe = null
         synchronized(Companion) { activeController=null; totalUplink=0L; totalDownlink=0L }

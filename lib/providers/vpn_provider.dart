@@ -1059,10 +1059,9 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     _xrayTrafficTimer = null;
   }
 
-  // Ping timer - every 3 seconds
-  // Xray ping is MANUAL (tap-to-ping), not an automatic 3s timer. This flag is
-  // true until the user taps the ping the first time after connecting, so the
-  // UI can show a "click to ping" hint only once.
+  // Ping timer - every 3 seconds for protocols that support periodic probes.
+  // Xray is tap-to-ping. WARP instead reads Aether's validated connect-time
+  // WireGuard endpoint RTT once; that value is not a fresh tap-triggered test.
   bool _xrayPingAwaitingFirstTap = false;
   bool get xrayPingAwaitingFirstTap => _xrayPingAwaitingFirstTap;
   bool _xrayPinging = false;
@@ -1071,11 +1070,17 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
   void _startPingTimer() {
     _stopPingTimer();
 
-    // Xray / WARP: NO automatic timer — the user taps to ping (see
-    // manualXrayPing). Both run the same Xray core under the hood, so they
-    // share the exact same manual-ping mechanism. Show the "click to ping"
-    // hint until the first tap.
-    if (_selectedProtocol == 'xray' || _selectedProtocol == 'warp') {
+    if (_selectedProtocol == 'warp') {
+      _xrayPingAwaitingFirstTap = false;
+      _currentPing = null;
+      _pingFailed = false;
+      unawaited(_updateCurrentPing());
+      return;
+    }
+
+    // Xray uses a real delay measurement through its active server config
+    // only when the user requests it.
+    if (_selectedProtocol == 'xray') {
       _xrayPingAwaitingFirstTap = true;
       _currentPing = null;
       _pingFailed = false;
@@ -1090,11 +1095,10 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     });
   }
 
-  /// Manual, tap-triggered ping for Xray. Runs a single real-delay measurement
-  /// each time the user taps the ping indicator on the home screen.
+  /// Manual, tap-triggered real-delay measurement for Xray and live Mix.
   Future<void> manualXrayPing() async {
     if (_selectedProtocol == 'mix') return _manualMixPing();
-    if (_selectedProtocol != 'xray' && _selectedProtocol != 'warp') return;
+    if (_selectedProtocol != 'xray') return;
     if (_xrayPinging) return; // ignore rapid double taps
     _xrayPingAwaitingFirstTap = false;
     _xrayPinging = true;
@@ -1106,9 +1110,8 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
     try {
       final started = Stopwatch()..start();
       await _updateCurrentPing();
-      // Keep the loading state visible briefly. WARP currently exposes the
-      // most recent validated RTT, so a repeated tap can otherwise complete
-      // too quickly and look like the tap was ignored when the value is equal.
+      // Keep the loading state visible briefly when a real Xray probe completes
+      // quickly, so repeated taps visibly launch a new measurement.
       final remaining = 220 - started.elapsedMilliseconds;
       if (remaining > 0) {
         await Future<void>.delayed(Duration(milliseconds: remaining));
@@ -1168,27 +1171,25 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
       return;
     }
 
-    // WARP uses Aether's already-running core. The native measureDelay branch
-    // returns the endpoint handshake + HTTP data-plane RTT and never starts a
-    // second Xray core.
+    // WARP's displayed value is only the validated endpoint RTT captured by
+    // Aether during connection startup. It is read from NativeCore and is not
+    // freshly retested here; unknown or inactive state returns -1.
     if (_selectedProtocol == 'warp') {
-      final account = _warpAccount;
-      if (account == null) {
-        _currentPing = null;
-        _pingFailed = true;
-        notifyListeners();
-        return;
-      }
       try {
-        // WARP is already running in Aether. Read its validated RTT directly;
-        // the generic Xray delay path must not create a temporary core.
-        final delay = await XrayConnection.measureWarpDelay().timeout(
-          const Duration(seconds: 6),
-          onTimeout: () => -1,
-        );
+        final delay = await XrayConnection.getWarpRtt();
+        if (_mixDisposed ||
+            _status != VpnConnectionStatus.connected ||
+            _selectedProtocol != 'warp') {
+          return;
+        }
         _currentPing = delay >= 0 ? delay : null;
         _pingFailed = delay < 0;
       } catch (_) {
+        if (_mixDisposed ||
+            _status != VpnConnectionStatus.connected ||
+            _selectedProtocol != 'warp') {
+          return;
+        }
         _currentPing = null;
         _pingFailed = true;
       }

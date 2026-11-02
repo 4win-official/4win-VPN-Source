@@ -96,7 +96,7 @@ class MixHomePingContractTest(unittest.TestCase):
     def test_home_handler_uses_live_mix_services_and_never_activity_http(self):
         activity = source("MainActivity.kt")
         body = method_body(activity, "configureFlutterEngine")
-        handler = body.split('"measureMixDelay" -> {', 1)[1].split('"measureWarpDelay" ->', 1)[0]
+        handler = body.split('"measureMixDelay" -> {', 1)[1].split('"getWarpRtt" -> {', 1)[0]
         self.assertIn('MixCoordinatorService.isRunning -> MixCoordinatorService.measureActiveDelay(url)', handler)
         self.assertIn('XrayVpnService.isMixModeRunning -> XrayVpnService.measureActiveMixDelay(url)', handler)
         self.assertIn("else -> -1L", handler)
@@ -110,8 +110,21 @@ class MixHomePingContractTest(unittest.TestCase):
         body = method_body(activity, "configureFlutterEngine")
         standalone = body.split('"measureDelay" -> {', 1)[1].split('"measureMixDelay" ->', 1)[0]
         self.assertIn("measureXrayDelay(configJson, url)", standalone)
-        self.assertIn("measureFreshWarpDelay()", standalone)
+        self.assertIn("startCancelableDelayProbe(requestId, result)", standalone)
         self.assertIn('if (configJson.contains("__APP_FILES__"))', standalone)
+        self.assertIn("result.success(-1L)", standalone)
+        self.assertNotIn("HttpURLConnection", standalone)
+
+        warp_handler = body.split('"getWarpRtt" -> {', 1)[1].split('else -> result.notImplemented()', 1)[0]
+        self.assertIn("WarpConnectionState.snapshot()", warp_handler)
+        self.assertIn("state.connected", warp_handler)
+        self.assertIn("XrayVpnService.isAetherActive()", warp_handler)
+        self.assertIn("!XrayVpnService.isMixModeRunning", warp_handler)
+        self.assertIn("NativeCore.isReady()", warp_handler)
+        self.assertIn("NativeCore.lastRttMs()", warp_handler)
+        self.assertNotRegex(warp_handler, r"(?i)HttpURLConnection|URL\(|openConnection")
+        self.assertNotIn("measureFreshWarpDelay", activity)
+        self.assertNotIn("activeDelayConnections", activity)
 
         dns_handler = body.split('"pingDns" -> {', 1)[1].split('"scanDns" ->', 1)[0]
         self.assertIn("pingDnsServer(dnsIp)", dns_handler)

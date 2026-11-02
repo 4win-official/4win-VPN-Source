@@ -5,20 +5,26 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/vpn_provider.dart';
+import '../services/ip_geolocation_service.dart';
+import '../widgets/simple_mode_world_map.dart';
 
 /// A lightweight, screenshot-inspired dashboard for Simple mode.
 ///
-/// The app logo is the actual connect/disconnect control. Decorative rings are
-/// drawn once with CustomPainter; there are no continuous animations or timers.
+/// A lightweight, screenshot-inspired Simple-mode dashboard with a circular
+/// power control and no continuous decorative animation.
 class SimpleModeHomeLayout extends StatelessWidget {
   const SimpleModeHomeLayout({
     super.key,
     required this.provider,
     required this.onSettings,
+    this.lookupSourceIpLocation,
+    this.lookupCurrentIpLocation,
   });
 
   final VpnProvider provider;
   final VoidCallback onSettings;
+  final IpLocationLookup? lookupSourceIpLocation;
+  final IpLocationLookup? lookupCurrentIpLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +34,10 @@ class SimpleModeHomeLayout extends StatelessWidget {
         provider.status == VpnConnectionStatus.connecting ||
         provider.status == VpnConnectionStatus.disconnecting ||
         provider.simpleConnectionInProgress;
+    final mapConnecting =
+        provider.status == VpnConnectionStatus.connecting ||
+        (provider.simpleConnectionInProgress &&
+            provider.status != VpnConnectionStatus.disconnecting);
     final failed = provider.simpleConnectionFailed;
     final actionLabel = connected
         ? 'Disconnect'
@@ -125,32 +135,45 @@ class SimpleModeHomeLayout extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        LocalizedText(
-                          headline,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: failed ? accent : primaryText,
-                            fontSize: 32,
-                            height: 1.12,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
+                        SizedBox(
+                          height: 72,
+                          child: Align(
+                            alignment: AlignmentDirectional.topStart,
+                            child: LocalizedText(
+                              headline,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: failed ? accent : primaryText,
+                                fontSize: 32,
+                                height: 1.12,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          helperText ==
-                                      provider.simpleConnectionFailureMessage &&
-                                  failed
-                              ? helperText
-                              : context.l10n.text(helperText),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.start,
-                          style: TextStyle(
-                            color: failed ? accent : secondaryText,
-                            fontSize: 15,
-                            height: 1.35,
+                        SizedBox(
+                          height: 44,
+                          child: Align(
+                            alignment: AlignmentDirectional.topStart,
+                            child: Text(
+                              helperText ==
+                                          provider
+                                              .simpleConnectionFailureMessage &&
+                                      failed
+                                  ? helperText
+                                  : context.l10n.text(helperText),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.start,
+                              style: TextStyle(
+                                color: failed ? accent : secondaryText,
+                                fontSize: 15,
+                                height: 1.35,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -158,24 +181,35 @@ class SimpleModeHomeLayout extends StatelessWidget {
                           child: LayoutBuilder(
                             builder: (context, constraints) {
                               final controlSize = math.min(
-                                176.0,
-                                math.max(126.0, constraints.maxHeight * 0.56),
+                                208.0,
+                                math.max(168.0, constraints.maxWidth * 0.56),
                               );
-                              return Center(
-                                key: const ValueKey(
-                                  'simple-power-control-area',
-                                ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Semantics(
+                              return Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Positioned.fill(
+                                    child: SimpleModeWorldMap(
+                                      status: provider.status,
+                                      connecting: mapConnecting,
+                                      isDark: isDark,
+                                      lookupSourceIpLocation:
+                                          lookupSourceIpLocation,
+                                      lookupCurrentIpLocation:
+                                          lookupCurrentIpLocation,
+                                    ),
+                                  ),
+                                  Center(
+                                    key: const ValueKey(
+                                      'simple-power-control-area',
+                                    ),
+                                    child: Semantics(
                                       button: true,
                                       label: context.l10n.text(actionLabel),
                                       child: Material(
                                         type: MaterialType.transparency,
                                         child: InkWell(
                                           key: const ValueKey(
-                                            'simple-logo-connect-control',
+                                            'simple-power-connect-control',
                                           ),
                                           onTap: () {
                                             if (connected || connecting) {
@@ -189,53 +223,61 @@ class SimpleModeHomeLayout extends StatelessWidget {
                                           customBorder: const CircleBorder(),
                                           child: AnimatedContainer(
                                             key: const ValueKey(
-                                              'simple-logo-control-surface',
+                                              'simple-power-control-surface',
                                             ),
                                             duration: const Duration(
-                                              milliseconds: 350,
+                                              milliseconds: 250,
                                             ),
+                                            curve: Curves.easeOut,
                                             width: controlSize,
                                             height: controlSize,
-                                            padding: EdgeInsets.all(
-                                              controlSize * 0.20,
-                                            ),
+                                            padding: const EdgeInsets.all(24),
                                             decoration: BoxDecoration(
                                               color: isDark
-                                                  ? const Color(0xFF101112)
-                                                  : Colors.white.withValues(
-                                                      alpha: 0.88,
-                                                    ),
+                                                  ? const Color(0xFF101315)
+                                                  : Colors.white,
                                               shape: BoxShape.circle,
                                               boxShadow: [
                                                 BoxShadow(
                                                   color: accent.withValues(
-                                                    alpha: isDark ? 0.12 : 0.16,
+                                                    alpha: isDark ? 0.18 : 0.12,
                                                   ),
-                                                  blurRadius: 24,
-                                                  spreadRadius: 2,
+                                                  blurRadius: 30,
+                                                  spreadRadius: 1,
                                                 ),
                                               ],
                                             ),
-                                            child: Image.asset(
-                                              'assets/icons/app_icon.png',
-                                              fit: BoxFit.contain,
+                                            child: Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons
+                                                      .power_settings_new_rounded,
+                                                  size: 50,
+                                                  color: accent,
+                                                ),
+                                                const SizedBox(height: 10),
+                                                LocalizedText(
+                                                  actionLabel,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    color: primaryText,
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(height: 12),
-                                    LocalizedText(
-                                      actionLabel,
-                                      style: TextStyle(
-                                        color: secondaryText,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        letterSpacing: 0.3,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               );
                             },
                           ),
@@ -245,6 +287,18 @@ class SimpleModeHomeLayout extends StatelessWidget {
                           connected: connected,
                           ping: provider.currentPing,
                           pingFailed: provider.pingFailed,
+                          pinging: provider.xrayPinging,
+                          awaitingFirstPing: provider.xrayPingAwaitingFirstTap,
+                          protocol: provider.selectedProtocol,
+                          connectionGeneration:
+                              provider.simpleConnectionGeneration,
+                          onPingTap:
+                              const {
+                                'xray',
+                                'mix',
+                              }.contains(provider.selectedProtocol)
+                              ? () => unawaited(provider.manualXrayPing())
+                              : null,
                           download: provider.downloadDataUsage,
                           upload: provider.uploadDataUsage,
                         ),
@@ -261,12 +315,17 @@ class SimpleModeHomeLayout extends StatelessWidget {
   }
 }
 
-class _ConnectionStatsCard extends StatelessWidget {
+class _ConnectionStatsCard extends StatefulWidget {
   const _ConnectionStatsCard({
     required this.isDark,
     required this.connected,
     required this.ping,
     required this.pingFailed,
+    required this.pinging,
+    required this.awaitingFirstPing,
+    required this.protocol,
+    required this.connectionGeneration,
+    required this.onPingTap,
     required this.download,
     required this.upload,
   });
@@ -275,33 +334,121 @@ class _ConnectionStatsCard extends StatelessWidget {
   final bool connected;
   final int? ping;
   final bool pingFailed;
+  final bool pinging;
+  final bool awaitingFirstPing;
+  final String protocol;
+  final int connectionGeneration;
+  final VoidCallback? onPingTap;
   final String download;
   final String upload;
 
   @override
+  State<_ConnectionStatsCard> createState() => _ConnectionStatsCardState();
+}
+
+class _ConnectionStatsCardState extends State<_ConnectionStatsCard> {
+  bool _initialPingStarted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeStartInitialPing();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ConnectionStatsCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.connected ||
+        !oldWidget.connected ||
+        oldWidget.protocol != widget.protocol ||
+        oldWidget.connectionGeneration != widget.connectionGeneration) {
+      _initialPingStarted = false;
+    }
+    _maybeStartInitialPing();
+  }
+
+  void _maybeStartInitialPing() {
+    if (_initialPingStarted ||
+        !widget.connected ||
+        !widget.awaitingFirstPing ||
+        widget.pinging ||
+        widget.onPingTap == null) {
+      return;
+    }
+    _initialPingStarted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !widget.connected ||
+          !widget.awaitingFirstPing ||
+          widget.pinging) {
+        return;
+      }
+      widget.onPingTap?.call();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final foreground = isDark ? Colors.white : const Color(0xFF17191C);
-    final secondary = isDark ? Colors.white60 : const Color(0xFF686D75);
-    final valuePing = !connected
+    final foreground = widget.isDark ? Colors.white : const Color(0xFF17191C);
+    final secondary = widget.isDark ? Colors.white60 : const Color(0xFF686D75);
+    final valuePing = !widget.connected
         ? '—'
-        : ping != null
-        ? '$ping ms'
-        : pingFailed
-        ? context.l10n.text('Failed')
+        : widget.pinging
+        ? 'Pinging…'
+        : widget.ping != null
+        ? '${widget.ping} ms'
+        : widget.pingFailed
+        ? 'Failed'
+        : widget.awaitingFirstPing
+        ? 'click to ping'
         : '—';
-    final valueDownload = connected ? download : '—';
-    final valueUpload = connected ? upload : '—';
+    final valueDownload = widget.connected ? widget.download : '—';
+    final valueUpload = widget.connected ? widget.upload : '—';
+    final valueIsLocalized =
+        widget.pinging ||
+        widget.pingFailed ||
+        (widget.awaitingFirstPing && widget.protocol != 'warp');
+    final pingMetric = _MetricColumn(
+      key: const ValueKey('simple-ping-metric'),
+      label: LocalizedText(widget.protocol == 'warp' ? 'WARP RTT' : 'Ping'),
+      metricKey: 'ping',
+      value: valuePing,
+      valueIsLocalized: valueIsLocalized,
+      color: foreground,
+      secondary: secondary,
+    );
+    final Widget pingCell;
+    if (widget.protocol == 'warp' && widget.connected) {
+      pingCell = Tooltip(
+        message: context.l10n.text(
+          'Aether’s connect-time RTT for successful WireGuard endpoint handshake and data-plane validation. Not refreshed on tap.',
+        ),
+        child: pingMetric,
+      );
+    } else if (widget.onPingTap == null || !widget.connected) {
+      pingCell = pingMetric;
+    } else {
+      pingCell = Tooltip(
+        message: context.l10n.text('Test Ping'),
+        child: InkWell(
+          key: const ValueKey('simple-ping-tap'),
+          borderRadius: BorderRadius.circular(12),
+          onTap: widget.pinging ? null : widget.onPingTap,
+          child: pingMetric,
+        ),
+      );
+    }
 
     return Container(
       key: const ValueKey('simple-connection-stats'),
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 17),
       decoration: BoxDecoration(
-        color: isDark
+        color: widget.isDark
             ? const Color(0xFF08090A).withValues(alpha: 0.78)
             : Colors.white.withValues(alpha: 0.82),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: isDark
+          color: widget.isDark
               ? Colors.white24
               : const Color(0xFF22252A).withValues(alpha: 0.18),
           width: 1,
@@ -322,17 +469,8 @@ class _ConnectionStatsCard extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(
-                child: _MetricColumn(
-                  key: const ValueKey('simple-ping-metric'),
-                  label: const LocalizedText('Ping'),
-                  metricKey: 'ping',
-                  value: valuePing,
-                  color: foreground,
-                  secondary: secondary,
-                ),
-              ),
-              _MetricDivider(isDark: isDark),
+              Expanded(child: pingCell),
+              _MetricDivider(isDark: widget.isDark),
               Expanded(
                 child: _MetricColumn(
                   key: const ValueKey('simple-download-metric'),
@@ -343,7 +481,7 @@ class _ConnectionStatsCard extends StatelessWidget {
                   secondary: secondary,
                 ),
               ),
-              _MetricDivider(isDark: isDark),
+              _MetricDivider(isDark: widget.isDark),
               Expanded(
                 child: _MetricColumn(
                   key: const ValueKey('simple-upload-metric'),
@@ -368,6 +506,7 @@ class _MetricColumn extends StatelessWidget {
     required this.label,
     required this.metricKey,
     required this.value,
+    this.valueIsLocalized = false,
     required this.color,
     required this.secondary,
   });
@@ -375,6 +514,7 @@ class _MetricColumn extends StatelessWidget {
   final Widget label;
   final String metricKey;
   final String value;
+  final bool valueIsLocalized;
   final Color color;
   final Color secondary;
 
@@ -390,15 +530,17 @@ class _MetricColumn extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Directionality(
-          textDirection: TextDirection.ltr,
+          textDirection: valueIsLocalized
+              ? Directionality.of(context)
+              : TextDirection.ltr,
           child: Text(
-            value,
+            valueIsLocalized ? context.l10n.text(value) : value,
             key: ValueKey('simple-$metricKey-value'),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: color,
-              fontSize: 15,
+              fontSize: valueIsLocalized ? 11 : 15,
               fontWeight: FontWeight.w700,
               fontFeatures: const [FontFeature.tabularFigures()],
             ),

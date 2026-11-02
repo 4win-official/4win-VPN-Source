@@ -32,8 +32,6 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
@@ -63,7 +61,6 @@ class MainActivity: FlutterActivity() {
     private var pendingXrayPermission: MethodChannel.Result? = null
     private var catMeowPlayer: MediaPlayer? = null
     private val activeDelayProbes = ConcurrentHashMap<String, Pair<Thread, MethodChannel.Result>>()
-    private val activeDelayConnections = ConcurrentHashMap<String, HttpURLConnection>()
     private val installedAppsExecutor = Executors.newSingleThreadExecutor { worker ->
         Thread(worker, "InstalledAppsLookup")
     }
@@ -625,6 +622,35 @@ class MainActivity: FlutterActivity() {
                 "getMixDiagnostics" -> {
                     result.success(MixCoordinatorService.getMixDiagnostics())
                 }
+                "getWarpExitIp" -> {
+                    Thread {
+                        val deadline = android.os.SystemClock.elapsedRealtime() + 8_000L
+                        var exitIp: String? = null
+                        while (XrayVpnService.isAetherActive() &&
+                            android.os.SystemClock.elapsedRealtime() < deadline) {
+                            exitIp = XrayVpnService.currentWarpExitIp()
+                            if (exitIp != null) break
+                            try { Thread.sleep(200L) } catch (_: InterruptedException) {
+                                Thread.currentThread().interrupt()
+                                break
+                            }
+                        }
+                        runOnUiThread { result.success(exitIp) }
+                    }.start()
+                }
+                "getXrayExitIp" -> {
+                    if (!XrayVpnService.isServiceRunning || XrayVpnService.isMixModeRunning ||
+                        XrayVpnService.isAetherActive()) {
+                        result.success(null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        val exitIp = runCatching {
+                            com.forwin.vpn.mix.MixEgressProbe.fetch(10808, timeoutMillis = 8_000).ip
+                        }.getOrNull()
+                        runOnUiThread { result.success(exitIp) }
+                    }.start()
+                }
                 "connectMixPlan" -> {
                     try {
                         val json = call.argument<String>("planJson") ?: error("Missing Mix plan")
@@ -784,12 +810,9 @@ class MainActivity: FlutterActivity() {
                     val requestId = call.argument<String>("requestId")
                         ?: "legacy-${android.os.SystemClock.elapsedRealtimeNanos()}"
                     if (configJson.contains("__APP_FILES__")) {
-                        // WARP is already running in Aether. Use a fresh
-                        // request through the active VPN instead of returning
-                        // the connect-time RTT stored by the native core.
-                        startCancelableDelayProbe(requestId, result) {
-                            measureFreshWarpDelay(requestId)
-                        }
+                        // The app UID is excluded from the Android VPN tunnel;
+                        // Activity HTTP here would measure direct internet, not WARP.
+                        result.success(-1L)
                         return@setMethodCallHandler
                     }
                     startCancelableDelayProbe(requestId, result) {
@@ -799,7 +822,6 @@ class MainActivity: FlutterActivity() {
                 "cancelMeasureDelay" -> {
                     val requestId = call.argument<String>("requestId")
                     val pending = requestId?.let { activeDelayProbes.remove(it) }
-                    requestId?.let { activeDelayConnections.remove(it)?.disconnect() }
                     if (pending != null) {
                         pending.first.interrupt()
                         runOnUiThread { pending.second.success(-1L) }
@@ -819,14 +841,23 @@ class MainActivity: FlutterActivity() {
                         runOnUiThread { result.success(delay) }
                     }.start()
                 }
-                "measureWarpDelay" -> {
-                    // Perform a fresh HTTP request through the active Android
-                    // VPN. NativeCore.lastRttMs() is only the connect-time
-                    // validation value and becomes stale after the first tap.
-                    Thread {
-                        val delay = measureFreshWarpDelay()
-                        runOnUiThread { result.success(delay) }
-                    }.start()
+                "getWarpRtt" -> {
+                    // This is the real WireGuard endpoint RTT Aether measured
+                    // while validating the live tunnel at connect time. Do not
+                    // replace it with Activity HTTP: this UID bypasses the TUN.
+                    val state = WarpConnectionState.snapshot()
+                    val rtt = if (
+                        state.connected &&
+                        XrayVpnService.isServiceRunning &&
+                        !XrayVpnService.isMixModeRunning &&
+                        XrayVpnService.isAetherActive() &&
+                        runCatching { NativeCore.isReady() }.getOrDefault(false)
+                    ) {
+                        runCatching { NativeCore.lastRttMs() }.getOrDefault(-1L)
+                    } else {
+                        -1L
+                    }
+                    result.success(if (rtt >= 0) rtt else -1L)
                 }
                 else -> result.notImplemented()
             }
@@ -858,40 +889,6 @@ class MainActivity: FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
-        }
-    }
-
-    private fun measureFreshWarpDelay(requestId: String? = null): Long {
-        if (!XrayVpnService.isServiceRunning ||
-            !runCatching { NativeCore.isReady() }.getOrDefault(false)) return -1L
-        var connection: HttpURLConnection? = null
-        return try {
-            val start = System.nanoTime()
-            connection = (URL("https://www.gstatic.com/generate_204").openConnection()
-                as HttpURLConnection).apply {
-                connectTimeout = 6000
-                readTimeout = 6000
-                requestMethod = "GET"
-                useCaches = false
-                setRequestProperty("Cache-Control", "no-cache, no-store")
-                setRequestProperty("Pragma", "no-cache")
-            }
-            if (requestId != null) {
-                activeDelayConnections[requestId] = connection
-                if (!activeDelayProbes.containsKey(requestId)) {
-                    activeDelayConnections.remove(requestId)
-                    connection.disconnect()
-                    return -1L
-                }
-            }
-            val code = connection.responseCode
-            val elapsed = (System.nanoTime() - start) / 1_000_000L
-            if (code in 200..399) elapsed else -1L
-        } catch (_: Exception) {
-            -1L
-        } finally {
-            requestId?.let { activeDelayConnections.remove(it) }
-            connection?.disconnect()
         }
     }
 

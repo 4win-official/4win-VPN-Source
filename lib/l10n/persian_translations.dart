@@ -144,6 +144,9 @@ const Map<String, String> appPersianTranslations = <String, String>{
   r'''Xray Servers''': r'''سرورهای Xray''',
   r'''Pinging…''': r'''در حال پینگ…''',
   r'''click to ping''': r'''برای پینگ کلیک کنید''',
+  r'''WARP RTT''': r'''RTT وارپ''',
+  r'''Aether’s connect-time RTT for successful WireGuard endpoint handshake and data-plane validation. Not refreshed on tap.''':
+      r'''RTT ثبت‌شدهٔ Aether هنگام اعتبارسنجی موفقِ دست‌دهی endpoint وایرگارد و مسیر داده؛ با لمس تازه نمی‌شود.''',
   r'''${ping}ms''': r'''${ping}ms''',
   r'''Failed''': r'''ناموفق''',
   r'''Testing...''': r'''در حال آزمایش...''',
@@ -1098,4 +1101,6 @@ https://example.com/servers.txt''',
   r'''No log directory was selected''': r'''پوشهٔ گزارش انتخاب نشده است.''',
   r'''Download: $download • Upload: $upload''':
       r'''دریافت: $download • ارسال: $upload''',
+  r'''Your location''': r'''موقعیت شما''',
+  r'''VPN location''': r'''موقعیت VPN''',
 };

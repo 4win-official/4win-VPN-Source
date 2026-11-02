@@ -38,6 +38,31 @@ class XrayConnection {
     }
   }
 
+  /// Public exit IP measured inside the active Aether/WARP tunnel.
+  static Future<String?> getWarpExitIp() async {
+    try {
+      final result = await platform
+          .invokeMethod<String>('getWarpExitIp')
+          .timeout(const Duration(seconds: 10));
+      return result?.trim().isNotEmpty == true ? result!.trim() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Public exit IP measured through Xray's active loopback SOCKS listener.
+  /// The native probe has no direct-network fallback.
+  static Future<String?> getXrayExitIp() async {
+    try {
+      final result = await platform
+          .invokeMethod<String>('getXrayExitIp')
+          .timeout(const Duration(seconds: 10));
+      return result?.trim().isNotEmpty == true ? result!.trim() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<void> disconnectMixPlan() async {
     try {
       await platform.invokeMethod('disconnectMixPlan');
@@ -135,6 +160,9 @@ class XrayConnection {
     String url = 'https://www.google.com/generate_204',
     ProbeCancellation? cancellation,
   }) async {
+    // Aether/WARP configs are not valid Xray delay-probe configs. The app UID
+    // bypasses the VPN tunnel, so any Activity HTTP result would be misleading.
+    if (configJson.contains('__APP_FILES__')) return -1;
     final requestId = 'delay-${++_nextDelayProbeId}';
     final token = cancellation;
     if (token?.isCancelled == true) return -1;
@@ -177,16 +205,18 @@ class XrayConnection {
     }
   }
 
-  /// Reads the RTT recorded by the already-running native WARP tunnel.
-  /// This never starts or probes a second core when the indicator is tapped.
-  static Future<int> measureWarpDelay() async {
+  /// Reads Aether's validated WireGuard endpoint RTT from tunnel startup.
+  /// This is not a new probe and must never be described as tap-to-refresh.
+  static Future<int> getWarpRtt() async {
     try {
-      final result = await platform.invokeMethod('measureWarpDelay');
+      final result = await platform
+          .invokeMethod('getWarpRtt')
+          .timeout(const Duration(seconds: 2));
       if (result is int) return result;
       if (result is num) return result.toInt();
       return -1;
     } catch (e) {
-      if (kDebugMode) debugPrint('❌ WARP measureDelay error: $e');
+      if (kDebugMode) debugPrint('❌ WARP RTT read error: $e');
       return -1;
     }
   }

@@ -7,6 +7,8 @@ import '../l10n/app_localizations.dart';
 import '../providers/app_mode_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/vpn_provider.dart';
+import '../services/ip_geolocation_service.dart';
+import '../services/xray_connection.dart';
 import '../widgets/app_language_setting.dart';
 import 'simple_mode_home_layout.dart';
 import 'split_tunnel_screen.dart';
@@ -171,7 +173,9 @@ class _ModeChoice extends StatelessWidget {
 /// The intentionally small Simple-mode home: one connection control and one
 /// settings entry point. The mode switch lives inside Simple Settings.
 class SimpleHomeScreen extends StatefulWidget {
-  const SimpleHomeScreen({super.key});
+  const SimpleHomeScreen({super.key, this.lookupCurrentIpLocation});
+
+  final IpLocationLookup? lookupCurrentIpLocation;
 
   @override
   State<SimpleHomeScreen> createState() => _SimpleHomeScreenState();
@@ -179,6 +183,7 @@ class SimpleHomeScreen extends StatefulWidget {
 
 class _SimpleHomeScreenState extends State<SimpleHomeScreen>
     with WidgetsBindingObserver {
+  final IpGeolocationService _mapGeolocation = IpGeolocationService();
   bool _appInForeground = true;
   bool _promptScheduled = false;
   bool _feedbackDialogOpen = false;
@@ -220,9 +225,27 @@ class _SimpleHomeScreenState extends State<SimpleHomeScreen>
     if (mounted) _scheduleFeedbackPrompt(provider);
   }
 
+  Future<IpLocation?> _lookupMapLocation(VpnProvider provider) async {
+    if (!provider.isConnected) return _mapGeolocation.lookupCurrent();
+
+    final attempt = provider.simpleCurrentAttempt;
+    if (attempt == null) return null;
+    final String? exitIp;
+    if (attempt.protocol == 'warp') {
+      exitIp = await XrayConnection.getWarpExitIp();
+    } else if (attempt.protocol == 'xray') {
+      exitIp = await XrayConnection.getXrayExitIp();
+    } else {
+      return null;
+    }
+    if (exitIp == null) return null;
+    return _mapGeolocation.lookupIp(exitIp);
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _mapGeolocation.close();
     super.dispose();
   }
 
@@ -312,6 +335,12 @@ class _SimpleHomeScreenState extends State<SimpleHomeScreen>
         return SimpleModeHomeLayout(
           provider: provider,
           onSettings: () => _openSettings(context),
+          lookupSourceIpLocation:
+              widget.lookupCurrentIpLocation ??
+              () => _mapGeolocation.lookupCurrent(),
+          lookupCurrentIpLocation:
+              widget.lookupCurrentIpLocation ??
+              () => _lookupMapLocation(provider),
         );
       },
     );

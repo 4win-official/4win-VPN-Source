@@ -24,9 +24,8 @@ mod exitprobe {
 
     use crate::exitip::Probe;
 
-    /// Wait after the first byte crosses before asking. Sending the probe the
-    /// instant the bridge starts races the handshake settling, and a lost first
-    /// datagram costs a whole retry interval.
+    /// Give the tunnel a moment to settle before asking. The probe is one-shot
+    /// per tunnel and stops its timer as soon as it succeeds or exhausts retries.
     const FIRST_DELAY: Duration = Duration::from_millis(1_200);
     /// Gap between retries of an unanswered probe.
     const RETRY_GAP: Duration = Duration::from_secs(3);
@@ -35,7 +34,7 @@ mod exitprobe {
     const MAX_ATTEMPTS: u32 = 4;
 
     enum State {
-        /// Waiting for the tunnel to carry something before probing.
+        /// Waiting for the one-shot probe's startup delay to expire.
         Idle,
         /// A probe is outstanding.
         Waiting { probe: Probe, attempts: u32, next: Instant },
@@ -55,7 +54,7 @@ mod exitprobe {
             ExitProbe {
                 local_ipv4,
                 state: State::Idle,
-                start_after: None,
+                start_after: Some(Instant::now() + FIRST_DELAY),
             }
         }
 
@@ -69,7 +68,8 @@ mod exitprobe {
             !matches!(self.state, State::Done)
         }
 
-        /// Called once traffic has been seen, to arm the first probe.
+        /// Compatibility hook for callers that start probing after traffic.
+        /// New probes are already scheduled at tunnel startup.
         pub fn arm(&mut self, now: Instant) {
             if self.start_after.is_none() {
                 self.start_after = Some(now + FIRST_DELAY);
@@ -398,10 +398,6 @@ pub async fn bridge(
                     return Ok(());
                 }
                 tx_total += length as u64;
-                // Real traffic is moving, so the tunnel is worth measuring.
-                if probing {
-                    exit_probe.arm(std::time::Instant::now());
-                }
                 let mut outbound = packet[..length].to_vec();
                 // Outbound SYN: cap what we ask the peer to send us.
                 if clamp_tcp_mss(&mut outbound, crate::wireguard::inner_mtu_hint()) {
@@ -631,11 +627,11 @@ mod tests {
         const LOCAL: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
 
         #[test]
-        fn nothing_is_sent_before_traffic_has_been_seen() {
+        fn one_shot_probe_is_scheduled_without_other_app_traffic() {
             let mut probe = ExitProbe::new(LOCAL);
             let now = Instant::now();
-            // Even far in the future: without arm() there is nothing to measure.
-            assert!(probe.due(now + Duration::from_secs(60)).is_none());
+            assert!(probe.due(now + Duration::from_millis(200)).is_none());
+            assert!(probe.due(now + Duration::from_millis(1_500)).is_some());
         }
 
         #[test]

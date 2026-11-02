@@ -5,7 +5,10 @@ import 'package:provider/provider.dart';
 import 'package:vpn_swift/l10n/app_localizations.dart';
 import 'package:vpn_swift/models/simple_connection_plan.dart';
 import 'package:vpn_swift/providers/vpn_provider.dart';
+import 'package:vpn_swift/services/ip_geolocation_service.dart';
 import 'package:vpn_swift/screens/simple_mode_screens.dart';
+
+Future<IpLocation?> _emptyLocationLookup() async => null;
 
 class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   final Set<VoidCallback> _listeners = <VoidCallback>{};
@@ -16,6 +19,10 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   int disconnectCalls = 0;
   VpnConnectionStatus currentStatus = VpnConnectionStatus.connected;
   int? ping = 42;
+  String protocol = 'warp';
+  bool pinging = false;
+  bool awaitingInitialPing = false;
+  int pingCalls = 0;
   String downloaded = '12.3 MB';
   String uploaded = '5.6 MB';
 
@@ -42,6 +49,15 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
 
   @override
   int? get currentPing => ping;
+
+  @override
+  String get selectedProtocol => protocol;
+
+  @override
+  bool get xrayPinging => pinging;
+
+  @override
+  bool get xrayPingAwaitingFirstTap => awaitingInitialPing;
 
   @override
   bool get pingFailed => false;
@@ -86,6 +102,18 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   }
 
   @override
+  Future<void> manualXrayPing() async {
+    pingCalls++;
+    awaitingInitialPing = false;
+    pinging = true;
+    emit();
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    ping = (ping ?? 40) + 1;
+    pinging = false;
+    emit();
+  }
+
+  @override
   Future<void> disconnect({bool preserveSimpleAttempt = false}) async {
     disconnectCalls++;
   }
@@ -111,145 +139,154 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets(
-    'uses the app logo as its connection control and shows live session stats',
-    (tester) async {
-      final provider = _FakeVpnProvider()
-        ..currentStatus = VpnConnectionStatus.disconnected;
-      await tester.pumpWidget(
-        ChangeNotifierProvider<VpnProvider>.value(
-          value: provider,
-          child: const MaterialApp(home: SimpleHomeScreen()),
+  testWidgets('uses a circular power control and shows live session stats', (
+    tester,
+  ) async {
+    final provider = _FakeVpnProvider()
+      ..currentStatus = VpnConnectionStatus.disconnected;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<VpnProvider>.value(
+        value: provider,
+        child: const MaterialApp(
+          home: SimpleHomeScreen(lookupCurrentIpLocation: _emptyLocationLookup),
         ),
-      );
-      await tester.pump();
+      ),
+    );
+    await tester.pump();
 
-      expect(
-        find.byWidgetPredicate(
-          (widget) =>
-              widget is Image &&
-              widget.image is AssetImage &&
-              (widget.image as AssetImage).assetName ==
-                  'assets/icons/app_icon.png',
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('simple-logo-connect-control')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('simple-settings-action')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('simple-split-tunnel-action')),
-        findsNothing,
-      );
-      final logoSurface = tester.widget<AnimatedContainer>(
-        find.byKey(const ValueKey('simple-logo-control-surface')),
-      );
-      expect((logoSurface.decoration as BoxDecoration).border, isNull);
-      expect(
-        find.byKey(const ValueKey('simple-power-control-area')),
-        findsOneWidget,
-      );
-      expect(find.text('—'), findsNWidgets(3));
-      final background = find.byKey(const ValueKey('simple-status-background'));
-      expect(background, findsOneWidget);
-      final disconnectedDecoration =
-          tester.widget<AnimatedContainer>(background).decoration
-              as BoxDecoration;
-      expect(
-        (disconnectedDecoration.gradient! as LinearGradient).colors.first,
-        const Color(0xFFF8F9FB),
-      );
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image is AssetImage &&
+            (widget.image as AssetImage).assetName ==
+                'assets/icons/app_icon.png',
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('simple-power-connect-control')),
+      findsOneWidget,
+    );
+    expect(find.byIcon(Icons.power_settings_new_rounded), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('simple-settings-action')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('simple-split-tunnel-action')),
+      findsNothing,
+    );
+    final controlSurface = tester.widget<AnimatedContainer>(
+      find.byKey(const ValueKey('simple-power-control-surface')),
+    );
+    final controlDecoration = controlSurface.decoration as BoxDecoration;
+    expect(controlDecoration.border, isNull);
+    expect(controlDecoration.shape, BoxShape.circle);
+    expect(controlDecoration.borderRadius, isNull);
+    final controlSize = tester.getSize(
+      find.byKey(const ValueKey('simple-power-control-surface')),
+    );
+    expect(controlSize.width, closeTo(controlSize.height, 0.01));
+    expect(
+      find.byKey(const ValueKey('simple-power-control-area')),
+      findsOneWidget,
+    );
+    final logoControl = find.byKey(
+      const ValueKey('simple-power-connect-control'),
+    );
+    final initialButtonY = tester.getCenter(logoControl).dy;
+    expect(find.text('—'), findsNWidgets(3));
+    final background = find.byKey(const ValueKey('simple-status-background'));
+    expect(background, findsOneWidget);
+    final disconnectedDecoration =
+        tester.widget<AnimatedContainer>(background).decoration
+            as BoxDecoration;
+    expect(
+      (disconnectedDecoration.gradient! as LinearGradient).colors.first,
+      const Color(0xFFF8F9FB),
+    );
 
-      provider.currentStatus = VpnConnectionStatus.connecting;
-      provider.emit();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
-      final backgroundDecoration = tester
-          .widgetList<DecoratedBox>(
-            find.descendant(
-              of: background,
-              matching: find.byType(DecoratedBox),
-            ),
-          )
-          .firstWhere(
-            (box) =>
-                box.decoration is BoxDecoration &&
-                (box.decoration as BoxDecoration).gradient is LinearGradient,
-          );
-      final inTransition =
-          (backgroundDecoration.decoration as BoxDecoration).gradient!
-              as LinearGradient;
-      expect(inTransition.colors.first, isNot(const Color(0xFFF8F9FB)));
-      expect(inTransition.colors.first, isNot(const Color(0xFFFFF5D9)));
-      final connectingTarget =
-          tester.widget<AnimatedContainer>(background).decoration
-              as BoxDecoration;
-      expect(
-        (connectingTarget.gradient! as LinearGradient).colors.first,
-        const Color(0xFFFFF5D9),
-      );
-      await tester.pump(const Duration(milliseconds: 350));
-      final connectingDecoration = tester
-          .widgetList<DecoratedBox>(
-            find.descendant(
-              of: background,
-              matching: find.byType(DecoratedBox),
-            ),
-          )
-          .firstWhere(
-            (box) =>
-                box.decoration is BoxDecoration &&
-                (box.decoration as BoxDecoration).gradient is LinearGradient,
-          );
-      expect(
-        ((connectingDecoration.decoration as BoxDecoration).gradient!
-                as LinearGradient)
-            .colors
-            .first,
-        const Color(0xFFFFF5D9),
-      );
+    provider.currentStatus = VpnConnectionStatus.connecting;
+    provider.emit();
+    await tester.pump();
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(tester.getCenter(logoControl).dy, closeTo(initialButtonY, 0.01));
+    await tester.pump(const Duration(milliseconds: 350));
+    final backgroundDecoration = tester
+        .widgetList<DecoratedBox>(
+          find.descendant(of: background, matching: find.byType(DecoratedBox)),
+        )
+        .firstWhere(
+          (box) =>
+              box.decoration is BoxDecoration &&
+              (box.decoration as BoxDecoration).gradient is LinearGradient,
+        );
+    final inTransition =
+        (backgroundDecoration.decoration as BoxDecoration).gradient!
+            as LinearGradient;
+    expect(inTransition.colors.first, isNot(const Color(0xFFF8F9FB)));
+    expect(inTransition.colors.first, isNot(const Color(0xFFFFF5D9)));
+    final connectingTarget =
+        tester.widget<AnimatedContainer>(background).decoration
+            as BoxDecoration;
+    expect(
+      (connectingTarget.gradient! as LinearGradient).colors.first,
+      const Color(0xFFFFF5D9),
+    );
+    await tester.pump(const Duration(milliseconds: 350));
+    final connectingDecoration = tester
+        .widgetList<DecoratedBox>(
+          find.descendant(of: background, matching: find.byType(DecoratedBox)),
+        )
+        .firstWhere(
+          (box) =>
+              box.decoration is BoxDecoration &&
+              (box.decoration as BoxDecoration).gradient is LinearGradient,
+        );
+    expect(
+      ((connectingDecoration.decoration as BoxDecoration).gradient!
+              as LinearGradient)
+          .colors
+          .first,
+      const Color(0xFFFFF5D9),
+    );
 
-      provider.currentStatus = VpnConnectionStatus.connected;
-      provider.emit();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
-      final changingToGreen = tester
-          .widgetList<DecoratedBox>(
-            find.descendant(
-              of: background,
-              matching: find.byType(DecoratedBox),
-            ),
-          )
-          .firstWhere(
-            (box) =>
-                box.decoration is BoxDecoration &&
-                (box.decoration as BoxDecoration).gradient is LinearGradient,
-          );
-      final yellowToGreen =
-          (changingToGreen.decoration as BoxDecoration).gradient!
-              as LinearGradient;
-      expect(yellowToGreen.colors.first, isNot(const Color(0xFFFFF5D9)));
-      expect(yellowToGreen.colors.first, isNot(const Color(0xFFE9F7ED)));
-      await tester.pump(const Duration(milliseconds: 700));
-      final connectedDecoration =
-          tester.widget<AnimatedContainer>(background).decoration
-              as BoxDecoration;
-      expect(
-        (connectedDecoration.gradient! as LinearGradient).colors.first,
-        const Color(0xFFE9F7ED),
-      );
-      expect(find.text('42 ms'), findsOneWidget);
-      expect(find.text('12.3 MB'), findsOneWidget);
-      expect(find.text('5.6 MB'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    provider.currentStatus = VpnConnectionStatus.connected;
+    provider.emit();
+    await tester.pump();
+    expect(find.text('Disconnect'), findsOneWidget);
+    expect(tester.getCenter(logoControl).dy, closeTo(initialButtonY, 0.01));
+    await tester.pump(const Duration(milliseconds: 350));
+    final changingToGreen = tester
+        .widgetList<DecoratedBox>(
+          find.descendant(of: background, matching: find.byType(DecoratedBox)),
+        )
+        .firstWhere(
+          (box) =>
+              box.decoration is BoxDecoration &&
+              (box.decoration as BoxDecoration).gradient is LinearGradient,
+        );
+    final yellowToGreen =
+        (changingToGreen.decoration as BoxDecoration).gradient!
+            as LinearGradient;
+    expect(yellowToGreen.colors.first, isNot(const Color(0xFFFFF5D9)));
+    expect(yellowToGreen.colors.first, isNot(const Color(0xFFE9F7ED)));
+    await tester.pump(const Duration(milliseconds: 700));
+    final connectedDecoration =
+        tester.widget<AnimatedContainer>(background).decoration
+            as BoxDecoration;
+    expect(
+      (connectedDecoration.gradient! as LinearGradient).colors.first,
+      const Color(0xFFE9F7ED),
+    );
+    expect(find.text('42 ms'), findsOneWidget);
+    expect(find.text('12.3 MB'), findsOneWidget);
+    expect(find.text('5.6 MB'), findsOneWidget);
+    expect(tester.getCenter(logoControl).dy, closeTo(initialButtonY, 0.01));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   test('feedback becomes ready only after leaving the same session', () {
     final feedback = SimpleConnectionFeedbackState()
@@ -271,7 +308,7 @@ void main() {
     expect(restored.feedbackReadyOnReturn, isFalse);
   });
 
-  testWidgets('the logo control connects and disconnects with the VPN state', (
+  testWidgets('the circular power control connects and disconnects', (
     tester,
   ) async {
     final provider = _FakeVpnProvider()
@@ -279,13 +316,15 @@ void main() {
     await tester.pumpWidget(
       ChangeNotifierProvider<VpnProvider>.value(
         value: provider,
-        child: const MaterialApp(home: SimpleHomeScreen()),
+        child: const MaterialApp(
+          home: SimpleHomeScreen(lookupCurrentIpLocation: _emptyLocationLookup),
+        ),
       ),
     );
     await tester.pump();
 
     final logoControl = find.byKey(
-      const ValueKey('simple-logo-connect-control'),
+      const ValueKey('simple-power-connect-control'),
     );
     await tester.tap(logoControl);
     await tester.pump();
@@ -301,10 +340,117 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('Xray ping starts after connection and can be repeated', (
+    tester,
+  ) async {
+    final provider = _FakeVpnProvider()
+      ..protocol = 'xray'
+      ..ping = null
+      ..awaitingInitialPing = true;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<VpnProvider>.value(
+        value: provider,
+        child: const MaterialApp(
+          home: SimpleHomeScreen(lookupCurrentIpLocation: _emptyLocationLookup),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(provider.pingCalls, 1);
+    expect(find.text('Pinging…'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(find.text('41 ms'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('simple-ping-tap')));
+    await tester.pump();
+    expect(provider.pingCalls, 2);
+    expect(find.text('Pinging…'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(find.text('42 ms'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('WARP shows a read-only validated endpoint RTT', (tester) async {
+    final provider = _FakeVpnProvider()
+      ..protocol = 'warp'
+      ..ping = 37;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<VpnProvider>.value(
+        value: provider,
+        child: const MaterialApp(
+          home: SimpleHomeScreen(lookupCurrentIpLocation: _emptyLocationLookup),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('WARP RTT'), findsOneWidget);
+    expect(find.text('37 ms'), findsOneWidget);
+    expect(find.byKey(const ValueKey('simple-ping-tap')), findsNothing);
+    expect(provider.pingCalls, 0);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('WARP RTT label and explanation are localized in RTL', (
+    tester,
+  ) async {
+    final provider = _FakeVpnProvider()
+      ..protocol = 'warp'
+      ..ping = 37;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<VpnProvider>.value(
+        value: provider,
+        child: MaterialApp(
+          locale: const Locale('fa'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: const [
+            AppLocalizationsDelegate(),
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          home: const SimpleHomeScreen(
+            lookupCurrentIpLocation: _emptyLocationLookup,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('RTT وارپ'), findsOneWidget);
+    expect(find.text('37 ms'), findsOneWidget);
+    final valueDirections = tester.widgetList<Directionality>(
+      find.ancestor(
+        of: find.byKey(const ValueKey('simple-ping-value')),
+        matching: find.byType(Directionality),
+      ),
+    );
+    expect(
+      valueDirections.any(
+        (direction) => direction.textDirection == TextDirection.ltr,
+      ),
+      isTrue,
+    );
+    final tooltip = tester.widget<Tooltip>(
+      find
+          .ancestor(
+            of: find.byKey(const ValueKey('simple-ping-metric')),
+            matching: find.byType(Tooltip),
+          )
+          .first,
+    );
+    expect(tooltip.message, contains('RTT ثبت‌شدهٔ Aether'));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'Simple dashboard translates stats and preserves LTR values in RTL',
     (tester) async {
-      final provider = _FakeVpnProvider();
+      final provider = _FakeVpnProvider()..protocol = 'xray';
       await tester.pumpWidget(
         ChangeNotifierProvider<VpnProvider>.value(
           value: provider,
@@ -317,7 +463,9 @@ void main() {
               GlobalWidgetsLocalizations.delegate,
               GlobalCupertinoLocalizations.delegate,
             ],
-            home: const SimpleHomeScreen(),
+            home: const SimpleHomeScreen(
+              lookupCurrentIpLocation: _emptyLocationLookup,
+            ),
           ),
         ),
       );
@@ -354,7 +502,9 @@ void main() {
     await tester.pumpWidget(
       ChangeNotifierProvider<VpnProvider>.value(
         value: provider,
-        child: const MaterialApp(home: SimpleHomeScreen()),
+        child: const MaterialApp(
+          home: SimpleHomeScreen(lookupCurrentIpLocation: _emptyLocationLookup),
+        ),
       ),
     );
     await tester.pump();
