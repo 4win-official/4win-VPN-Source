@@ -312,9 +312,6 @@ class _SimpleHomeScreenState extends State<SimpleHomeScreen>
         return SimpleModeHomeLayout(
           provider: provider,
           onSettings: () => _openSettings(context),
-          onSplitTunnel: () => Navigator.of(context).push<void>(
-            MaterialPageRoute<void>(builder: (_) => const SplitTunnelScreen()),
-          ),
         );
       },
     );

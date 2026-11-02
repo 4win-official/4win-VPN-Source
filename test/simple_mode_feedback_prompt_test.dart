@@ -138,6 +138,22 @@ void main() {
         find.byKey(const ValueKey('simple-logo-connect-control')),
         findsOneWidget,
       );
+      expect(
+        find.byKey(const ValueKey('simple-settings-action')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('simple-split-tunnel-action')),
+        findsNothing,
+      );
+      final logoSurface = tester.widget<AnimatedContainer>(
+        find.byKey(const ValueKey('simple-logo-control-surface')),
+      );
+      expect((logoSurface.decoration as BoxDecoration).border, isNull);
+      expect(
+        find.byKey(const ValueKey('simple-power-control-area')),
+        findsOneWidget,
+      );
       expect(find.text('—'), findsNWidgets(3));
       final background = find.byKey(const ValueKey('simple-status-background'));
       expect(background, findsOneWidget);

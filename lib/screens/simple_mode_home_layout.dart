@@ -15,12 +15,10 @@ class SimpleModeHomeLayout extends StatelessWidget {
     super.key,
     required this.provider,
     required this.onSettings,
-    required this.onSplitTunnel,
   });
 
   final VpnProvider provider;
   final VoidCallback onSettings;
-  final VoidCallback onSplitTunnel;
 
   @override
   Widget build(BuildContext context) {
@@ -101,17 +99,30 @@ class SimpleModeHomeLayout extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Directionality(
-                          textDirection: TextDirection.ltr,
-                          child: LocalizedText(
-                            '4win VPN',
-                            style: TextStyle(
-                              color: primaryText.withValues(alpha: 0.66),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.7,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Directionality(
+                                textDirection: TextDirection.ltr,
+                                child: LocalizedText(
+                                  '4win VPN',
+                                  style: TextStyle(
+                                    color: primaryText.withValues(alpha: 0.66),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 1.7,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
+                            IconButton(
+                              key: const ValueKey('simple-settings-action'),
+                              tooltip: context.l10n.text('Settings'),
+                              onPressed: onSettings,
+                              color: primaryText,
+                              icon: const Icon(Icons.settings_outlined),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 12),
                         LocalizedText(
@@ -150,91 +161,80 @@ class SimpleModeHomeLayout extends StatelessWidget {
                                 176.0,
                                 math.max(126.0, constraints.maxHeight * 0.56),
                               );
-                              return CustomPaint(
-                                painter: _OrbitalRingsPainter(
-                                  color: primaryText.withValues(
-                                    alpha: isDark ? 0.045 : 0.07,
-                                  ),
+                              return Center(
+                                key: const ValueKey(
+                                  'simple-power-control-area',
                                 ),
-                                child: Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Semantics(
-                                        button: true,
-                                        label: context.l10n.text(actionLabel),
-                                        child: Material(
-                                          type: MaterialType.transparency,
-                                          child: InkWell(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Semantics(
+                                      button: true,
+                                      label: context.l10n.text(actionLabel),
+                                      child: Material(
+                                        type: MaterialType.transparency,
+                                        child: InkWell(
+                                          key: const ValueKey(
+                                            'simple-logo-connect-control',
+                                          ),
+                                          onTap: () {
+                                            if (connected || connecting) {
+                                              unawaited(provider.disconnect());
+                                            } else {
+                                              unawaited(
+                                                provider.connectSimple(),
+                                              );
+                                            }
+                                          },
+                                          customBorder: const CircleBorder(),
+                                          child: AnimatedContainer(
                                             key: const ValueKey(
-                                              'simple-logo-connect-control',
+                                              'simple-logo-control-surface',
                                             ),
-                                            onTap: () {
-                                              if (connected || connecting) {
-                                                unawaited(
-                                                  provider.disconnect(),
-                                                );
-                                              } else {
-                                                unawaited(
-                                                  provider.connectSimple(),
-                                                );
-                                              }
-                                            },
-                                            customBorder: const CircleBorder(),
-                                            child: AnimatedContainer(
-                                              duration: const Duration(
-                                                milliseconds: 350,
-                                              ),
-                                              width: controlSize,
-                                              height: controlSize,
-                                              padding: EdgeInsets.all(
-                                                controlSize * 0.20,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: isDark
-                                                    ? const Color(0xFF101112)
-                                                    : Colors.white.withValues(
-                                                        alpha: 0.88,
-                                                      ),
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                  color: accent.withValues(
-                                                    alpha: 0.82,
-                                                  ),
-                                                  width: 1.5,
-                                                ),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: accent.withValues(
-                                                      alpha: isDark
-                                                          ? 0.12
-                                                          : 0.16,
+                                            duration: const Duration(
+                                              milliseconds: 350,
+                                            ),
+                                            width: controlSize,
+                                            height: controlSize,
+                                            padding: EdgeInsets.all(
+                                              controlSize * 0.20,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: isDark
+                                                  ? const Color(0xFF101112)
+                                                  : Colors.white.withValues(
+                                                      alpha: 0.88,
                                                     ),
-                                                    blurRadius: 24,
-                                                    spreadRadius: 2,
+                                              shape: BoxShape.circle,
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: accent.withValues(
+                                                    alpha: isDark ? 0.12 : 0.16,
                                                   ),
-                                                ],
-                                              ),
-                                              child: Image.asset(
-                                                'assets/icons/app_icon.png',
-                                                fit: BoxFit.contain,
-                                              ),
+                                                  blurRadius: 24,
+                                                  spreadRadius: 2,
+                                                ),
+                                              ],
+                                            ),
+                                            child: Image.asset(
+                                              'assets/icons/app_icon.png',
+                                              fit: BoxFit.contain,
                                             ),
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(height: 12),
-                                      LocalizedText(
-                                        actionLabel,
-                                        style: TextStyle(
-                                          color: secondaryText,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          letterSpacing: 0.3,
-                                        ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    LocalizedText(
+                                      actionLabel,
+                                      style: TextStyle(
+                                        color: secondaryText,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.3,
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               );
                             },
@@ -247,46 +247,6 @@ class SimpleModeHomeLayout extends StatelessWidget {
                           pingFailed: provider.pingFailed,
                           download: provider.downloadDataUsage,
                           upload: provider.uploadDataUsage,
-                        ),
-                        const SizedBox(height: 16),
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF090A0B),
-                              borderRadius: BorderRadius.circular(40),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.16),
-                                  blurRadius: 16,
-                                  offset: const Offset(0, 6),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _DockButton(
-                                  key: const ValueKey(
-                                    'simple-split-tunnel-action',
-                                  ),
-                                  tooltip: context.l10n.text('Split Tunneling'),
-                                  icon: Icons.call_split_rounded,
-                                  onPressed: onSplitTunnel,
-                                ),
-                                const SizedBox(width: 6),
-                                _DockButton(
-                                  key: const ValueKey('simple-settings-action'),
-                                  tooltip: context.l10n.text('Settings'),
-                                  icon: Icons.tune_rounded,
-                                  onPressed: onSettings,
-                                ),
-                              ],
-                            ),
-                          ),
                         ),
                       ],
                     ),
@@ -461,53 +421,4 @@ class _MetricDivider extends StatelessWidget {
     margin: const EdgeInsets.symmetric(horizontal: 8),
     color: isDark ? Colors.white24 : Colors.black12,
   );
-}
-
-class _DockButton extends StatelessWidget {
-  const _DockButton({
-    super.key,
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => IconButton(
-    tooltip: tooltip,
-    onPressed: onPressed,
-    splashRadius: 25,
-    color: Colors.white,
-    iconSize: 25,
-    icon: Icon(icon),
-  );
-}
-
-class _OrbitalRingsPainter extends CustomPainter {
-  const _OrbitalRingsPainter({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final maxRadius = math.min(size.width * 0.48, size.height * 0.46);
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2
-      ..isAntiAlias = true;
-
-    for (var ring = 0; ring < 5; ring++) {
-      final radius = maxRadius * (0.42 + ring * 0.145);
-      canvas.drawCircle(center, radius, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _OrbitalRingsPainter oldDelegate) =>
-      oldDelegate.color != color;
 }
