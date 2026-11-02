@@ -38,7 +38,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Split Tunneling'), findsOneWidget);
-    await tester.tap(find.text('Choose apps & websites'));
+    await tester.tap(find.text('Choose apps'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 2300));
     await tester.pump();

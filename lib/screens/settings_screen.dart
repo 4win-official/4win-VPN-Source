@@ -2156,9 +2156,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                           Icons.call_split,
                           color: Colors.tealAccent.shade700,
                         ),
-                        title: LocalizedText('Choose apps & websites'),
+                        title: LocalizedText('Choose apps'),
                         subtitle: LocalizedText(
-                          'Select apps or websites to bypass the VPN',
+                          'Select apps to bypass the VPN',
                         ),
                         trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                         onTap: () => Navigator.push(

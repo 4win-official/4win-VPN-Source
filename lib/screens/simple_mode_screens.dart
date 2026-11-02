@@ -389,7 +389,7 @@ class SimpleSettingsScreen extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.call_split),
             title: const LocalizedText('Split Tunneling'),
-            subtitle: const LocalizedText('Choose apps & websites'),
+            subtitle: const LocalizedText('Choose apps'),
             trailing: const Icon(Icons.arrow_forward_ios, size: 16),
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute<void>(

@@ -429,9 +429,9 @@ http://host:8080''',
       r'''روشن: خطاهای Psiphon ترافیک را مسدود می‌کنند (بدون نشت) و تلاش مجدد خودکار انجام می‌شود''',
   r'''OFF: Psiphon failures restore normal internet''':
       r'''خاموش: خطاهای Psiphon اینترنت عادی را بازمی‌گردانند''',
-  r'''Choose apps & websites''': r'''انتخاب برنامه‌ها و وب‌سایت‌ها''',
-  r'''Select apps or websites to bypass the VPN''':
-      r'''برنامه‌ها یا وب‌سایت‌هایی را برای دور زدن VPN انتخاب کنید''',
+  r'''Choose apps''': r'''انتخاب برنامه‌ها''',
+  r'''Select apps to bypass the VPN''':
+      r'''برنامه‌هایی را برای عبور از VPN انتخاب کنید''',
   r'''Check GitHub for a newer version of 4win VPN.''':
       r'''برای نسخهٔ جدیدتر 4win VPN، GitHub را بررسی کنید.''',
   r'''Notify me when a new version is available''':
