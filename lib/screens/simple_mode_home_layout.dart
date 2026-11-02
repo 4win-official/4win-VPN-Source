@@ -231,46 +231,146 @@ class SimpleModeHomeLayout extends StatelessWidget {
                                             curve: Curves.easeOut,
                                             width: controlSize,
                                             height: controlSize,
-                                            padding: const EdgeInsets.all(24),
+                                            padding: const EdgeInsets.all(1),
                                             decoration: BoxDecoration(
-                                              color: isDark
-                                                  ? const Color(0xFF101315)
-                                                  : Colors.white,
                                               shape: BoxShape.circle,
+                                              gradient: const SweepGradient(
+                                                startAngle: -math.pi / 2,
+                                                colors: [
+                                                  Color(0x7189A5B4),
+                                                  Color(0x30627B89),
+                                                  Color(0x4C253039),
+                                                  Color(0x6D9DB8C7),
+                                                  Color(0x7189A5B4),
+                                                ],
+                                                stops: [0, 0.24, 0.52, 0.78, 1],
+                                              ),
                                               boxShadow: [
                                                 BoxShadow(
                                                   color: accent.withValues(
                                                     alpha: isDark ? 0.18 : 0.12,
                                                   ),
-                                                  blurRadius: 30,
-                                                  spreadRadius: 1,
+                                                  blurRadius: 27,
+                                                  spreadRadius: 0.5,
+                                                ),
+                                                const BoxShadow(
+                                                  color: Color(0x70000000),
+                                                  blurRadius: 28,
+                                                  offset: Offset(0, 16),
+                                                ),
+                                                const BoxShadow(
+                                                  color: Color(0x2489AFC0),
+                                                  blurRadius: 16,
+                                                  offset: Offset(-5, -6),
                                                 ),
                                               ],
                                             ),
-                                            child: Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons
-                                                      .power_settings_new_rounded,
-                                                  size: 50,
-                                                  color: accent,
-                                                ),
-                                                const SizedBox(height: 10),
-                                                LocalizedText(
-                                                  actionLabel,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    color: primaryText,
-                                                    fontSize: 15,
-                                                    fontWeight: FontWeight.w700,
+                                            child: ClipOval(
+                                              child: Stack(
+                                                fit: StackFit.expand,
+                                                children: [
+                                                  const Positioned.fill(
+                                                    child: DecoratedBox(
+                                                      decoration: BoxDecoration(
+                                                        gradient: LinearGradient(
+                                                          begin: Alignment(
+                                                            -0.8,
+                                                            -0.9,
+                                                          ),
+                                                          end: Alignment(
+                                                            0.9,
+                                                            0.95,
+                                                          ),
+                                                          colors: [
+                                                            Color(0xFF27343B),
+                                                            Color(0xFF13181B),
+                                                            Color(0xFF080A0C),
+                                                          ],
+                                                          stops: [0, 0.38, 1],
+                                                        ),
+                                                      ),
+                                                    ),
                                                   ),
-                                                ),
-                                              ],
+                                                  const Positioned.fill(
+                                                    child: DecoratedBox(
+                                                      decoration: BoxDecoration(
+                                                        gradient: RadialGradient(
+                                                          center: Alignment(
+                                                            -0.58,
+                                                            -0.72,
+                                                          ),
+                                                          radius: 1.05,
+                                                          colors: [
+                                                            Color(0x2ABDD8E6),
+                                                            Color(0x147E9DAD),
+                                                            Colors.transparent,
+                                                          ],
+                                                          stops: [0, 0.42, 1],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Positioned(
+                                                    top: controlSize * 0.08,
+                                                    left: controlSize * 0.12,
+                                                    child: SizedBox(
+                                                      width: controlSize * 0.58,
+                                                      height: controlSize * 0.36,
+                                                      child: const DecoratedBox(
+                                                        decoration: BoxDecoration(
+                                                          gradient: RadialGradient(
+                                                            center: Alignment(
+                                                              -0.2,
+                                                              -0.2,
+                                                            ),
+                                                            colors: [
+                                                              Color(0x25C6E1EB),
+                                                              Color(0x108DAFBD),
+                                                              Colors.transparent,
+                                                            ],
+                                                            stops: [0, 0.48, 1],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Center(
+                                                    child: Column(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons
+                                                              .power_settings_new_rounded,
+                                                          size: 50,
+                                                          color: accent,
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 10,
+                                                        ),
+                                                        LocalizedText(
+                                                          actionLabel,
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style: TextStyle(
+                                                            color: Colors.white
+                                                                .withValues(
+                                                                  alpha: 0.94,
+                                                                ),
+                                                            fontSize: 15,
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ),

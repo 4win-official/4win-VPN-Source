@@ -356,13 +356,22 @@ class _WorldMapPainter extends CustomPainter {
       }
     }
 
+    final landShadowPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = const Color(0x46000000);
+    for (final country in projected) {
+      for (final path in country.paths) {
+        canvas.drawPath(path.shift(const Offset(0, 1.8)), landShadowPaint);
+      }
+    }
+
     final baseFill = Paint()
       ..style = PaintingStyle.fill
       ..shader = LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: isDark
-            ? const [Color(0xB2678292), Color(0xC48B9AA2)]
+            ? const [Color(0xA8425057), Color(0xB04D5A61)]
             : const [Color(0xC1AAB8C2), Color(0xE0D5DFE5)],
       ).createShader(Offset.zero & size);
     for (final country in projected) {
@@ -410,6 +419,20 @@ class _WorldMapPainter extends CustomPainter {
       }
       for (final path in country.paths) {
         canvas.drawPath(path, paint);
+      }
+    }
+
+    final reliefEdgePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.38
+      ..strokeJoin = StrokeJoin.round
+      ..color = const Color(0x229CB9C6);
+    for (final country in projected) {
+      if (_highlightFill(country.code, sourceCode, destinationCode) != null) {
+        continue;
+      }
+      for (final path in country.paths) {
+        canvas.drawPath(path.shift(const Offset(-0.3, -0.4)), reliefEdgePaint);
       }
     }
 
