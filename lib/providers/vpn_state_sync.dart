@@ -119,6 +119,20 @@ extension _VpnStateSync on VpnProvider {
     // for this session; never substitute whole-device traffic for VPN traffic.
   }
 
+  Future<bool> _nativeStateProxyMode(String protocol) async {
+    if (protocol != 'xray' && protocol != 'proxy') return false;
+    final diagnostics = _protocolDiagnostics;
+    if (diagnostics != null &&
+        diagnostics.protocol == protocol &&
+        (_status == VpnConnectionStatus.connecting ||
+            _status == VpnConnectionStatus.connected)) {
+      return diagnostics.proxyMode;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    return !_simpleConnectionAttemptActive &&
+        (prefs.getString('connection_mode') ?? 'vpn') == 'proxy';
+  }
+
   Future<void> _onNativeVpnState(MethodCall call) async {
     if (_mixDisposed || call.method != 'onDisconnected') return;
     final arguments = call.arguments;
@@ -146,8 +160,19 @@ extension _VpnStateSync on VpnProvider {
     final status = _status;
     final read = ++_nativeStateRead;
     try {
+      final proxyMode = await _nativeStateProxyMode(protocol);
+      if (_mixDisposed ||
+          revision != _vpnStateRevision ||
+          read != _nativeStateRead ||
+          protocol != _selectedProtocol ||
+          status != _status) {
+        return;
+      }
       final state = await VpnProvider._vpnStateChannel
-          .invokeMapMethod<String, dynamic>('getState', {'protocol': protocol});
+          .invokeMapMethod<String, dynamic>('getState', {
+            'protocol': protocol,
+            'proxyMode': proxyMode,
+          });
       if (_mixDisposed ||
           revision != _vpnStateRevision ||
           read != _nativeStateRead ||

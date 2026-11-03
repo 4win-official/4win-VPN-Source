@@ -131,14 +131,22 @@ class XrayProxyService : Service() {
         }
     }
 
+    private fun failStartup(token: Long) {
+        synchronized(lifecycleLock) {
+            if (generation != token) return
+            invalidateConnectionLocked()
+        }
+        teardown(false)
+        VpnStateBroadcast.notifyDisconnected(this, "xray")
+    }
+
     private fun startXray(expectedGeneration: Long = generation) {
         if (expectedGeneration != generation) return
         if (isRunning) return
         val config = configJson
         if (config.isNullOrBlank()) {
             android.util.Log.e(TAG, "No config provided")
-            finishReconnect(expectedGeneration)
-            commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
+            commandExecutor.execute { failStartup(expectedGeneration) }
             return
         }
         com.example.sstp_flutter.VpnConnectionObserver.notifyStarting(this)
@@ -168,8 +176,7 @@ class XrayProxyService : Service() {
             android.util.Log.d(TAG, "Xray proxy started (127.0.0.1:4444)")
         } catch (t: Throwable) {
             android.util.Log.e(TAG, "Failed to start Xray proxy: ${t.message}", t)
-            finishReconnect(expectedGeneration)
-            commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
+            commandExecutor.execute { failStartup(expectedGeneration) }
         }
     }
 
@@ -221,7 +228,7 @@ class XrayProxyService : Service() {
     }
 
     private fun requestShutdown(token: Long) {
-        if (isCurrent(token)) commandExecutor.execute { if (isCurrent(token)) teardown(false) }
+        if (isCurrent(token)) commandExecutor.execute { failStartup(token) }
     }
 
     private inner class XrayCallback(private val token: Long) : CoreCallbackHandler {

@@ -204,6 +204,15 @@ class XrayVpnService : VpnService() {
         }
     }
 
+    private fun failStartup(token: Long) {
+        synchronized(lifecycleLock) {
+            if (generation != token) return
+            invalidateConnectionLocked()
+        }
+        teardown(false)
+        VpnStateBroadcast.notifyDisconnected(this, "xray")
+    }
+
     private fun startXray(expectedGeneration: Long = generation) {
         if (expectedGeneration != generation) return
         if (isRunning) {
@@ -213,8 +222,7 @@ class XrayVpnService : VpnService() {
         val config = configJson
         if (config.isNullOrBlank()) {
             android.util.Log.e(TAG, "No config provided")
-            finishReconnect(expectedGeneration)
-            commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
+            commandExecutor.execute { failStartup(expectedGeneration) }
             return
         }
 
@@ -260,7 +268,7 @@ class XrayVpnService : VpnService() {
             vpnInterface = tun
             if (tun == null) {
                 android.util.Log.e(TAG, "Failed to establish VPN interface")
-                commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
+                commandExecutor.execute { failStartup(expectedGeneration) }
                 return
             }
             val tunFd = tun.fd
@@ -299,8 +307,7 @@ class XrayVpnService : VpnService() {
             android.util.Log.d(TAG, "Xray core started successfully")
         } catch (t: Throwable) {
             android.util.Log.e(TAG, "Failed to start Xray: ${t.message}", t)
-            finishReconnect(expectedGeneration)
-            commandExecutor.execute { if (isCurrent(expectedGeneration)) teardown(false) }
+            commandExecutor.execute { failStartup(expectedGeneration) }
         }
     }
 
@@ -487,7 +494,9 @@ class XrayVpnService : VpnService() {
         if (stopService) { runCatching { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true) }; stopSelf() }
         return true
     }
-    private fun requestShutdown(token: Long) { if (isCurrent(token)) commandExecutor.execute { if (isCurrent(token)) teardown(false) } }
+    private fun requestShutdown(token: Long) {
+        if (isCurrent(token)) commandExecutor.execute { failStartup(token) }
+    }
 
     private inner class XrayCallback(private val token: Long) : CoreCallbackHandler {
         override fun startup(): Long = 0L

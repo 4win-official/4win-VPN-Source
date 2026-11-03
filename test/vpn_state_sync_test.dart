@@ -213,7 +213,10 @@ void main() {
           });
       provider.didChangeAppLifecycleState(AppLifecycleState.resumed);
       await Future<void>.delayed(Duration.zero);
-      expect(stateCalls.single.arguments, {'protocol': 'mix'});
+      expect(stateCalls, isNotEmpty);
+      for (final call in stateCalls) {
+        expect(call.arguments, {'protocol': 'mix', 'proxyMode': false});
+      }
       expect(provider.status, VpnConnectionStatus.connected);
 
       xrayCalls.clear();
@@ -236,7 +239,10 @@ void main() {
       stateCalls.clear();
       provider.didChangeAppLifecycleState(AppLifecycleState.resumed);
       await Future<void>.delayed(Duration.zero);
-      expect(stateCalls.single.arguments, {'protocol': 'mix'});
+      expect(
+        stateCalls.single.arguments,
+        {'protocol': 'mix', 'proxyMode': false},
+      );
 
       final connecting = Completer<int>();
       xrayResponses['connectMixPlan'] = connecting.future;

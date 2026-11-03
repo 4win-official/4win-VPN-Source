@@ -778,8 +778,13 @@ pub(crate) fn mark_ready() {
 mod tests {
     use super::*;
 
+    static PANIC_HOOK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn the_panic_hook_keeps_the_message_instead_of_losing_it() {
+        let _guard = PANIC_HOOK_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // A panic in the native core is the difference between a crash report
         // a user can paste and "the tunnel died". The hook has to survive the
         // round trip through catch_unwind with its payload intact.
@@ -801,6 +806,9 @@ mod tests {
 
     #[test]
     fn a_caught_panic_keeps_the_hook_message_and_is_not_overwritten() {
+        let _guard = PANIC_HOOK_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // The catch_unwind handler used to call set_last_error("panic in Aether
         // native core") unconditionally, which clobbered the "PANIC file:line:
         // payload" the hook had just stored. Two field logs arrived with the

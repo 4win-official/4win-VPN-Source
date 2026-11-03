@@ -67,6 +67,8 @@ const WHOAMI_NAME: &str = "whoami.cloudflare";
 pub struct Probe {
     /// IPv4 packet, ready to hand to the tunnel.
     pub packet: Vec<u8>,
+    /// Tunnel address the resolver's reply must target.
+    local_ipv4: Ipv4Addr,
     /// Source port we chose, used to match the reply back to this probe.
     pub sport: u16,
     /// DNS transaction id, checked so an off-path reply cannot answer for us.
@@ -85,6 +87,7 @@ impl Probe {
         let packet = build_udp_ipv4(src, RESOLVER, sport, DNS_PORT, &query);
         Probe {
             packet,
+            local_ipv4: src,
             sport,
             id,
             name,
@@ -98,7 +101,8 @@ impl Probe {
     /// question inside it. Anything else belongs to the user's traffic and must
     /// be left alone.
     pub fn matches(&self, packet: &[u8]) -> bool {
-        let Some(payload) = udp_payload(packet, RESOLVER, DNS_PORT, self.sport) else {
+        let Some(payload) = udp_payload(packet, RESOLVER, self.local_ipv4, DNS_PORT, self.sport)
+        else {
             return false;
         };
         question_matches(payload, self.id, &self.name, QTYPE_TXT, QCLASS_CH)
@@ -106,7 +110,7 @@ impl Probe {
 
     /// Extracts the exit address from a reply already accepted by [Probe::matches].
     pub fn read(&self, packet: &[u8]) -> Option<Ipv4Addr> {
-        let payload = udp_payload(packet, RESOLVER, DNS_PORT, self.sport)?;
+        let payload = udp_payload(packet, RESOLVER, self.local_ipv4, DNS_PORT, self.sport)?;
         first_txt_record(payload)?.trim().parse().ok()
     }
 }
@@ -201,9 +205,14 @@ fn build_udp_ipv4(
     pkt
 }
 
-/// Returns the UDP payload of `packet` when it comes from `src`:`sport` and is
-/// addressed to `dport`, else `None`.
-fn udp_payload(packet: &[u8], src: Ipv4Addr, sport: u16, dport: u16) -> Option<&[u8]> {
+/// Returns the UDP payload when the packet matches the expected IPv4/UDP tuple.
+fn udp_payload(
+    packet: &[u8],
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+    sport: u16,
+    dport: u16,
+) -> Option<&[u8]> {
     if packet.len() < 20 || packet[0] >> 4 != 4 {
         return None;
     }
@@ -217,6 +226,9 @@ fn udp_payload(packet: &[u8], src: Ipv4Addr, sport: u16, dport: u16) -> Option<&
         return None;
     }
     if Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]) != src {
+        return None;
+    }
+    if Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]) != dst {
         return None;
     }
     let udp = &packet[ihl..];
@@ -358,6 +370,17 @@ mod tests {
     /// Builds a TXT reply for `name`, as a full IPv4/UDP packet from the
     /// resolver back to `sport`.
     fn txt_reply(id: u16, name: &str, qclass: u16, sport: u16, txt: &str) -> Vec<u8> {
+        txt_reply_to(Ipv4Addr::new(10, 0, 0, 2), id, name, qclass, sport, txt)
+    }
+
+    fn txt_reply_to(
+        dst: Ipv4Addr,
+        id: u16,
+        name: &str,
+        qclass: u16,
+        sport: u16,
+        txt: &str,
+    ) -> Vec<u8> {
         let mut msg = Vec::new();
         msg.extend_from_slice(&id.to_be_bytes());
         msg.extend_from_slice(&[0x81, 0x80]); // response, no error
@@ -381,13 +404,7 @@ mod tests {
         msg.push(txt.len() as u8);
         msg.extend_from_slice(txt.as_bytes());
 
-        build_udp_ipv4(
-            RESOLVER,
-            Ipv4Addr::new(10, 0, 0, 2),
-            DNS_PORT,
-            sport,
-            &msg,
-        )
+        build_udp_ipv4(RESOLVER, dst, DNS_PORT, sport, &msg)
     }
 
     #[test]
@@ -430,6 +447,20 @@ mod tests {
             WHOAMI_NAME,
             QCLASS_CH,
             probe.sport.wrapping_add(1),
+            "203.0.113.7",
+        );
+        assert!(!probe.matches(&reply));
+    }
+
+    #[test]
+    fn a_reply_to_a_different_tunnel_address_is_rejected() {
+        let probe = Probe::whoami(Ipv4Addr::new(10, 0, 0, 2));
+        let reply = txt_reply_to(
+            Ipv4Addr::new(10, 0, 0, 3),
+            probe.id,
+            WHOAMI_NAME,
+            QCLASS_CH,
+            probe.sport,
             "203.0.113.7",
         );
         assert!(!probe.matches(&reply));

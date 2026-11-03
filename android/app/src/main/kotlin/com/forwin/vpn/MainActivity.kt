@@ -237,7 +237,8 @@ class MainActivity: FlutterActivity() {
             if (call.method != "getState") { result.notImplemented(); return@setMethodCallHandler }
             val protocol = call.argument<String>("protocol")?.lowercase()
             if (protocol == null) { result.error("INVALID_PROTOCOL", "protocol is required", null); return@setMethodCallHandler }
-            result.success(nativeVpnState(protocol))
+            val proxyMode = call.argument<Boolean>("proxyMode") ?: false
+            result.success(nativeVpnState(protocol, proxyMode))
         }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
@@ -1510,7 +1511,7 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    private fun nativeVpnState(protocol: String): Map<String, Any> {
+    private fun nativeVpnState(protocol: String, proxyMode: Boolean = false): Map<String, Any> {
         var running = false
         var reconnecting = false
         var connected = false
@@ -1526,15 +1527,25 @@ class MainActivity: FlutterActivity() {
                 stats = XrayVpnService.queryTrafficStats()
             }
             "xray", "proxy" -> {
-                val xr = XrayVpnService.isServiceRunning
-                val pr = XrayProxyService.isServiceRunning
-                val xrr = XrayVpnService.isReconnecting
-                val prr = XrayProxyService.isReconnecting
-                running = xr || pr
-                reconnecting = xrr || prr
-                connected = (xr && !xrr) || (pr && !prr)
-                metricsOwner = if (pr || prr) "proxy" else "xray"
-                stats = if (pr) XrayProxyService.queryTrafficStats() else XrayVpnService.queryTrafficStats()
+                val serviceRunning = if (proxyMode) {
+                    XrayProxyService.isServiceRunning
+                } else {
+                    XrayVpnService.isServiceRunning
+                }
+                val serviceReconnecting = if (proxyMode) {
+                    XrayProxyService.isReconnecting
+                } else {
+                    XrayVpnService.isReconnecting
+                }
+                running = serviceRunning
+                reconnecting = serviceReconnecting
+                connected = serviceRunning && !serviceReconnecting
+                metricsOwner = if (proxyMode) "proxy" else "xray"
+                stats = if (proxyMode) {
+                    XrayProxyService.queryTrafficStats()
+                } else {
+                    XrayVpnService.queryTrafficStats()
+                }
             }
             "mix" -> {
                 val mr = MixCoordinatorService.isRunning
