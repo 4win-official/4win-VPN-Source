@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -8,10 +7,11 @@ import '../providers/vpn_provider.dart';
 import '../services/ip_geolocation_service.dart';
 import '../widgets/simple_mode_world_map.dart';
 
-/// A lightweight, screenshot-inspired dashboard for Simple mode.
+/// A screenshot-inspired, single-purpose home for Simple mode.
 ///
-/// A lightweight, screenshot-inspired Simple-mode dashboard with a circular
-/// power control and no continuous decorative animation.
+/// The page deliberately keeps the connection flow simple: the map shows the
+/// current location, the central control starts/stops the simple connection,
+/// and the bottom connection card explains what will be selected.
 class SimpleModeHomeLayout extends StatelessWidget {
   const SimpleModeHomeLayout({
     super.key,
@@ -28,297 +28,274 @@ class SimpleModeHomeLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final connected = provider.status == VpnConnectionStatus.connected;
     final connecting =
         provider.status == VpnConnectionStatus.connecting ||
         provider.status == VpnConnectionStatus.disconnecting ||
         provider.simpleConnectionInProgress;
-    final mapConnecting =
-        provider.status == VpnConnectionStatus.connecting ||
-        (provider.simpleConnectionInProgress &&
-            provider.status != VpnConnectionStatus.disconnecting);
     final failed = provider.simpleConnectionFailed;
-    final accent = failed
-        ? (isDark ? const Color(0xFFFF7F93) : const Color(0xFFC13D57))
-        : connected
-        ? const Color(0xFF7BE5AA)
-        : connecting
-        ? const Color(0xFFFFCB69)
-        : const Color(0xFF9B82FF);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     final background = isDark
-        ? const Color(0xFF111116)
-        : const Color(0xFFF4F2F8);
-    final foreground = isDark ? const Color(0xFFF7F5FA) : const Color(0xFF20202A);
-    final secondary = isDark ? const Color(0xFFAAA7B5) : const Color(0xFF6D6978);
-    final actionLabel = connected
-        ? 'Disconnect'
+        ? const Color(0xFF191822)
+        : const Color(0xFFF2EFF7);
+    final mapBackground = isDark
+        ? const Color(0xFF22212E)
+        : const Color(0xFFE8E4EF);
+    final foreground = isDark ? const Color(0xFFF7F3FB) : const Color(0xFF292634);
+    final secondary = isDark ? const Color(0xFFB5B0C0) : const Color(0xFF716B7D);
+    final accent = failed
+        ? const Color(0xFFFF7796)
+        : connected
+        ? const Color(0xFF75E5A5)
         : connecting
-        ? 'Cancel'
-        : 'Connect';
+        ? const Color(0xFFFFC56B)
+        : const Color(0xFFB98AFF);
+
     final headline = failed
         ? 'Connection failed'
         : connected
         ? 'You are protected'
         : connecting
         ? 'Connecting securely'
-        : 'Connect with confidence';
-    final helper = failed
-        ? provider.simpleConnectionFailureMessage ?? 'Tap connect to try again.'
-        : connected
-        ? 'Your connection is private and protected.'
+        : 'You are unprotected';
+    final actionLabel = connected
+        ? 'Disconnect'
         : connecting
-        ? 'Finding the best available route for you.'
-        : 'One tap to secure your connection.';
+        ? 'Cancel'
+        : 'Connect';
+    final protocol = provider.selectedProtocol.toUpperCase();
+    final mapConnecting =
+        provider.status == VpnConnectionStatus.connecting ||
+        (provider.simpleConnectionInProgress &&
+            provider.status != VpnConnectionStatus.disconnecting);
+
+    void toggleConnection() {
+      if (connected || connecting) {
+        unawaited(provider.disconnect());
+      } else {
+        unawaited(provider.connectSimple());
+      }
+    }
 
     return Scaffold(
       backgroundColor: background,
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final compact = constraints.maxHeight < 700;
-            return SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(20, compact ? 10 : 18, 20, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _SimpleHeader(
-                        isDark: isDark,
-                        foreground: foreground,
-                        connected: connected,
-                        connecting: connecting,
-                        onSettings: onSettings,
-                      ),
-                      SizedBox(height: compact ? 18 : 28),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        transitionBuilder: (child, animation) => FadeTransition(
-                          opacity: animation,
-                          child: SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(0, 0.12),
-                              end: Offset.zero,
-                            ).animate(animation),
-                            child: child,
-                          ),
-                        ),
-                        child: Column(
-                          key: ValueKey(headline),
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              headline,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: failed ? accent : foreground,
-                                fontSize: compact ? 28 : 34,
-                                height: 1.08,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.8,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              helper,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: failed ? accent : secondary,
-                                fontSize: 15,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(height: compact ? 8 : 16),
-                      SizedBox(
-                        height: compact ? 280 : 370,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Positioned.fill(
-                              child: DecoratedBox(
+        bottom: false,
+        child: Column(
+          children: [
+            _SimpleTopBar(
+              foreground: foreground,
+              secondary: secondary,
+              accent: accent,
+              isDark: isDark,
+              onSettings: onSettings,
+            ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final height = constraints.maxHeight;
+                  final mapHeight =
+                      (height * 0.64).clamp(390.0, 640.0).toDouble();
+                  return SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          height: mapHeight,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              DecoratedBox(
                                 decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(36),
-                                  gradient: RadialGradient(
-                                    center: const Alignment(0, 0.05),
-                                    radius: 0.9,
+                                  color: mapBackground,
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
                                     colors: [
-                                      accent.withValues(alpha: isDark ? 0.12 : 0.09),
-                                      Colors.transparent,
+                                      accent.withValues(alpha: isDark ? 0.22 : 0.18),
+                                      mapBackground,
                                     ],
                                   ),
                                 ),
                               ),
-                            ),
-                            PositionedDirectional(
-                              start: -36,
-                              end: -36,
-                              top: 4,
-                              bottom: 0,
-                              child: SimpleModeWorldMap(
-                                status: provider.status,
-                                connecting: mapConnecting,
-                                isDark: isDark,
-                                lookupSourceIpLocation: lookupSourceIpLocation,
-                                lookupCurrentIpLocation: lookupCurrentIpLocation,
+                              Positioned.fill(
+                                child: SimpleModeWorldMap(
+                                  status: provider.status,
+                                  connecting: mapConnecting,
+                                  isDark: isDark,
+                                  lookupSourceIpLocation: lookupSourceIpLocation,
+                                  lookupCurrentIpLocation: lookupCurrentIpLocation,
+                                ),
                               ),
-                            ),
-                            Center(
-                              child: _SimplePowerButton(
-                                size: compact ? 154 : 188,
-                                accent: accent,
-                                isDark: isDark,
-                                label: actionLabel,
-                                onTap: () {
-                                  if (connected || connecting) {
-                                    unawaited(provider.disconnect());
-                                  } else {
-                                    unawaited(provider.connectSimple());
-                                  }
-                                },
+                              Align(
+                                alignment: const Alignment(0, 0.10),
+                                child: _SimpleMapControl(
+                                  accent: accent,
+                                  connected: connected,
+                                  connecting: connecting,
+                                  failed: failed,
+                                  onTap: toggleConnection,
+                                ),
                               ),
-                            ),
-                          ],
+                              Positioned(
+                                left: 24,
+                                right: 24,
+                                bottom: 14,
+                                child: _MapStatusLine(
+                                  headline: headline,
+                                  secondary: connected
+                                      ? 'Your connection is private and protected.'
+                                      : connecting
+                                      ? 'Finding the best available route for you.'
+                                      : 'Connect to protect your internet traffic.',
+                                  foreground: foreground,
+                                  secondaryColor: secondary,
+                                  accent: accent,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      _SimpleConnectionCard(
-                        isDark: isDark,
-                        accent: accent,
-                        foreground: foreground,
-                        secondary: secondary,
-                        connected: connected,
-                        connecting: connecting,
-                        actionLabel: actionLabel,
-                        protocol: provider.selectedProtocol,
-                        ping: provider.currentPing,
-                        pingFailed: provider.pingFailed,
-                        pinging: provider.xrayPinging,
-                        onConnect: () {
-                          if (connected || connecting) {
-                            unawaited(provider.disconnect());
-                          } else {
-                            unawaited(provider.connectSimple());
-                          }
-                        },
-                        onPing: provider.isConnected &&
-                                const {'xray', 'mix', 'warp'}
-                                    .contains(provider.selectedProtocol)
-                            ? () => unawaited(provider.manualXrayPing())
-                            : null,
-                      ),
-                      const SizedBox(height: 18),
-                      _ConnectionStatsCard(
-                        isDark: isDark,
-                        connected: connected,
-                        ping: provider.currentPing,
-                        pingFailed: provider.pingFailed,
-                        pinging: provider.xrayPinging,
-                        awaitingFirstPing: provider.xrayPingAwaitingFirstTap,
-                        protocol: provider.selectedProtocol,
-                        connectionGeneration: provider.simpleConnectionGeneration,
-                        onPingTap: provider.isConnected &&
-                                const {'xray', 'mix', 'warp'}
-                                    .contains(provider.selectedProtocol)
-                            ? () => unawaited(provider.manualXrayPing())
-                            : null,
-                        download: provider.downloadDataUsage,
-                        upload: provider.uploadDataUsage,
-                      ),
-                      const SizedBox(height: 18),
-                      _SimpleBottomBar(
-                        isDark: isDark,
-                        foreground: foreground,
-                        onSettings: onSettings,
-                      ),
-                    ],
-                  ),
-                ),
+                        Container(
+                          color: background,
+                          padding: const EdgeInsets.fromLTRB(24, 20, 24, 14),
+                          child: _SimpleConnectionCard(
+                            isDark: isDark,
+                            foreground: foreground,
+                            secondary: secondary,
+                            accent: accent,
+                            connected: connected,
+                            connecting: connecting,
+                            failed: failed,
+                            protocol: protocol,
+                            actionLabel: actionLabel,
+                            ping: provider.currentPing,
+                            pingFailed: provider.pingFailed,
+                            pinging: provider.xrayPinging,
+                            onConnect: toggleConnection,
+                            onPing: provider.isConnected &&
+                                    const {'xray', 'mix', 'warp'}
+                                        .contains(provider.selectedProtocol)
+                                ? () => unawaited(provider.manualXrayPing())
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
-            );
-          },
+            ),
+            _SimpleBottomNavigation(
+              isDark: isDark,
+              foreground: foreground,
+              accent: accent,
+              onSettings: onSettings,
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _SimpleHeader extends StatelessWidget {
-  const _SimpleHeader({
-    required this.isDark,
+class _SimpleTopBar extends StatelessWidget {
+  const _SimpleTopBar({
     required this.foreground,
-    required this.connected,
-    required this.connecting,
+    required this.secondary,
+    required this.accent,
+    required this.isDark,
     required this.onSettings,
   });
 
-  final bool isDark;
   final Color foreground;
-  final bool connected;
-  final bool connecting;
+  final Color secondary;
+  final Color accent;
+  final bool isDark;
   final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = connected
-        ? const Color(0xFF63D99A)
-        : connecting
-        ? const Color(0xFFFFC857)
-        : const Color(0xFF9B82FF);
-    final status = connected
-        ? 'Protected'
-        : connecting
-        ? 'Setting up'
-        : 'Not protected';
-    return Row(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 12, 18, 5),
+      child: Row(
+        children: [
+          Icon(Icons.shield_outlined, color: accent, size: 24),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              '4win VPN',
+              style: TextStyle(
+                color: foreground,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: context.l10n.text('Settings'),
+            onPressed: onSettings,
+            icon: Icon(Icons.settings_outlined, color: secondary),
+            style: IconButton.styleFrom(
+              backgroundColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapStatusLine extends StatelessWidget {
+  const _MapStatusLine({
+    required this.headline,
+    required this.secondary,
+    required this.foreground,
+    required this.secondaryColor,
+    required this.accent,
+  });
+
+  final String headline;
+  final String secondary;
+  final Color foreground;
+  final Color secondaryColor;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
       children: [
-        Expanded(
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(13),
-                  border: Border.all(color: statusColor.withValues(alpha: 0.32)),
-                ),
-                child: Icon(Icons.shield_outlined, color: statusColor, size: 21),
-              ),
-              const SizedBox(width: 11),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '4win VPN',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-                  ),
-                  Text(
-                    status,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          child: Text(
+            headline,
+            key: ValueKey(headline),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: foreground,
+              fontSize: 25,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.1,
+            ),
           ),
         ),
-        IconButton(
-          tooltip: context.l10n.text('Settings'),
-          onPressed: onSettings,
-          icon: Icon(Icons.settings_outlined, color: foreground),
-          style: IconButton.styleFrom(
-            backgroundColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06),
+        const SizedBox(height: 8),
+        Text(
+          secondary,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: secondaryColor, fontSize: 13),
+        ),
+        const SizedBox(height: 7),
+        Container(
+          width: 42,
+          height: 3,
+          decoration: BoxDecoration(
+            color: accent,
+            borderRadius: BorderRadius.circular(8),
           ),
         ),
       ],
@@ -326,79 +303,72 @@ class _SimpleHeader extends StatelessWidget {
   }
 }
 
-class _SimplePowerButton extends StatelessWidget {
-  const _SimplePowerButton({
-    required this.size,
+class _SimpleMapControl extends StatelessWidget {
+  const _SimpleMapControl({
     required this.accent,
-    required this.isDark,
-    required this.label,
+    required this.connected,
+    required this.connecting,
+    required this.failed,
     required this.onTap,
   });
 
-  final double size;
   final Color accent;
-  final bool isDark;
-  final String label;
+  final bool connected;
+  final bool connecting;
+  final bool failed;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final pulseColor = failed
+        ? const Color(0xFFFF6F91)
+        : connected
+        ? const Color(0xFF68E5A0)
+        : accent;
     return Semantics(
       button: true,
-      label: context.l10n.text(label),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          key: const ValueKey('simple-power-connect-control'),
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: AnimatedContainer(
-            key: const ValueKey('simple-power-control-surface'),
-            duration: const Duration(milliseconds: 350),
-            curve: Curves.easeOutCubic,
-            width: size,
-            height: size,
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: SweepGradient(
-                startAngle: -math.pi / 2,
-                colors: [
-                  accent.withValues(alpha: 0.9),
-                  const Color(0xFF4A4A59),
-                  accent.withValues(alpha: 0.28),
-                  const Color(0xFF252531),
-                  accent.withValues(alpha: 0.9),
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(color: accent.withValues(alpha: 0.24), blurRadius: 35, spreadRadius: 2),
-                const BoxShadow(color: Color(0x55000000), blurRadius: 24, offset: Offset(0, 14)),
+      label: context.l10n.text(connected ? 'Disconnect' : 'Connect'),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 400),
+          width: 152,
+          height: 152,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                pulseColor.withValues(alpha: 0.55),
+                pulseColor.withValues(alpha: 0.18),
+                Colors.transparent,
               ],
+              stops: const [0.12, 0.55, 1],
             ),
-            child: DecoratedBox(
+          ),
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              width: 62,
+              height: 62,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  center: const Alignment(-0.35, -0.45),
-                  colors: isDark
-                      ? const [Color(0xFF343442), Color(0xFF111117)]
-                      : const [Color(0xFF5A596C), Color(0xFF1F1E29)],
-                ),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                color: const Color(0xFFF9F7FF),
+                boxShadow: [
+                  BoxShadow(
+                    color: pulseColor.withValues(alpha: 0.55),
+                    blurRadius: 24,
+                    spreadRadius: 4,
+                  ),
+                ],
               ),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.power_settings_new_rounded, size: size * 0.28, color: accent),
-                    const SizedBox(height: 8),
-                    Text(
-                      context.l10n.text(label),
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
+              child: Icon(
+                connecting
+                    ? Icons.more_horiz_rounded
+                    : connected
+                    ? Icons.lock_rounded
+                    : Icons.power_settings_new_rounded,
+                color: pulseColor,
+                size: 29,
               ),
             ),
           ),
@@ -411,13 +381,14 @@ class _SimplePowerButton extends StatelessWidget {
 class _SimpleConnectionCard extends StatelessWidget {
   const _SimpleConnectionCard({
     required this.isDark,
-    required this.accent,
     required this.foreground,
     required this.secondary,
+    required this.accent,
     required this.connected,
     required this.connecting,
-    required this.actionLabel,
+    required this.failed,
     required this.protocol,
+    required this.actionLabel,
     required this.ping,
     required this.pingFailed,
     required this.pinging,
@@ -426,13 +397,14 @@ class _SimpleConnectionCard extends StatelessWidget {
   });
 
   final bool isDark;
-  final Color accent;
   final Color foreground;
   final Color secondary;
+  final Color accent;
   final bool connected;
   final bool connecting;
-  final String actionLabel;
+  final bool failed;
   final String protocol;
+  final String actionLabel;
   final int? ping;
   final bool pingFailed;
   final bool pinging;
@@ -441,7 +413,7 @@ class _SimpleConnectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pingText = pinging
+    final pingLabel = pinging
         ? 'Testing…'
         : pingFailed
         ? 'Ping failed'
@@ -449,12 +421,21 @@ class _SimpleConnectionCard extends StatelessWidget {
         ? 'Tap to test'
         : '$ping ms';
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+      padding: const EdgeInsets.fromLTRB(17, 17, 17, 16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF19191F) : Colors.white.withValues(alpha: 0.88),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: accent.withValues(alpha: isDark ? 0.32 : 0.24)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.06), blurRadius: 22, offset: const Offset(0, 9))],
+        color: isDark ? const Color(0xFF2A2935) : Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.13) : Colors.black.withValues(alpha: 0.09),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -462,18 +443,40 @@ class _SimpleConnectionCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: accent.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(14)),
-                child: Icon(connected ? Icons.verified_user_outlined : Icons.bolt_rounded, color: accent, size: 24),
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: connected
+                      ? const Color(0xFF5DDBA0).withValues(alpha: 0.18)
+                      : const Color(0xFF42E8CD).withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  connected ? Icons.verified_user_outlined : Icons.bolt_rounded,
+                  color: connected ? const Color(0xFF63D99A) : const Color(0xFF42E8CD),
+                  size: 25,
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 13),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(connected ? 'Secure connection' : 'Fastest available route', style: TextStyle(color: foreground, fontSize: 16, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 4),
-                    Text(protocol.toUpperCase(), style: TextStyle(color: secondary, fontSize: 12, letterSpacing: 0.8, fontWeight: FontWeight.w600)),
+                    Text(
+                      connected ? 'Secure connection' : 'Fastest free server',
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      connected ? 'Protected by 4win VPN' : 'Auto-selected from available servers',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: secondary, fontSize: 12.5),
+                    ),
                   ],
                 ),
               ),
@@ -482,25 +485,46 @@ class _SimpleConnectionCard extends StatelessWidget {
                   onTap: pinging ? null : onPing,
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(7),
                     child: Column(
                       children: [
-                        Icon(Icons.speed_rounded, size: 19, color: pingFailed ? Colors.redAccent : accent),
-                        const SizedBox(height: 3),
-                        Text(pingText, style: TextStyle(color: pingFailed ? Colors.redAccent : secondary, fontSize: 10, fontWeight: FontWeight.w700)),
+                        Icon(Icons.info_outline_rounded, color: secondary, size: 22),
+                        const SizedBox(height: 2),
+                        Text(
+                          pingLabel,
+                          style: TextStyle(
+                            color: pingFailed ? Colors.redAccent : secondary,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 15),
           SizedBox(
-            height: 52,
+            height: 53,
             child: FilledButton(
               onPressed: onConnect,
-              style: FilledButton.styleFrom(backgroundColor: accent, foregroundColor: const Color(0xFF15131D), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17))),
-              child: Text(context.l10n.text(actionLabel), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+              style: FilledButton.styleFrom(
+                backgroundColor: failed ? const Color(0xFFFF6688) : const Color(0xFF7650FF),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              ),
+              child: Text(
+                context.l10n.text(actionLabel),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          const SizedBox(height: 9),
+          Center(
+            child: Text(
+              protocol.isEmpty ? 'AUTO' : protocol,
+              style: TextStyle(color: accent, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.3),
             ),
           ),
         ],
@@ -509,299 +533,86 @@ class _SimpleConnectionCard extends StatelessWidget {
   }
 }
 
-class _SimpleBottomBar extends StatelessWidget {
-  const _SimpleBottomBar({required this.isDark, required this.foreground, required this.onSettings});
+class _SimpleBottomNavigation extends StatelessWidget {
+  const _SimpleBottomNavigation({
+    required this.isDark,
+    required this.foreground,
+    required this.accent,
+    required this.onSettings,
+  });
 
   final bool isDark;
   final Color foreground;
+  final Color accent;
   final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
-    final muted = isDark ? Colors.white54 : Colors.black45;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        _BottomAction(icon: Icons.speed_rounded, label: 'Status', active: true, color: foreground, muted: muted),
-        const SizedBox(width: 10),
-        _BottomAction(icon: Icons.tune_rounded, label: 'Settings', active: false, color: foreground, muted: muted, onTap: onSettings),
-      ],
-    );
-  }
-}
-
-class _BottomAction extends StatelessWidget {
-  const _BottomAction({required this.icon, required this.label, required this.active, required this.color, required this.muted, this.onTap});
-
-  final IconData icon;
-  final String label;
-  final bool active;
-  final Color color;
-  final Color muted;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(22),
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-      decoration: BoxDecoration(color: active ? color.withValues(alpha: 0.12) : Colors.transparent, borderRadius: BorderRadius.circular(22)),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 19, color: active ? color : muted),
-        const SizedBox(width: 7),
-        Text(label, style: TextStyle(color: active ? color : muted, fontSize: 12, fontWeight: FontWeight.w700)),
-      ]),
-    ),
-  );
-}
-
-class _ConnectionStatsCard extends StatefulWidget {
-  const _ConnectionStatsCard({
-    required this.isDark,
-    required this.connected,
-    required this.ping,
-    required this.pingFailed,
-    required this.pinging,
-    required this.awaitingFirstPing,
-    required this.protocol,
-    required this.connectionGeneration,
-    required this.onPingTap,
-    required this.download,
-    required this.upload,
-  });
-
-  final bool isDark;
-  final bool connected;
-  final int? ping;
-  final bool pingFailed;
-  final bool pinging;
-  final bool awaitingFirstPing;
-  final String protocol;
-  final int connectionGeneration;
-  final VoidCallback? onPingTap;
-  final String download;
-  final String upload;
-
-  @override
-  State<_ConnectionStatsCard> createState() => _ConnectionStatsCardState();
-}
-
-class _ConnectionStatsCardState extends State<_ConnectionStatsCard> {
-  bool _initialPingStarted = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _maybeStartInitialPing();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ConnectionStatsCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!widget.connected ||
-        !oldWidget.connected ||
-        oldWidget.protocol != widget.protocol ||
-        oldWidget.connectionGeneration != widget.connectionGeneration) {
-      _initialPingStarted = false;
-    }
-    _maybeStartInitialPing();
-  }
-
-  void _maybeStartInitialPing() {
-    if (_initialPingStarted ||
-        !widget.connected ||
-        !widget.awaitingFirstPing ||
-        widget.protocol == 'warp' ||
-        widget.pinging ||
-        widget.onPingTap == null) {
-      return;
-    }
-    _initialPingStarted = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          !widget.connected ||
-          !widget.awaitingFirstPing ||
-          widget.protocol == 'warp' ||
-          widget.pinging) {
-        return;
-      }
-      widget.onPingTap?.call();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final foreground = widget.isDark ? Colors.white : const Color(0xFF17191C);
-    final secondary = widget.isDark ? Colors.white60 : const Color(0xFF686D75);
-    final valuePing = !widget.connected
-        ? '—'
-        : widget.pinging
-        ? 'Pinging…'
-        : widget.ping != null
-        ? '${widget.ping} ms'
-        : widget.pingFailed
-        ? 'Failed'
-        : widget.awaitingFirstPing
-        ? 'click to ping'
-        : '—';
-    final valueDownload = widget.connected ? widget.download : '—';
-    final valueUpload = widget.connected ? widget.upload : '—';
-    final valueIsLocalized =
-        widget.pinging ||
-        widget.pingFailed ||
-        widget.awaitingFirstPing;
-    final pingMetric = _MetricColumn(
-      key: const ValueKey('simple-ping-metric'),
-      label: LocalizedText(widget.protocol == 'warp' ? 'WARP RTT' : 'Ping'),
-      metricKey: 'ping',
-      value: valuePing,
-      valueIsLocalized: valueIsLocalized,
-      color: foreground,
-      secondary: secondary,
-    );
-    final Widget pingCell;
-    if (widget.onPingTap == null || !widget.connected) {
-      pingCell = pingMetric;
-    } else {
-      pingCell = Tooltip(
-        message: context.l10n.text(
-          widget.protocol == 'warp'
-              ? 'Fresh RTT to Cloudflare’s 1.1.1.1 resolver through the active WARP data plane.'
-              : 'Test Ping',
-        ),
-        child: InkWell(
-          key: const ValueKey('simple-ping-tap'),
-          borderRadius: BorderRadius.circular(12),
-          onTap: widget.pinging ? null : widget.onPingTap,
-          child: pingMetric,
-        ),
-      );
-    }
-
+    final muted = isDark ? Colors.white70 : Colors.black54;
     return Container(
-      key: const ValueKey('simple-connection-stats'),
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 17),
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
       decoration: BoxDecoration(
-        color: widget.isDark
-            ? const Color(0xFF08090A).withValues(alpha: 0.78)
-            : Colors.white.withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: widget.isDark
-              ? Colors.white24
-              : const Color(0xFF22252A).withValues(alpha: 0.18),
-          width: 1,
-        ),
+        color: isDark ? const Color(0xFF24232F) : Colors.white,
+        border: Border(top: BorderSide(color: foreground.withValues(alpha: 0.07))),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          LocalizedText(
-            'Connection stats',
-            style: TextStyle(
-              color: foreground,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(child: pingCell),
-              _MetricDivider(isDark: widget.isDark),
-              Expanded(
-                child: _MetricColumn(
-                  key: const ValueKey('simple-download-metric'),
-                  label: const LocalizedText('Download'),
-                  metricKey: 'download',
-                  value: valueDownload,
-                  color: foreground,
-                  secondary: secondary,
-                ),
-              ),
-              _MetricDivider(isDark: widget.isDark),
-              Expanded(
-                child: _MetricColumn(
-                  key: const ValueKey('simple-upload-metric'),
-                  label: const LocalizedText('Upload'),
-                  metricKey: 'upload',
-                  value: valueUpload,
-                  color: foreground,
-                  secondary: secondary,
-                ),
-              ),
-            ],
-          ),
+          _NavigationItem(icon: Icons.home_rounded, label: 'Home', active: true, color: accent, muted: muted),
+          _NavigationItem(icon: Icons.public_rounded, label: 'Servers', color: foreground, muted: muted),
+          _NavigationItem(icon: Icons.article_outlined, label: 'Profiles', color: foreground, muted: muted),
+          _NavigationItem(icon: Icons.settings_outlined, label: 'Settings', color: foreground, muted: muted, onTap: onSettings),
         ],
       ),
     );
   }
 }
 
-class _MetricColumn extends StatelessWidget {
-  const _MetricColumn({
-    super.key,
+class _NavigationItem extends StatelessWidget {
+  const _NavigationItem({
+    required this.icon,
     required this.label,
-    required this.metricKey,
-    required this.value,
-    this.valueIsLocalized = false,
     required this.color,
-    required this.secondary,
+    required this.muted,
+    this.active = false,
+    this.onTap,
   });
 
-  final Widget label;
-  final String metricKey;
-  final String value;
-  final bool valueIsLocalized;
+  final IconData icon;
+  final String label;
   final Color color;
-  final Color secondary;
+  final Color muted;
+  final bool active;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        DefaultTextStyle(
-          style: TextStyle(color: secondary, fontSize: 11.5),
-          child: label,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(26),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: active ? color.withValues(alpha: 0.18) : Colors.transparent,
+          borderRadius: BorderRadius.circular(26),
         ),
-        const SizedBox(height: 6),
-        Directionality(
-          textDirection: valueIsLocalized
-              ? Directionality.of(context)
-              : TextDirection.ltr,
-          child: Text(
-            valueIsLocalized ? context.l10n.text(value) : value,
-            key: ValueKey('simple-$metricKey-value'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: color,
-              fontSize: valueIsLocalized ? 11 : 15,
-              fontWeight: FontWeight.w700,
-              fontFeatures: const [FontFeature.tabularFigures()],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: active ? color : muted, size: 24),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? color : muted,
+                fontSize: 11,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              ),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
-}
-
-class _MetricDivider extends StatelessWidget {
-  const _MetricDivider({required this.isDark});
-
-  final bool isDark;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 1,
-    height: 36,
-    margin: const EdgeInsets.symmetric(horizontal: 8),
-    color: isDark ? Colors.white24 : Colors.black12,
-  );
 }
