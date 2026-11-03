@@ -12,6 +12,7 @@ enum AppTheme {
   liquidGlass, // تم لیکویید گلس (دارک + لایت)
   crying, // Append only: preserve all existing persisted theme indices.
   cat, // Append only: Cat keeps every existing saved theme stable.
+  blackHole, // Append only: preserve persisted theme indices.
 }
 
 class ThemeProvider with ChangeNotifier {
@@ -114,7 +115,9 @@ class ThemeProvider with ChangeNotifier {
 
   /// Whether the day/night toggle is locked for the currently-selected theme.
   bool get isModeLocked =>
-      selectedTheme == AppTheme.snow || selectedTheme == AppTheme.rain;
+      selectedTheme == AppTheme.snow ||
+      selectedTheme == AppTheme.rain ||
+      selectedTheme == AppTheme.blackHole;
 
   static AppTheme _themeFromPersistedIndex(int index) {
     if (index < 0 || index >= AppTheme.values.length) {
@@ -145,6 +148,11 @@ class ThemeProvider with ChangeNotifier {
       await prefs.setBool(_darkModeKey, true);
     }
 
+    if (theme == AppTheme.blackHole) {
+      _isDarkMode = true;
+      await prefs.setBool(_darkModeKey, true);
+    }
+
     // Day & Night and other adaptive themes preserve the current brightness.
     notifyListeners();
   }
@@ -169,6 +177,8 @@ class ThemeProvider with ChangeNotifier {
         return const Color(0xFF4CAF50);
       case AppTheme.cat:
         return isDarkMode ? const Color(0xFFAFD5C3) : const Color(0xFFAC6549);
+      case AppTheme.blackHole:
+        return const Color(0xFFFFA45B);
       case AppTheme.pixel:
       case AppTheme.system:
         return const Color(0xFF4CAF50);
@@ -203,10 +213,14 @@ class ThemeProvider with ChangeNotifier {
     useMaterial3: true,
     scaffoldBackgroundColor: selectedTheme == AppTheme.cat
         ? const Color(0xFF15252B)
+        : selectedTheme == AppTheme.blackHole
+        ? const Color(0xFF05060B)
         : const Color(0xFF121212),
     appBarTheme: AppBarTheme(
       backgroundColor: selectedTheme == AppTheme.cat
           ? const Color(0xFF15252B)
+          : selectedTheme == AppTheme.blackHole
+          ? const Color(0xFF080913)
           : const Color(0xFF1E1E1E),
       foregroundColor: Colors.white,
       elevation: 0,

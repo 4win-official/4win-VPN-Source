@@ -24,6 +24,7 @@ import '../widgets/cat_power_button_surface.dart';
 import '../widgets/liquid_background.dart';
 import '../widgets/liquid_power_button_surface.dart';
 import '../widgets/heart_burst.dart';
+import '../widgets/black_hole_background.dart';
 import '../widgets/glass_power_button_surface.dart';
 import '../widgets/protocol_selector_dialog.dart';
 import '../widgets/rainbow_heart_button.dart';
@@ -377,6 +378,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isAutumnTheme = themeProvider.selectedTheme == AppTheme.autumn;
     final isLiquidGlassTheme =
         themeProvider.selectedTheme == AppTheme.liquidGlass;
+    final isBlackHoleTheme =
+        themeProvider.selectedTheme == AppTheme.blackHole;
     final isSystemTheme = themeProvider.selectedTheme == AppTheme.system;
 
     // Theme-specific colors
@@ -412,6 +415,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       bgColor = isDark ? const Color(0xFF0B1020) : const Color(0xFFEAF0FF);
       iconColor = isDark ? Colors.white : const Color(0xFF1A2540);
       textColor = isDark ? Colors.white : const Color(0xFF10182B);
+    } else if (isBlackHoleTheme) {
+      bgColor = const Color(0xFF05060B);
+      iconColor = const Color(0xFFFFC27A);
+      textColor = const Color(0xFFF5EDE5);
     } else {
       bgColor = isDark ? const Color(0xFF000000) : Colors.white;
       iconColor = isDark ? Colors.white70 : Colors.black54;
@@ -428,7 +435,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         File(themeProvider.customBackgroundPath!).existsSync();
 
     return Scaffold(
-      backgroundColor: (hasCustomBackground || isLiquidGlassTheme)
+      backgroundColor:
+          (hasCustomBackground || isLiquidGlassTheme || isBlackHoleTheme)
           ? Colors.transparent
           : bgColor,
       extendBodyBehindAppBar: true,
@@ -537,6 +545,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 File(customBg).existsSync();
             return Stack(
               children: [
+                if (isBlackHoleTheme)
+                  const Positioned.fill(
+                    child: RepaintBoundary(child: BlackHoleBackground()),
+                  ),
                 // Only Liquid gets the animated, isolated frosted backdrop.
                 if (isLiquidGlassTheme)
                   const Positioned.fill(
@@ -663,7 +675,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   );
                                 }
 
-                                final buttonContentColor = isCatTheme
+                                final buttonContentColor = isBlackHoleTheme
+                                    ? const Color(0xFFFFD29A)
+                                    : isCatTheme
                                     ? const Color(0xFF18231E)
                                     : isSystemTheme || isLiquidGlassTheme
                                     ? (isDark ? Colors.white : Colors.black87)
@@ -1002,17 +1016,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                 borderRadius: isPixelTheme
                                                     ? BorderRadius.zero
                                                     : null,
-                                                color:
-                                                    isSystemTheme ||
-                                                        isCatTheme ||
-                                                        isLiquidGlassTheme
+                                                color: isBlackHoleTheme
+                                                    ? null
+                                                    : isSystemTheme ||
+                                                          isCatTheme ||
+                                                          isLiquidGlassTheme
                                                     ? Colors.transparent
                                                     : _getButtonColor(
                                                         provider.status,
                                                         isDark,
                                                       ),
-                                                gradient:
-                                                    isMascotTheme && !isCatTheme
+                                                gradient: isBlackHoleTheme
+                                                    ? const LinearGradient(
+                                                        begin: Alignment.topLeft,
+                                                        end: Alignment.bottomRight,
+                                                        colors: [
+                                                          Color(0xFF28130F),
+                                                          Color(0xFF090A12),
+                                                          Color(0xFF1B1018),
+                                                        ],
+                                                      )
+                                                    : isMascotTheme && !isCatTheme
                                                     ? LinearGradient(
                                                         begin:
                                                             Alignment.topLeft,
@@ -1034,8 +1058,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                         ],
                                                       )
                                                     : null,
-                                                border:
-                                                    isMascotTheme && !isCatTheme
+                                                border: isBlackHoleTheme
+                                                    ? Border.all(
+                                                        color: _getButtonColor(
+                                                          provider.status,
+                                                          isDark,
+                                                        ).withValues(alpha: .86),
+                                                        width: 2.4,
+                                                      )
+                                                    : isMascotTheme && !isCatTheme
                                                     ? Border.all(
                                                         color: isCatTheme
                                                             ? (isDark
@@ -1063,7 +1094,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                         width: 4,
                                                       )
                                                     : null,
-                                                boxShadow: isPixelTheme
+                                                boxShadow: isBlackHoleTheme
+                                                    ? [
+                                                        BoxShadow(
+                                                          color: const Color(0xFFFF813D)
+                                                              .withValues(alpha: .22),
+                                                          blurRadius: 34,
+                                                          spreadRadius: 2,
+                                                        ),
+                                                        BoxShadow(
+                                                          color: Colors.black.withValues(alpha: .78),
+                                                          blurRadius: 32,
+                                                          spreadRadius: 8,
+                                                          offset: const Offset(0, 12),
+                                                        ),
+                                                      ]
+                                                    : isPixelTheme
                                                     ? [
                                                         // سایه پیکسلی (بدون blur)
                                                         BoxShadow(
@@ -1203,7 +1249,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                     isDark,
                                                   ),
                                                   child: Center(
-                                                    child: isLiquidGlassTheme
+                                                    child: isBlackHoleTheme
+                                                        ? BlackHolePowerButtonSurface(
+                                                            child: powerControl,
+                                                          )
+                                                        : isLiquidGlassTheme
                                                         ? LiquidPowerButtonSurface(
                                                             isDark: isDark,
                                                             tint:
@@ -2109,6 +2159,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final themeProvider = context.watch<ThemeProvider>();
     final isPinkTheme = themeProvider.selectedTheme == AppTheme.pink;
 
+    if (themeProvider.selectedTheme == AppTheme.blackHole) {
+      switch (status) {
+        case VpnConnectionStatus.connected:
+          return const Color(0xFF75E8C2);
+        case VpnConnectionStatus.connecting:
+        case VpnConnectionStatus.disconnecting:
+          return const Color(0xFFFFC16F);
+        case VpnConnectionStatus.error:
+          return const Color(0xFFFF6378);
+        case VpnConnectionStatus.disconnected:
+          return const Color(0xFFFF9B58);
+      }
+    }
+
     if (themeProvider.selectedTheme == AppTheme.cat) {
       switch (status) {
         case VpnConnectionStatus.connected:
@@ -2320,7 +2384,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // رنگ نور ملایم از پایین صفحه
   Color _getGlowColor(VpnConnectionStatus status, bool isDark) {
-    if (context.watch<ThemeProvider>().selectedTheme == AppTheme.cat) {
+    final selectedTheme = context.watch<ThemeProvider>().selectedTheme;
+    if (selectedTheme == AppTheme.cat ||
+        selectedTheme == AppTheme.blackHole) {
       return _getButtonColor(status, isDark);
     }
     switch (status) {

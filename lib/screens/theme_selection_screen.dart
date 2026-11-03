@@ -3,6 +3,7 @@ import '../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import 'default_theme_settings_screen.dart';
+import '../widgets/black_hole_background.dart';
 
 class ThemeSelectionScreen extends StatelessWidget {
   const ThemeSelectionScreen({super.key});
@@ -127,6 +128,23 @@ class ThemeSelectionScreen extends StatelessWidget {
                       builder: (_) => const DefaultThemeSettingsScreen(),
                     ),
                   ),
+                ),
+
+                const SizedBox(height: 16),
+
+                _ThemeCard(
+                  title: context.l10n.text('Black Hole'),
+                  description: context.l10n.text(
+                    'Event-horizon glow · deep-space lensing',
+                  ),
+                  icon: Icons.blur_circular,
+                  color: const Color(0xFFFFA45B),
+                  artwork: const BlackHoleEmblem(),
+                  isSelected:
+                      themeProvider.selectedTheme == AppTheme.blackHole,
+                  onTap: () => themeProvider.setTheme(AppTheme.blackHole),
+                  warning: context.l10n.text('Dark mode only'),
+                  warningColor: const Color(0xFFFFC27A),
                 ),
 
                 const SizedBox(height: 16),
@@ -356,6 +374,7 @@ class _ThemeCard extends StatelessWidget {
   final VoidCallback onTap;
   final String? warning;
   final Color? warningColor;
+  final Widget? artwork;
 
   /// Optional settings gear (only the default theme uses it for now).
   final VoidCallback? onSettings;
@@ -369,6 +388,7 @@ class _ThemeCard extends StatelessWidget {
     required this.onTap,
     this.warning,
     this.warningColor,
+    this.artwork,
     this.onSettings,
   });
 
@@ -405,7 +425,7 @@ class _ThemeCard extends StatelessWidget {
                   color: color.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, color: color, size: 28),
+                child: artwork ?? Icon(icon, color: color, size: 28),
               ),
 
               const SizedBox(width: 16),

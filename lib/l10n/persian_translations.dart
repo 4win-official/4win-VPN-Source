@@ -1,5 +1,9 @@
 // Central Persian UI catalog. Keep protocol payloads and user-entered data out of this file.
 const Map<String, String> appPersianTranslations = <String, String>{
+  r'''Black Hole''': r'''سیاه‌چاله''',
+  r'''Event-horizon glow · deep-space lensing''':
+      r'''درخشش افق رویداد · عدسی‌گری در اعماق فضا''',
+  r'''Dark mode only''': r'''فقط در حالت تاریک''',
   r'''Default Theme Settings''': r'''تنظیمات پوسته پیش‌فرض''',
   r'''Custom Background''': r'''پس‌زمینه سفارشی''',
   r'''Set your own wallpaper for the default theme. You can pick a different image for day and for night — the one shown here applies to the current mode.''':
