@@ -1103,4 +1103,6 @@ https://example.com/servers.txt''',
       r'''دریافت: $download • ارسال: $upload''',
   r'''Your location''': r'''موقعیت شما''',
   r'''VPN location''': r'''موقعیت VPN''',
+  r'''Direct IP''': r'''آی‌پی مستقیم''',
+  r'''VPN exit''': r'''خروجی VPN''',
 };

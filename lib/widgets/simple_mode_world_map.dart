@@ -9,8 +9,12 @@ import '../l10n/app_localizations.dart';
 import '../services/ip_geolocation_service.dart';
 import '../services/vpn_service.dart' show VpnConnectionStatus;
 
-/// Lightweight Simple-mode background map. Country geometry is local; only
-/// country highlights and the route depend on successful public-IP lookups.
+/// A quiet, country-focused map for Simple mode.
+///
+/// Only a successful lookup is allowed to choose the focused country. A direct
+/// IP is used while disconnected; a current-IP lookup is used as the VPN exit
+/// while the tunnel is active. If either lookup is unavailable, the map stays
+/// unmarked rather than inferring a location.
 class SimpleModeWorldMap extends StatefulWidget {
   const SimpleModeWorldMap({
     super.key,
@@ -33,20 +37,18 @@ class SimpleModeWorldMap extends StatefulWidget {
 
 class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
   IpGeolocationService? _geolocation;
-  List<_MapCountry> _countries = const <_MapCountry>[];
-  IpLocation? _source;
-  IpLocation? _destination;
-  int _sourceLookupGeneration = 0;
-  int _destinationLookupGeneration = 0;
+  List<_MapCountry> _countries = const [];
+  IpLocation? _directIpLocation;
+  IpLocation? _vpnExitLocation;
+  int _directLookupGeneration = 0;
+  int _exitLookupGeneration = 0;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadMap());
-    unawaited(_lookupSource());
-    if (widget.status == VpnConnectionStatus.connected) {
-      unawaited(_lookupDestination());
-    }
+    unawaited(_loadCountries());
+    unawaited(_lookupDirectIp());
+    if (_isTunnelActive(widget.status)) unawaited(_lookupVpnExit());
   }
 
   @override
@@ -54,21 +56,19 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.status == widget.status) return;
 
-    if (widget.status == VpnConnectionStatus.connected) {
-      if (_source == null) unawaited(_lookupSource());
-      unawaited(_lookupDestination());
-    } else if (widget.connecting ||
-        widget.status == VpnConnectionStatus.connecting) {
-      // Keep the direct/source request independent; invalidate only a pending
-      // destination request while the tunnel is being established.
-      _destinationLookupGeneration++;
+    if (_isTunnelActive(widget.status)) {
+      if (_directIpLocation == null) unawaited(_lookupDirectIp());
+      unawaited(_lookupVpnExit());
     } else if (_isDirectState(widget.status)) {
-      _destinationLookupGeneration++;
-      unawaited(_lookupSource());
+      _exitLookupGeneration++;
+      unawaited(_lookupDirectIp());
+    } else {
+      // A connection attempt is not evidence of a VPN exit yet.
+      _exitLookupGeneration++;
     }
   }
 
-  Future<void> _loadMap() async {
+  Future<void> _loadCountries() async {
     try {
       final source = await rootBundle.loadString(
         'assets/maps/world_countries.json',
@@ -83,73 +83,85 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
       if (!mounted) return;
       setState(() => _countries = countries);
     } on Object {
-      // Keep the screen usable if an asset is unavailable; never invent a
-      // country highlight when there is no usable map or IP metadata.
+      // The screen remains usable; an unavailable asset must not imply a place.
     }
   }
 
-  Future<void> _lookupSource() async {
-    final generation = ++_sourceLookupGeneration;
+  Future<void> _lookupDirectIp() async {
+    final generation = ++_directLookupGeneration;
     if (mounted) {
       setState(() {
-        _source = null;
-        _destination = null;
+        _directIpLocation = null;
+        _vpnExitLocation = null;
       });
     }
-    final location = await _lookupSourceIpLocation();
-    if (!mounted || generation != _sourceLookupGeneration) return;
-    setState(() => _source = location);
+
+    final location = await _readDirectIpLocation();
+    if (!mounted || generation != _directLookupGeneration) return;
+    setState(() => _directIpLocation = location);
   }
 
-  Future<void> _lookupDestination() async {
-    final generation = ++_destinationLookupGeneration;
-    if (mounted) setState(() => _destination = null);
-    final location = await _lookupDestinationIpLocation();
+  Future<void> _lookupVpnExit() async {
+    final generation = ++_exitLookupGeneration;
+    if (mounted) setState(() => _vpnExitLocation = null);
+
+    final location = await _readVpnExitLocation();
     if (!mounted ||
-        generation != _destinationLookupGeneration ||
+        generation != _exitLookupGeneration ||
         !_isTunnelActive(widget.status)) {
       return;
     }
-    setState(() => _destination = location);
+    setState(() => _vpnExitLocation = location);
+  }
+
+  Future<IpLocation?> _readDirectIpLocation() async {
+    final explicitSourceLookup = widget.lookupSourceIpLocation;
+    if (explicitSourceLookup != null) {
+      return _safeLookup(explicitSourceLookup);
+    }
+
+    // Once a tunnel is active, the ordinary current-IP endpoint returns the
+    // VPN exit. It cannot be used to reconstruct the user's direct IP country.
+    if (_isTunnelActive(widget.status)) return null;
+
+    final injectedCurrentLookup = widget.lookupCurrentIpLocation;
+    if (injectedCurrentLookup != null) {
+      return _safeLookup(injectedCurrentLookup);
+    }
+    return _safeLookup(
+      () => (_geolocation ??= IpGeolocationService()).lookupCurrent(),
+    );
+  }
+
+  Future<IpLocation?> _readVpnExitLocation() {
+    final currentLookup = widget.lookupCurrentIpLocation;
+    if (currentLookup == null) return Future<IpLocation?>.value(null);
+    return _safeLookup(currentLookup);
+  }
+
+  Future<IpLocation?> _safeLookup(IpLocationLookup lookup) async {
+    try {
+      return await lookup();
+    } on Object {
+      return null;
+    }
   }
 
   @override
   void dispose() {
-    _sourceLookupGeneration++;
-    _destinationLookupGeneration++;
+    _directLookupGeneration++;
+    _exitLookupGeneration++;
     _geolocation?.close();
     super.dispose();
-  }
-
-  Future<IpLocation?> _lookupSourceIpLocation() {
-    final sourceLookup = widget.lookupSourceIpLocation;
-    if (sourceLookup != null) return sourceLookup();
-
-    // Preserve the existing injected lookup for direct-state widget tests, but
-    // never mistake a connected destination lookup for the direct source.
-    if (!_isTunnelActive(widget.status)) {
-      final currentLookup = widget.lookupCurrentIpLocation;
-      if (currentLookup != null) return currentLookup();
-    }
-    return (_geolocation ??= IpGeolocationService()).lookupCurrent();
-  }
-
-  Future<IpLocation?> _lookupDestinationIpLocation() {
-    final lookup = widget.lookupCurrentIpLocation;
-    if (lookup != null) return lookup();
-    // A direct current-IP lookup is not a safe substitute for tunnel egress.
-    return Future<IpLocation?>.value(null);
   }
 
   @override
   Widget build(BuildContext context) {
     final tunnelActive = _isTunnelActive(widget.status);
-    final showSource = tunnelActive
-        ? _source != null &&
-              _destination != null &&
-              _source!.countryCode != _destination!.countryCode
-        : _source != null;
-    final showDestination = tunnelActive && _destination != null;
+    final location = tunnelActive ? _vpnExitLocation : _directIpLocation;
+    final locationColor = tunnelActive
+        ? _MapPalette.exit(isDark: widget.isDark).marker
+        : _MapPalette.direct(isDark: widget.isDark).marker;
 
     return Stack(
       fit: StackFit.expand,
@@ -157,36 +169,29 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
         RepaintBoundary(
           child: CustomPaint(
             key: const ValueKey('simple-world-map-canvas'),
-            painter: _WorldMapPainter(
+            painter: _CountryAtlasPainter(
               countries: _countries,
-              source: _source,
-              destination: _destination,
+              location: location,
               tunnelActive: tunnelActive,
               isDark: widget.isDark,
             ),
           ),
         ),
-        if (showSource || showDestination)
+        if (location != null)
           PositionedDirectional(
-            top: 6,
+            top: 8,
             start: 0,
             end: 0,
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 14,
-              runSpacing: 4,
-              children: [
-                if (showSource)
-                  _MapLegendItem(
-                    color: const Color(0xFFFF626A),
-                    label: context.l10n.text('Your location'),
-                  ),
-                if (showDestination)
-                  _MapLegendItem(
-                    color: const Color(0xFF44D18C),
-                    label: context.l10n.text('VPN location'),
-                  ),
-              ],
+            child: Center(
+              child: _MapLocationLabel(
+                key: ValueKey(
+                  'simple-world-map-location-${location.countryCode}',
+                ),
+                label:
+                    '${context.l10n.text(tunnelActive ? 'VPN exit' : 'Direct IP')} · ${location.countryName}',
+                color: locationColor,
+                isDark: widget.isDark,
+              ),
             ),
           ),
       ],
@@ -202,22 +207,38 @@ bool _isDirectState(VpnConnectionStatus status) =>
     status == VpnConnectionStatus.disconnected ||
     status == VpnConnectionStatus.error;
 
-class _MapLegendItem extends StatelessWidget {
-  const _MapLegendItem({required this.color, required this.label});
+class _MapLocationLabel extends StatelessWidget {
+  const _MapLocationLabel({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.isDark,
+  });
 
-  final Color color;
   final String label;
+  final Color color;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
-      color: Theme.of(context).brightness == Brightness.dark
-          ? const Color(0xFF08090A).withValues(alpha: 0.58)
-          : Colors.white.withValues(alpha: 0.64),
-      borderRadius: BorderRadius.circular(18),
+      color: isDark ? const Color(0xE51B1A21) : const Color(0xF2FFFFFF),
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.10)
+            : const Color(0xFF272933).withValues(alpha: 0.10),
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.07),
+          blurRadius: 16,
+          offset: const Offset(0, 4),
+        ),
+      ],
     ),
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -226,15 +247,16 @@ class _MapLegendItem extends StatelessWidget {
             height: 7,
             decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
-          const SizedBox(width: 5),
+          const SizedBox(width: 7),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white70
-                  : const Color(0xFF41464D),
-              fontSize: 10.5,
+              color: isDark ? const Color(0xFFF2F1F4) : const Color(0xFF272832),
+              fontSize: 11,
               fontWeight: FontWeight.w600,
+              letterSpacing: 0.05,
             ),
           ),
         ],
@@ -250,7 +272,6 @@ class _MapCountry {
   final List<List<Offset>> polygons;
 
   factory _MapCountry.fromJson(Map<String, dynamic> json) {
-    final rawCode = json['c'];
     final rawPolygons = json['p'];
     final polygons = <List<Offset>>[];
     if (rawPolygons is List) {
@@ -264,374 +285,215 @@ class _MapCountry {
           if (longitude is! num || latitude is! num) continue;
           points.add(Offset(longitude.toDouble(), latitude.toDouble()));
         }
-        if (points.length >= 4) polygons.add(points);
+        if (points.length >= 3) polygons.add(points);
       }
     }
+    final rawCode = json['c'];
     return _MapCountry(
-      code: rawCode is String ? rawCode : '',
+      code: rawCode is String ? rawCode.toUpperCase() : '',
       polygons: polygons,
     );
   }
 }
 
-class _WorldMapPainter extends CustomPainter {
-  const _WorldMapPainter({
+class _MapPalette {
+  const _MapPalette({
+    required this.country,
+    required this.border,
+    required this.highlight,
+    required this.highlightBorder,
+    required this.marker,
+  });
+
+  final Color country;
+  final Color border;
+  final Color highlight;
+  final Color highlightBorder;
+  final Color marker;
+
+  factory _MapPalette.direct({required bool isDark}) => isDark
+      ? const _MapPalette(
+          country: Color(0xFF24232B),
+          border: Color(0xFF595761),
+          highlight: Color(0xFF654653),
+          highlightBorder: Color(0xFFD27E91),
+          marker: Color(0xFFFF7D96),
+        )
+      : const _MapPalette(
+          country: Color(0xFFD9D7DB),
+          border: Color(0xFF9B969F),
+          highlight: Color(0xFFE1B9C1),
+          highlightBorder: Color(0xFFB54D63),
+          marker: Color(0xFFC9445D),
+        );
+
+  factory _MapPalette.exit({required bool isDark}) => isDark
+      ? const _MapPalette(
+          country: Color(0xFF23282C),
+          border: Color(0xFF53605F),
+          highlight: Color(0xFF35584B),
+          highlightBorder: Color(0xFF79C69D),
+          marker: Color(0xFF78E2AA),
+        )
+      : const _MapPalette(
+          country: Color(0xFFD6DED9),
+          border: Color(0xFF95A39A),
+          highlight: Color(0xFFB6D8C5),
+          highlightBorder: Color(0xFF3F946A),
+          marker: Color(0xFF238756),
+        );
+}
+
+class _CountryAtlasPainter extends CustomPainter {
+  const _CountryAtlasPainter({
     required this.countries,
-    required this.source,
-    required this.destination,
+    required this.location,
     required this.tunnelActive,
     required this.isDark,
   });
 
   final List<_MapCountry> countries;
-  final IpLocation? source;
-  final IpLocation? destination;
+  final IpLocation? location;
   final bool tunnelActive;
   final bool isDark;
-
-  static const Color _sourceColor = Color(0xFFFF626A);
-  static const Color _destinationColor = Color(0xFF44D18C);
-  static const List<Offset> _starPoints = [
-    Offset(0.08, 0.18),
-    Offset(0.15, 0.76),
-    Offset(0.21, 0.35),
-    Offset(0.29, 0.88),
-    Offset(0.37, 0.12),
-    Offset(0.43, 0.72),
-    Offset(0.52, 0.23),
-    Offset(0.59, 0.91),
-    Offset(0.66, 0.14),
-    Offset(0.73, 0.81),
-    Offset(0.81, 0.28),
-    Offset(0.89, 0.68),
-    Offset(0.94, 0.14),
-    Offset(0.12, 0.49),
-    Offset(0.85, 0.48),
-    Offset(0.48, 0.53),
-  ];
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
-    _drawAtmosphere(canvas, size);
-    final sourceCode = tunnelActive ? source?.countryCode : source?.countryCode;
-    final destinationCode = tunnelActive ? destination?.countryCode : null;
-    final showSource =
-        !tunnelActive ||
-        (sourceCode != null &&
-            destinationCode != null &&
-            sourceCode != destinationCode);
-    final activeCodes = <String>{
-      if (showSource && sourceCode != null) sourceCode,
-      if (destinationCode != null) destinationCode,
-    };
-    final projection = _MapProjection.fit(
-      size: size,
-      countries: countries,
-      activeCodes: activeCodes,
-      source: showSource ? source : null,
-      destination: destinationCode == null ? null : destination,
-    );
 
-    final projected = <_ProjectedCountry>[];
+    final bounds = Offset.zero & size;
+    final palette = tunnelActive
+        ? _MapPalette.exit(isDark: isDark)
+        : _MapPalette.direct(isDark: isDark);
+    final selectedCode = location?.countryCode.toUpperCase();
+    final selectedCountry = selectedCode == null
+        ? null
+        : _countryForCode(selectedCode);
+    final projection = location == null
+        ? _MapProjection.world(size)
+        : _MapProjection.focused(
+            size: size,
+            location: location!,
+            country: selectedCountry,
+          );
+
+    canvas.save();
+    canvas.clipRect(bounds);
+
+    final projectedCountries = <_ProjectedCountry>[];
     for (final country in countries) {
-      // Antarctica is omitted from the default globe framing to keep the
-      // inhabited world larger and more legible on a phone screen.
-      if (activeCodes.isEmpty && country.code == 'AQ') continue;
+      if (country.code == 'AQ') continue;
       final paths = <Path>[];
       for (final polygon in country.polygons) {
-        if (polygon.length < 4) continue;
+        if (polygon.length < 3) continue;
         final path = Path();
         final first = projection.project(polygon.first);
         path.moveTo(first.dx, first.dy);
         for (final point in polygon.skip(1)) {
-          final mapped = projection.project(point);
-          path.lineTo(mapped.dx, mapped.dy);
+          final projected = projection.project(point);
+          path.lineTo(projected.dx, projected.dy);
         }
         path.close();
         paths.add(path);
       }
       if (paths.isNotEmpty) {
-        projected.add(_ProjectedCountry(country.code, paths));
+        projectedCountries.add(_ProjectedCountry(country.code, paths));
       }
     }
 
-    final landShadowPaint = Paint()
+    final countryPaint = Paint()
       ..style = PaintingStyle.fill
-      ..color = const Color(0x46000000);
-    for (final country in projected) {
+      ..color = palette.country;
+    for (final country in projectedCountries) {
       for (final path in country.paths) {
-        canvas.drawPath(path.shift(const Offset(0, 1.8)), landShadowPaint);
+        canvas.drawPath(path, countryPaint);
       }
     }
 
-    final baseFill = Paint()
-      ..style = PaintingStyle.fill
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: isDark
-            ? const [Color(0xA8425057), Color(0xB04D5A61)]
-            : const [Color(0xC1AAB8C2), Color(0xE0D5DFE5)],
-      ).createShader(Offset.zero & size);
-    for (final country in projected) {
-      for (final path in country.paths) {
-        canvas.drawPath(path, baseFill);
-      }
-    }
-
-    _drawGlobeGrid(canvas, size);
-
-    for (final country in projected) {
-      final fill = _highlightFill(country.code, sourceCode, destinationCode);
-      if (fill == null) continue;
-      final highlightPaint = Paint()
+    if (selectedCode != null) {
+      final selectedPaint = Paint()
         ..style = PaintingStyle.fill
-        ..color = fill.withValues(alpha: 0.72);
-      for (final path in country.paths) {
-        canvas.drawPath(path, highlightPaint);
+        ..color = palette.highlight;
+      for (final country in projectedCountries) {
+        if (country.code != selectedCode) continue;
+        for (final path in country.paths) {
+          canvas.drawPath(path, selectedPaint);
+        }
       }
     }
 
     final borderPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.62
+      ..strokeWidth = math.max(0.65, size.shortestSide * 0.0024)
       ..strokeJoin = StrokeJoin.round
-      ..color = isDark
-          ? const Color(0xFFAAB2B7).withValues(alpha: 0.32)
-          : const Color(0xFF69737C).withValues(alpha: 0.34);
+      ..color = palette.border.withValues(alpha: isDark ? 0.78 : 0.82);
     final selectedBorderPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.05
-      ..strokeJoin = StrokeJoin.round;
-    for (final country in projected) {
-      final selectedColor = _highlightFill(
-        country.code,
-        sourceCode,
-        destinationCode,
-      );
-      final Paint paint;
-      if (selectedColor == null) {
-        paint = borderPaint;
-      } else {
-        selectedBorderPaint.color = selectedColor;
-        paint = selectedBorderPaint;
-      }
-      for (final path in country.paths) {
-        canvas.drawPath(path, paint);
-      }
-    }
-
-    final reliefEdgePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.38
+      ..strokeWidth = math.max(1.0, size.shortestSide * 0.0034)
       ..strokeJoin = StrokeJoin.round
-      ..color = const Color(0x229CB9C6);
-    for (final country in projected) {
-      if (_highlightFill(country.code, sourceCode, destinationCode) != null) {
-        continue;
-      }
+      ..color = palette.highlightBorder.withValues(alpha: 0.94);
+
+    for (final country in projectedCountries) {
       for (final path in country.paths) {
-        canvas.drawPath(path.shift(const Offset(-0.3, -0.4)), reliefEdgePaint);
+        canvas.drawPath(path, borderPaint);
+        if (country.code == selectedCode) {
+          canvas.drawPath(path, selectedBorderPaint);
+        }
       }
     }
 
-    if (tunnelActive &&
-        source != null &&
-        destination != null &&
-        source!.countryCode != destination!.countryCode) {
-      final from = projection.project(
-        Offset(source!.longitude, source!.latitude),
+    if (location != null) {
+      final point = projection.project(
+        Offset(location!.longitude, location!.latitude),
       );
-      final to = projection.project(
-        Offset(destination!.longitude, destination!.latitude),
-      );
-      final control = Offset(
-        (from.dx + to.dx) / 2,
-        math.max(6.0, math.min(from.dy, to.dy) - size.height * 0.13),
-      );
-      final route = Path()
-        ..moveTo(from.dx, from.dy)
-        ..quadraticBezierTo(control.dx, control.dy, to.dx, to.dy);
-      canvas.drawPath(
-        route,
-        Paint()
-          ..color = _destinationColor.withValues(alpha: isDark ? 0.24 : 0.18)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 6
-          ..strokeCap = StrokeCap.round,
-      );
-      canvas.drawPath(
-        route,
-        Paint()
-          ..color = Colors.white.withValues(alpha: isDark ? 0.9 : 0.86)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.2
-          ..strokeCap = StrokeCap.round,
-      );
-      canvas.drawPath(
-        route,
-        Paint()
-          ..color = _destinationColor.withValues(alpha: 0.95)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.15
-          ..strokeCap = StrokeCap.round,
-      );
+      _drawLocationPulse(canvas, point, palette.marker, size);
     }
 
-    if (tunnelActive && destination != null) {
-      _drawMarker(
-        canvas,
-        projection.project(
-          Offset(destination!.longitude, destination!.latitude),
-        ),
-        _destinationColor,
-      );
-    } else if (!tunnelActive && source != null) {
-      _drawMarker(
-        canvas,
-        projection.project(Offset(source!.longitude, source!.latitude)),
-        _sourceColor,
-      );
-    }
-    if (tunnelActive &&
-        source != null &&
-        destination != null &&
-        source!.countryCode != destination!.countryCode) {
-      _drawMarker(
-        canvas,
-        projection.project(Offset(source!.longitude, source!.latitude)),
-        _sourceColor,
-      );
-    }
+    canvas.restore();
   }
 
-  Color? _highlightFill(
-    String countryCode,
-    String? sourceCode,
-    String? destinationCode,
-  ) {
-    if (tunnelActive && destinationCode == countryCode) {
-      return _destinationColor;
-    }
-    if ((!tunnelActive ||
-            (sourceCode != null && sourceCode != destinationCode)) &&
-        sourceCode == countryCode) {
-      return _sourceColor;
+  _MapCountry? _countryForCode(String code) {
+    for (final country in countries) {
+      if (country.code == code) return country;
     }
     return null;
   }
 
-  void _drawAtmosphere(Canvas canvas, Size size) {
-    final bounds = Offset.zero & size;
-    final primaryTint = tunnelActive
-        ? _destinationColor
-        : const Color(0xFF70A9FF);
-    canvas.drawRect(
-      bounds,
+  void _drawLocationPulse(Canvas canvas, Offset point, Color color, Size size) {
+    final radius = math.min(size.shortestSide * 0.18, 54.0);
+    canvas.drawCircle(
+      point,
+      radius,
       Paint()
         ..shader = RadialGradient(
-          center: const Alignment(0, 0.05),
-          radius: 0.92,
           colors: [
-            primaryTint.withValues(alpha: isDark ? 0.12 : 0.09),
-            primaryTint.withValues(alpha: isDark ? 0.035 : 0.045),
+            color.withValues(alpha: isDark ? 0.28 : 0.20),
+            color.withValues(alpha: isDark ? 0.12 : 0.08),
             Colors.transparent,
           ],
-          stops: const [0, 0.58, 1],
-        ).createShader(bounds),
+          stops: const [0, 0.54, 1],
+        ).createShader(Rect.fromCircle(center: point, radius: radius)),
     );
-    final globeBounds = Rect.fromCenter(
-      center: size.center(Offset.zero),
-      width: size.width * 0.96,
-      height: size.height * 0.9,
+    canvas.drawCircle(
+      point,
+      15,
+      Paint()..color = color.withValues(alpha: isDark ? 0.18 : 0.15),
     );
-    canvas.drawOval(
-      globeBounds,
+    canvas.drawCircle(
+      point,
+      9.4,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.8
-        ..color = (isDark ? Colors.white : const Color(0xFF486274)).withValues(
-          alpha: isDark ? 0.09 : 0.11,
-        ),
+        ..strokeWidth = 1.2
+        ..color = Colors.white.withValues(alpha: isDark ? 0.94 : 0.98),
     );
-    final starPaint = Paint()
-      ..color = (isDark ? Colors.white : const Color(0xFF4B718C)).withValues(
-        alpha: isDark ? 0.26 : 0.16,
-      );
-    for (var i = 0; i < _starPoints.length; i++) {
-      final point = Offset(
-        _starPoints[i].dx * size.width,
-        _starPoints[i].dy * size.height,
-      );
-      canvas.drawCircle(point, i % 4 == 0 ? 1.35 : 0.85, starPaint);
-    }
-  }
-
-  void _drawGlobeGrid(Canvas canvas, Size size) {
-    final gridPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.65
-      ..color = (isDark ? Colors.white : const Color(0xFF52738A)).withValues(
-        alpha: isDark ? 0.105 : 0.12,
-      );
-    for (final fraction in const [0.2, 0.36, 0.5, 0.64, 0.8]) {
-      final x = size.width * fraction;
-      final bend = (size.width * 0.5 - x) * 0.34;
-      final meridian = Path()
-        ..moveTo(x, 0)
-        ..cubicTo(
-          x + bend,
-          size.height * 0.32,
-          x + bend,
-          size.height * 0.68,
-          x,
-          size.height,
-        );
-      canvas.drawPath(meridian, gridPaint);
-    }
-    for (final fraction in const [0.24, 0.4, 0.6, 0.76]) {
-      final y = size.height * fraction;
-      final curve = fraction < 0.5 ? -size.height * 0.025 : size.height * 0.025;
-      final parallel = Path()
-        ..moveTo(0, y)
-        ..quadraticBezierTo(size.width * 0.5, y + curve, size.width, y);
-      canvas.drawPath(parallel, gridPaint);
-    }
-  }
-
-  void _drawMarker(Canvas canvas, Offset point, Color color) {
-    canvas.drawCircle(
-      point,
-      12,
-      Paint()..color = color.withValues(alpha: 0.14),
-    );
-    canvas.drawCircle(
-      point,
-      8.5,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.8
-        ..color = color.withValues(alpha: 0.72),
-    );
-    canvas.drawCircle(
-      point,
-      6.8,
-      Paint()..color = Colors.white.withValues(alpha: 0.96),
-    );
-    canvas.drawCircle(point, 4.7, Paint()..color = color);
-    canvas.drawCircle(
-      point,
-      1.7,
-      Paint()..color = Colors.white.withValues(alpha: 0.94),
-    );
+    canvas.drawCircle(point, 5.2, Paint()..color = color);
   }
 
   @override
-  bool shouldRepaint(covariant _WorldMapPainter oldDelegate) =>
+  bool shouldRepaint(covariant _CountryAtlasPainter oldDelegate) =>
       !identical(countries, oldDelegate.countries) ||
-      !identical(source, oldDelegate.source) ||
-      !identical(destination, oldDelegate.destination) ||
+      !identical(location, oldDelegate.location) ||
       tunnelActive != oldDelegate.tunnelActive ||
       isDark != oldDelegate.isDark;
 }
@@ -646,84 +508,202 @@ class _ProjectedCountry {
 class _MapProjection {
   const _MapProjection({
     required this.scale,
-    required this.offsetX,
-    required this.offsetY,
+    required this.centerX,
+    required this.centerY,
+    required this.focusLongitude,
+    required this.centerMercatorY,
+    required this.wrapLongitudes,
   });
 
   final double scale;
-  final double offsetX;
-  final double offsetY;
+  final double centerX;
+  final double centerY;
+  final double focusLongitude;
+  final double centerMercatorY;
+  final bool wrapLongitudes;
 
-  Offset project(Offset longitudeLatitude) => Offset(
-    offsetX + longitudeLatitude.dx * scale,
-    offsetY - longitudeLatitude.dy * scale,
-  );
-
-  factory _MapProjection.fit({
-    required Size size,
-    required List<_MapCountry> countries,
-    required Set<String> activeCodes,
-    required IpLocation? source,
-    required IpLocation? destination,
-  }) {
-    var minLongitude = 180.0;
-    var maxLongitude = -180.0;
-    var minLatitude = 90.0;
-    var maxLatitude = -90.0;
-    var hasBounds = false;
-
-    void include(double longitude, double latitude) {
-      minLongitude = math.min(minLongitude, longitude);
-      maxLongitude = math.max(maxLongitude, longitude);
-      minLatitude = math.min(minLatitude, latitude);
-      maxLatitude = math.max(maxLatitude, latitude);
-      hasBounds = true;
-    }
-
-    for (final country in countries) {
-      if (!activeCodes.contains(country.code)) continue;
-      for (final polygon in country.polygons) {
-        for (final point in polygon) {
-          include(point.dx, point.dy);
-        }
-      }
-    }
-    if (source != null) {
-      include(source.longitude, source.latitude);
-    }
-    if (destination != null) {
-      include(destination.longitude, destination.latitude);
-    }
-
-    if (!hasBounds) {
-      minLongitude = -180;
-      maxLongitude = 180;
-      minLatitude = -58;
-      maxLatitude = 84;
-    } else {
-      final centerLongitude = (minLongitude + maxLongitude) / 2;
-      final centerLatitude = (minLatitude + maxLatitude) / 2;
-      final width = math.max(maxLongitude - minLongitude, 12.0);
-      final height = math.max(maxLatitude - minLatitude, 10.0);
-      minLongitude = centerLongitude - width / 2;
-      maxLongitude = centerLongitude + width / 2;
-      minLatitude = centerLatitude - height / 2;
-      maxLatitude = centerLatitude + height / 2;
-    }
-
-    const edgePadding = 26.0;
-    final availableWidth = math.max(1.0, size.width - edgePadding * 2);
-    final availableHeight = math.max(1.0, size.height - edgePadding * 2);
-    final longitudeSpan = math.max(1.0, maxLongitude - minLongitude);
-    final latitudeSpan = math.max(1.0, maxLatitude - minLatitude);
-    final scale = math.min(
-      availableWidth / longitudeSpan,
-      availableHeight / latitudeSpan,
-    );
-    final drawnWidth = longitudeSpan * scale;
-    final drawnHeight = latitudeSpan * scale;
-    final offsetX = (size.width - drawnWidth) / 2 - minLongitude * scale;
-    final offsetY = (size.height - drawnHeight) / 2 + maxLatitude * scale;
-    return _MapProjection(scale: scale, offsetX: offsetX, offsetY: offsetY);
+  static double _mercatorY(double latitude) {
+    final clamped = latitude.clamp(-80.0, 85.0).toDouble();
+    final radians = clamped * math.pi / 180;
+    return math.log(math.tan(math.pi / 4 + radians / 2));
   }
+
+  factory _MapProjection.world(Size size) {
+    const minLatitude = -58.0;
+    const maxLatitude = 84.0;
+    final minY = _mercatorY(minLatitude);
+    final maxY = _mercatorY(maxLatitude);
+    final horizontalSpan = 2 * math.pi;
+    final verticalSpan = maxY - minY;
+    final scale = math.min(
+      size.width * 0.96 / horizontalSpan,
+      size.height * 0.94 / verticalSpan,
+    );
+    return _MapProjection(
+      scale: scale,
+      centerX: size.width / 2,
+      centerY: size.height / 2,
+      focusLongitude: 0,
+      centerMercatorY: (minY + maxY) / 2,
+      wrapLongitudes: false,
+    );
+  }
+
+  factory _MapProjection.focused({
+    required Size size,
+    required IpLocation location,
+    required _MapCountry? country,
+  }) {
+    final bounds = country == null
+        ? null
+        : _countryBoundsNearLocation(country, location);
+    if (bounds == null) {
+      return _MapProjection(
+        scale: size.width / (62 * math.pi / 180),
+        centerX: size.width / 2,
+        centerY: size.height / 2,
+        focusLongitude: location.longitude,
+        centerMercatorY: _mercatorY(location.latitude),
+        wrapLongitudes: true,
+      );
+    }
+
+    final countryWidth = bounds.longitudeSpan * math.pi / 180;
+    final countryHeight = bounds.mercatorSpan;
+    final fitByWidth = countryWidth <= 0
+        ? double.infinity
+        : size.width * 0.86 / countryWidth;
+    final fitByHeight = countryHeight <= 0
+        ? double.infinity
+        : size.height * 0.82 / countryHeight;
+    final maximumDetail = size.width / (6 * math.pi / 180);
+    final scale = math.min(math.min(fitByWidth, fitByHeight), maximumDetail);
+
+    return _MapProjection(
+      scale: scale,
+      centerX: size.width / 2,
+      centerY: size.height / 2,
+      focusLongitude:
+          location.longitude + (bounds.minLongitude + bounds.maxLongitude) / 2,
+      centerMercatorY: (bounds.minMercatorY + bounds.maxMercatorY) / 2,
+      wrapLongitudes: true,
+    );
+  }
+
+  Offset project(Offset longitudeLatitude) {
+    var longitudeDelta = longitudeLatitude.dx - focusLongitude;
+    if (wrapLongitudes) {
+      longitudeDelta = (longitudeDelta + 540) % 360 - 180;
+    }
+    final latitude = longitudeLatitude.dy.clamp(-80.0, 85.0).toDouble();
+    return Offset(
+      centerX + longitudeDelta * math.pi / 180 * scale,
+      centerY - (_mercatorY(latitude) - centerMercatorY) * scale,
+    );
+  }
+}
+
+class _CountryBounds {
+  const _CountryBounds({
+    required this.minLongitude,
+    required this.maxLongitude,
+    required this.minMercatorY,
+    required this.maxMercatorY,
+  });
+
+  final double minLongitude;
+  final double maxLongitude;
+  final double minMercatorY;
+  final double maxMercatorY;
+
+  double get longitudeSpan => maxLongitude - minLongitude;
+  double get mercatorSpan => maxMercatorY - minMercatorY;
+
+  double distanceSquaredFromOrigin(double focusMercatorY) {
+    final longitudeDistance = minLongitude > 0
+        ? minLongitude
+        : maxLongitude < 0
+        ? maxLongitude
+        : 0.0;
+    final latitudeDistance = minMercatorY > focusMercatorY
+        ? minMercatorY - focusMercatorY
+        : maxMercatorY < focusMercatorY
+        ? maxMercatorY - focusMercatorY
+        : 0.0;
+    return longitudeDistance * longitudeDistance +
+        latitudeDistance * latitudeDistance;
+  }
+}
+
+_CountryBounds? _countryBoundsNearLocation(
+  _MapCountry country,
+  IpLocation location,
+) {
+  final focusY = _mercatorLatitude(location.latitude);
+  final polygonBounds = <_CountryBounds>[];
+  final containingBounds = <_CountryBounds>[];
+
+  for (final polygon in country.polygons) {
+    if (polygon.length < 3) continue;
+    var minLongitude = double.infinity;
+    var maxLongitude = double.negativeInfinity;
+    var minY = double.infinity;
+    var maxY = double.negativeInfinity;
+    var containsLocation = false;
+    var previous = polygon.last;
+    var previousX = _wrappedLongitudeDelta(previous.dx, location.longitude);
+
+    for (final point in polygon) {
+      final x = _wrappedLongitudeDelta(point.dx, location.longitude);
+      final y = _mercatorLatitude(point.dy);
+      minLongitude = math.min(minLongitude, x);
+      maxLongitude = math.max(maxLongitude, x);
+      minY = math.min(minY, y);
+      maxY = math.max(maxY, y);
+
+      final previousY = _mercatorLatitude(previous.dy);
+      if ((previousY > focusY) != (y > focusY)) {
+        final edgeX = previousX +
+            (x - previousX) * (focusY - previousY) / (y - previousY);
+        if (edgeX > 0) containsLocation = !containsLocation;
+      }
+      previous = point;
+      previousX = x;
+    }
+
+    final bounds = _CountryBounds(
+      minLongitude: minLongitude,
+      maxLongitude: maxLongitude,
+      minMercatorY: minY,
+      maxMercatorY: maxY,
+    );
+    polygonBounds.add(bounds);
+    if (containsLocation) containingBounds.add(bounds);
+  }
+
+  final candidates = containingBounds.isNotEmpty
+      ? containingBounds
+      : polygonBounds;
+  if (candidates.isEmpty) return null;
+  return candidates.reduce((best, candidate) {
+    if (containingBounds.isNotEmpty) {
+      return candidate.longitudeSpan * candidate.mercatorSpan <
+              best.longitudeSpan * best.mercatorSpan
+          ? candidate
+          : best;
+    }
+    return candidate.distanceSquaredFromOrigin(focusY) <
+            best.distanceSquaredFromOrigin(focusY)
+        ? candidate
+        : best;
+  });
+}
+
+double _wrappedLongitudeDelta(double longitude, double reference) =>
+    (longitude - reference + 540) % 360 - 180;
+
+double _mercatorLatitude(double latitude) {
+  final clamped = latitude.clamp(-80.0, 85.0).toDouble();
+  final radians = clamped * math.pi / 180;
+  return math.log(math.tan(math.pi / 4 + radians / 2));
 }

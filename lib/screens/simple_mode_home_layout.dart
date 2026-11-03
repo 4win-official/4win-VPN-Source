@@ -187,7 +187,13 @@ class SimpleModeHomeLayout extends StatelessWidget {
                               return Stack(
                                 fit: StackFit.expand,
                                 children: [
-                                  Positioned.fill(
+                                  // The atlas bleeds to screen edges; the Stack
+                                  // and its centered connect control do not move.
+                                  PositionedDirectional(
+                                    start: -24,
+                                    end: -24,
+                                    top: 0,
+                                    bottom: 0,
                                     child: SimpleModeWorldMap(
                                       status: provider.status,
                                       connecting: mapConnecting,
