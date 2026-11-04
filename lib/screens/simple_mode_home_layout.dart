@@ -52,13 +52,6 @@ class SimpleModeHomeLayout extends StatelessWidget {
         ? const Color(0xFFFFC56B)
         : const Color(0xFFB98AFF);
 
-    final headline = failed
-        ? 'Connection failed'
-        : connected
-        ? 'You are protected'
-        : connecting
-        ? 'Connecting securely'
-        : 'You are unprotected';
     final actionLabel = connected
         ? 'Disconnect'
         : connecting
@@ -151,22 +144,6 @@ class SimpleModeHomeLayout extends StatelessWidget {
                                       onTap: toggleConnection,
                                     ),
                                   ),
-                                  Positioned(
-                                    left: 24,
-                                    right: 24,
-                                    bottom: 14,
-                                    child: _MapStatusLine(
-                                      headline: headline,
-                                      secondary: connected
-                                          ? 'Your connection is private and protected.'
-                                          : connecting
-                                          ? 'Finding the best available route for you.'
-                                          : 'Connect to protect your internet traffic.',
-                                      foreground: foreground,
-                                      secondaryColor: secondary,
-                                      accent: accent,
-                                    ),
-                                  ),
                                 ],
                               ),
                             ),
@@ -254,61 +231,6 @@ class _SimpleTopBar extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _MapStatusLine extends StatelessWidget {
-  const _MapStatusLine({
-    required this.headline,
-    required this.secondary,
-    required this.foreground,
-    required this.secondaryColor,
-    required this.accent,
-  });
-
-  final String headline;
-  final String secondary;
-  final Color foreground;
-  final Color secondaryColor;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 280),
-          child: Text(
-            headline,
-            key: ValueKey(headline),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: foreground,
-              fontSize: 25,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.1,
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          secondary,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: secondaryColor, fontSize: 13),
-        ),
-        const SizedBox(height: 7),
-        Container(
-          width: 42,
-          height: 3,
-          decoration: BoxDecoration(
-            color: accent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      ],
     );
   }
 }
