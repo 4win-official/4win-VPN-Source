@@ -9,8 +9,8 @@ import '../widgets/simple_mode_world_map.dart';
 
 /// A screenshot-inspired, single-purpose home for Simple mode.
 ///
-/// The page deliberately keeps the connection flow simple: the map shows the
-/// current location, the central control starts/stops the simple connection,
+/// The page deliberately keeps the connection flow simple: an edge-to-edge
+/// map stays behind the page, the central control starts/stops the connection,
 /// and the bottom connection card explains what will be selected.
 class SimpleModeHomeLayout extends StatelessWidget {
   const SimpleModeHomeLayout({
@@ -39,9 +39,9 @@ class SimpleModeHomeLayout extends StatelessWidget {
     final background = isDark
         ? const Color(0xFF191822)
         : const Color(0xFFF2EFF7);
-    final mapBackground = isDark
-        ? const Color(0xFF22212E)
-        : const Color(0xFFE8E4EF);
+    final cardBackground = isDark
+        ? const Color(0xD02A2935)
+        : const Color(0xDDFFFFFF);
     final foreground = isDark ? const Color(0xFFF7F3FB) : const Color(0xFF292634);
     final secondary = isDark ? const Color(0xFFB5B0C0) : const Color(0xFF716B7D);
     final accent = failed
@@ -80,115 +80,125 @@ class SimpleModeHomeLayout extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: background,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _SimpleTopBar(
-              foreground: foreground,
-              secondary: secondary,
-              accent: accent,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: SimpleModeWorldMap(
+              status: provider.status,
+              connecting: mapConnecting,
               isDark: isDark,
-              onSettings: onSettings,
+              locationLabelTopInset: MediaQuery.of(context).padding.top + 73,
+              lookupSourceIpLocation: lookupSourceIpLocation,
+              lookupCurrentIpLocation: lookupCurrentIpLocation,
             ),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final height = constraints.maxHeight;
-                  final mapHeight =
-                      (height * 0.64).clamp(390.0, 640.0).toDouble();
-                  return SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          height: mapHeight,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: mapBackground,
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      accent.withValues(alpha: isDark ? 0.22 : 0.18),
-                                      mapBackground,
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Positioned.fill(
-                                child: SimpleModeWorldMap(
-                                  status: provider.status,
-                                  connecting: mapConnecting,
-                                  isDark: isDark,
-                                  lookupSourceIpLocation: lookupSourceIpLocation,
-                                  lookupCurrentIpLocation: lookupCurrentIpLocation,
-                                ),
-                              ),
-                              Align(
-                                alignment: const Alignment(0, 0.10),
-                                child: _SimpleMapControl(
-                                  accent: accent,
-                                  connected: connected,
-                                  connecting: connecting,
-                                  failed: failed,
-                                  onTap: toggleConnection,
-                                ),
-                              ),
-                              Positioned(
-                                left: 24,
-                                right: 24,
-                                bottom: 14,
-                                child: _MapStatusLine(
-                                  headline: headline,
-                                  secondary: connected
-                                      ? 'Your connection is private and protected.'
-                                      : connecting
-                                      ? 'Finding the best available route for you.'
-                                      : 'Connect to protect your internet traffic.',
-                                  foreground: foreground,
-                                  secondaryColor: secondary,
-                                  accent: accent,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          color: background,
-                          padding: const EdgeInsets.fromLTRB(24, 20, 24, 14),
-                          child: _SimpleConnectionCard(
-                            isDark: isDark,
-                            foreground: foreground,
-                            secondary: secondary,
-                            accent: accent,
-                            connected: connected,
-                            connecting: connecting,
-                            failed: failed,
-                            protocol: protocol,
-                            actionLabel: actionLabel,
-                            ping: provider.currentPing,
-                            pingFailed: provider.pingFailed,
-                            pinging: provider.xrayPinging,
-                            onConnect: toggleConnection,
-                            onPing: provider.isConnected &&
-                                    const {'xray', 'mix', 'warp'}
-                                        .contains(provider.selectedProtocol)
-                                ? () => unawaited(provider.manualXrayPing())
-                                : null,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    background.withValues(alpha: isDark ? 0.77 : 0.73),
+                    background.withValues(alpha: isDark ? 0.52 : 0.46),
+                    background.withValues(alpha: isDark ? 0.82 : 0.76),
+                  ],
+                  stops: const [0, 0.47, 1],
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+          SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                _SimpleTopBar(
+                  foreground: foreground,
+                  secondary: secondary,
+                  accent: accent,
+                  isDark: isDark,
+                  onSettings: onSettings,
+                ),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final height = constraints.maxHeight;
+                      final mapHeight =
+                          (height * 0.64).clamp(390.0, 640.0).toDouble();
+                      return SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: Column(
+                          children: [
+                            SizedBox(
+                              height: mapHeight,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Align(
+                                    alignment: const Alignment(0, 0.10),
+                                    child: _SimpleMapControl(
+                                      accent: accent,
+                                      connected: connected,
+                                      connecting: connecting,
+                                      failed: failed,
+                                      onTap: toggleConnection,
+                                    ),
+                                  ),
+                                  Positioned(
+                                    left: 24,
+                                    right: 24,
+                                    bottom: 14,
+                                    child: _MapStatusLine(
+                                      headline: headline,
+                                      secondary: connected
+                                          ? 'Your connection is private and protected.'
+                                          : connecting
+                                          ? 'Finding the best available route for you.'
+                                          : 'Connect to protect your internet traffic.',
+                                      foreground: foreground,
+                                      secondaryColor: secondary,
+                                      accent: accent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              color: Colors.transparent,
+                              padding: const EdgeInsets.fromLTRB(24, 20, 24, 14),
+                              child: _SimpleConnectionCard(
+                                isDark: isDark,
+                                cardBackground: cardBackground,
+                                foreground: foreground,
+                                secondary: secondary,
+                                accent: accent,
+                                connected: connected,
+                                connecting: connecting,
+                                failed: failed,
+                                protocol: protocol,
+                                actionLabel: actionLabel,
+                                ping: provider.currentPing,
+                                pingFailed: provider.pingFailed,
+                                pinging: provider.xrayPinging,
+                                onConnect: toggleConnection,
+                                onPing: provider.isConnected &&
+                                        const {'xray', 'mix', 'warp'}
+                                            .contains(provider.selectedProtocol)
+                                    ? () => unawaited(provider.manualXrayPing())
+                                    : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -375,6 +385,7 @@ class _SimpleMapControl extends StatelessWidget {
 class _SimpleConnectionCard extends StatelessWidget {
   const _SimpleConnectionCard({
     required this.isDark,
+    required this.cardBackground,
     required this.foreground,
     required this.secondary,
     required this.accent,
@@ -391,6 +402,7 @@ class _SimpleConnectionCard extends StatelessWidget {
   });
 
   final bool isDark;
+  final Color cardBackground;
   final Color foreground;
   final Color secondary;
   final Color accent;
@@ -417,7 +429,7 @@ class _SimpleConnectionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(17, 17, 17, 16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2A2935) : Colors.white,
+        color: cardBackground,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: isDark ? Colors.white.withValues(alpha: 0.13) : Colors.black.withValues(alpha: 0.09),

@@ -23,6 +23,7 @@ class SimpleModeWorldMap extends StatefulWidget {
     required this.isDark,
     this.lookupSourceIpLocation,
     this.lookupCurrentIpLocation,
+    this.locationLabelTopInset = 8,
   });
 
   final VpnConnectionStatus status;
@@ -30,6 +31,7 @@ class SimpleModeWorldMap extends StatefulWidget {
   final bool isDark;
   final IpLocationLookup? lookupSourceIpLocation;
   final IpLocationLookup? lookupCurrentIpLocation;
+  final double locationLabelTopInset;
 
   @override
   State<SimpleModeWorldMap> createState() => _SimpleModeWorldMapState();
@@ -179,7 +181,7 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
         ),
         if (location != null)
           PositionedDirectional(
-            top: 8,
+            top: widget.locationLabelTopInset,
             start: 0,
             end: 0,
             child: Center(
