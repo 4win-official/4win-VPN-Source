@@ -37,20 +37,65 @@ class SimpleModeWorldMap extends StatefulWidget {
   State<SimpleModeWorldMap> createState() => _SimpleModeWorldMapState();
 }
 
-class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
+class _SimpleModeWorldMapState extends State<SimpleModeWorldMap>
+    with SingleTickerProviderStateMixin {
   IpGeolocationService? _geolocation;
   List<_MapCountry> _countries = const [];
   IpLocation? _directIpLocation;
   IpLocation? _vpnExitLocation;
+  IpLocation? _pendingVpnExitLocation;
+  IpLocation? _transitionFrom;
+  IpLocation? _transitionTo;
   int _directLookupGeneration = 0;
   int _exitLookupGeneration = 0;
+  bool _directLookupInFlight = false;
+  late final AnimationController _cameraTransition;
 
   @override
   void initState() {
     super.initState();
+    _cameraTransition =
+        AnimationController(
+            vsync: this,
+            duration: const Duration(milliseconds: 1400),
+          )
+          ..addListener(_handleCameraFrame)
+          ..addStatusListener(_handleCameraStatus);
     unawaited(_loadCountries());
     unawaited(_lookupDirectIp());
     if (_isTunnelActive(widget.status)) unawaited(_lookupVpnExit());
+  }
+
+  void _handleCameraFrame() {
+    if (mounted && _transitionFrom != null) setState(() {});
+  }
+
+  void _handleCameraStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed ||
+        !mounted ||
+        _transitionTo == null) {
+      return;
+    }
+    setState(() {
+      _transitionFrom = null;
+      _transitionTo = null;
+    });
+  }
+
+  void _startCameraTransition(IpLocation? from, IpLocation to) {
+    _cameraTransition.stop();
+    if (from == null) {
+      setState(() {
+        _transitionFrom = null;
+        _transitionTo = null;
+      });
+      return;
+    }
+    setState(() {
+      _transitionFrom = from;
+      _transitionTo = to;
+    });
+    _cameraTransition.forward(from: 0);
   }
 
   @override
@@ -59,14 +104,28 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
     if (oldWidget.status == widget.status) return;
 
     if (_isTunnelActive(widget.status)) {
-      if (_directIpLocation == null) unawaited(_lookupDirectIp());
-      unawaited(_lookupVpnExit());
+      if (!_isTunnelActive(oldWidget.status)) {
+        _vpnExitLocation = null;
+        _pendingVpnExitLocation = null;
+        if (_directIpLocation == null && !_directLookupInFlight) {
+          unawaited(_lookupDirectIp());
+        }
+        unawaited(_lookupVpnExit());
+      }
     } else if (_isDirectState(widget.status)) {
       _exitLookupGeneration++;
+      final previousExit = _vpnExitLocation;
+      _vpnExitLocation = null;
+      _pendingVpnExitLocation = null;
+      if (previousExit != null && _directIpLocation != null) {
+        _startCameraTransition(previousExit, _directIpLocation!);
+      }
       unawaited(_lookupDirectIp());
     } else {
       // A connection attempt is not evidence of a VPN exit yet.
       _exitLookupGeneration++;
+      _vpnExitLocation = null;
+      _pendingVpnExitLocation = null;
     }
   }
 
@@ -90,31 +149,71 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
   }
 
   Future<void> _lookupDirectIp() async {
+    if (_directLookupInFlight) return;
     final generation = ++_directLookupGeneration;
-    if (mounted) {
-      setState(() {
-        _directIpLocation = null;
-        _vpnExitLocation = null;
-      });
-    }
+    _directLookupInFlight = true;
 
     final location = await _readDirectIpLocation();
-    if (!mounted || generation != _directLookupGeneration) return;
-    setState(() => _directIpLocation = location);
+    if (!mounted || generation != _directLookupGeneration) {
+      if (generation == _directLookupGeneration) {
+        _directLookupInFlight = false;
+      }
+      return;
+    }
+    _directLookupInFlight = false;
+    if (location == null) {
+      final pendingExit = _pendingVpnExitLocation;
+      if (pendingExit != null && _isTunnelActive(widget.status)) {
+        _pendingVpnExitLocation = null;
+        setState(() => _vpnExitLocation = pendingExit);
+        _startCameraTransition(_directIpLocation, pendingExit);
+      }
+      return;
+    }
+
+    final previousLocation = _directIpLocation;
+    final pendingExit = _pendingVpnExitLocation;
+    _pendingVpnExitLocation = null;
+    setState(() {
+      _directIpLocation = location;
+      if (pendingExit != null && _isTunnelActive(widget.status)) {
+        _vpnExitLocation = pendingExit;
+      }
+    });
+    if (pendingExit != null && _isTunnelActive(widget.status)) {
+      _startCameraTransition(location, pendingExit);
+      return;
+    }
+    if (!_isTunnelActive(widget.status) &&
+        previousLocation != null &&
+        !_sameIpLocation(previousLocation, location)) {
+      _startCameraTransition(previousLocation, location);
+    } else if (_isTunnelActive(widget.status) && _vpnExitLocation != null) {
+      _startCameraTransition(location, _vpnExitLocation!);
+    }
   }
 
   Future<void> _lookupVpnExit() async {
     final generation = ++_exitLookupGeneration;
-    if (mounted) setState(() => _vpnExitLocation = null);
-
     final location = await _readVpnExitLocation();
     if (!mounted ||
         generation != _exitLookupGeneration ||
         !_isTunnelActive(widget.status)) {
       return;
     }
+    if (location == null) return;
+    if (_directLookupInFlight) {
+      _pendingVpnExitLocation = location;
+      return;
+    }
+    final sourceLocation = _directIpLocation ?? _currentMapLocation;
     setState(() => _vpnExitLocation = location);
+    _startCameraTransition(sourceLocation, location);
   }
+
+  IpLocation? get _currentMapLocation => _isTunnelActive(widget.status)
+      ? _vpnExitLocation ?? _directIpLocation
+      : _directIpLocation;
 
   Future<IpLocation?> _readDirectIpLocation() async {
     final explicitSourceLookup = widget.lookupSourceIpLocation;
@@ -153,6 +252,7 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
   void dispose() {
     _directLookupGeneration++;
     _exitLookupGeneration++;
+    _cameraTransition.dispose();
     _geolocation?.close();
     super.dispose();
   }
@@ -160,8 +260,11 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
   @override
   Widget build(BuildContext context) {
     final tunnelActive = _isTunnelActive(widget.status);
-    final location = tunnelActive ? _vpnExitLocation : _directIpLocation;
-    final locationColor = tunnelActive
+    final location = tunnelActive
+        ? _vpnExitLocation ?? _directIpLocation
+        : _directIpLocation;
+    final destinationConfirmed = tunnelActive && _vpnExitLocation != null;
+    final locationColor = destinationConfirmed
         ? _MapPalette.exit(isDark: widget.isDark).marker
         : _MapPalette.direct(isDark: widget.isDark).marker;
 
@@ -174,7 +277,12 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
             painter: _CountryAtlasPainter(
               countries: _countries,
               location: location,
+              transitionFrom: _transitionFrom,
+              transitionTo: _transitionTo,
+              transitionProgress: _cameraTransition.value,
               tunnelActive: tunnelActive,
+              destinationConfirmed: destinationConfirmed,
+              hideWorldWithoutLocation: widget.connecting || tunnelActive,
               isDark: widget.isDark,
             ),
           ),
@@ -190,7 +298,7 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap> {
                   'simple-world-map-location-${location.countryCode}',
                 ),
                 label:
-                    '${context.l10n.text(tunnelActive ? 'VPN exit' : 'Direct IP')} · ${location.countryName}',
+                    '${context.l10n.text(destinationConfirmed ? 'VPN exit' : 'Direct IP')} · ${location.countryName}',
                 color: locationColor,
                 isDark: widget.isDark,
               ),
@@ -208,6 +316,35 @@ bool _isTunnelActive(VpnConnectionStatus status) =>
 bool _isDirectState(VpnConnectionStatus status) =>
     status == VpnConnectionStatus.disconnected ||
     status == VpnConnectionStatus.error;
+
+bool _sameIpLocation(IpLocation first, IpLocation second) =>
+    first.countryCode.toUpperCase() == second.countryCode.toUpperCase() &&
+    first.latitude == second.latitude &&
+    first.longitude == second.longitude;
+
+IpLocation _interpolateIpLocation(
+  IpLocation from,
+  IpLocation to,
+  double progress,
+) {
+  final t = Curves.easeInOutCubic.transform(
+    progress.clamp(0.0, 1.0).toDouble(),
+  );
+  final longitude =
+      from.longitude + _wrappedLongitudeDelta(to.longitude, from.longitude) * t;
+  final fromY = _mercatorLatitude(from.latitude);
+  final toY = _mercatorLatitude(to.latitude);
+  final mercatorY = fromY + (toY - fromY) * t;
+  final latitude =
+      (2 * math.atan(math.exp(mercatorY)) - math.pi / 2) * 180 / math.pi;
+  final identity = t < 0.5 ? from : to;
+  return IpLocation(
+    countryCode: identity.countryCode,
+    countryName: identity.countryName,
+    latitude: latitude,
+    longitude: longitude,
+  );
+}
 
 class _MapLocationLabel extends StatelessWidget {
   const _MapLocationLabel({
@@ -350,28 +487,63 @@ class _CountryAtlasPainter extends CustomPainter {
   const _CountryAtlasPainter({
     required this.countries,
     required this.location,
+    required this.transitionFrom,
+    required this.transitionTo,
+    required this.transitionProgress,
     required this.tunnelActive,
+    required this.destinationConfirmed,
+    required this.hideWorldWithoutLocation,
     required this.isDark,
   });
 
   final List<_MapCountry> countries;
   final IpLocation? location;
+  final IpLocation? transitionFrom;
+  final IpLocation? transitionTo;
+  final double transitionProgress;
   final bool tunnelActive;
+  final bool destinationConfirmed;
+  final bool hideWorldWithoutLocation;
   final bool isDark;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
+    if (location == null && hideWorldWithoutLocation) return;
 
     final bounds = Offset.zero & size;
-    final palette = tunnelActive
+    final palette = destinationConfirmed
         ? _MapPalette.exit(isDark: isDark)
         : _MapPalette.direct(isDark: isDark);
+    final sourcePalette = _MapPalette.direct(isDark: isDark);
+    final exitPalette = _MapPalette.exit(isDark: isDark);
     final selectedCode = location?.countryCode.toUpperCase();
     final selectedCountry = selectedCode == null
         ? null
         : _countryForCode(selectedCode);
-    final projection = location == null
+    final hasTransition = transitionFrom != null && transitionTo != null;
+    final progress = transitionProgress.clamp(0.0, 1.0).toDouble();
+    final projection = hasTransition
+        ? _MapProjection.transition(
+            size: size,
+            from: _MapProjection.focused(
+              size: size,
+              location: transitionFrom!,
+              country: _countryForCode(
+                transitionFrom!.countryCode.toUpperCase(),
+              ),
+            ),
+            to: _MapProjection.focused(
+              size: size,
+              location: transitionTo!,
+              country: _countryForCode(transitionTo!.countryCode.toUpperCase()),
+            ),
+            progress: progress,
+            sameCountry:
+                transitionFrom!.countryCode.toUpperCase() ==
+                transitionTo!.countryCode.toUpperCase(),
+          )
+        : location == null
         ? _MapProjection.world(size)
         : _MapProjection.focused(
             size: size,
@@ -412,15 +584,41 @@ class _CountryAtlasPainter extends CustomPainter {
       }
     }
 
-    if (selectedCode != null) {
+    final fromCode = transitionFrom?.countryCode.toUpperCase();
+    final toCode = transitionTo?.countryCode.toUpperCase() ?? selectedCode;
+    for (final country in projectedCountries) {
+      Color? highlight;
+      if (hasTransition && fromCode == toCode && country.code == toCode) {
+        highlight = Color.lerp(
+          sourcePalette.highlight,
+          exitPalette.highlight,
+          progress,
+        );
+      } else if (hasTransition &&
+          fromCode != toCode &&
+          country.code == fromCode) {
+        highlight = Color.lerp(
+          sourcePalette.highlight,
+          palette.country,
+          progress,
+        );
+      } else if (hasTransition &&
+          fromCode != toCode &&
+          country.code == toCode) {
+        highlight = Color.lerp(
+          palette.country,
+          exitPalette.highlight,
+          progress,
+        );
+      } else if (!hasTransition && country.code == selectedCode) {
+        highlight = palette.highlight;
+      }
+      if (highlight == null) continue;
       final selectedPaint = Paint()
         ..style = PaintingStyle.fill
-        ..color = palette.highlight;
-      for (final country in projectedCountries) {
-        if (country.code != selectedCode) continue;
-        for (final path in country.paths) {
-          canvas.drawPath(path, selectedPaint);
-        }
+        ..color = highlight;
+      for (final path in country.paths) {
+        canvas.drawPath(path, selectedPaint);
       }
     }
 
@@ -433,22 +631,35 @@ class _CountryAtlasPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = math.max(1.0, size.shortestSide * 0.0034)
       ..strokeJoin = StrokeJoin.round
-      ..color = palette.highlightBorder.withValues(alpha: 0.94);
+      ..color = hasTransition && fromCode == toCode
+          ? Color.lerp(
+              sourcePalette.highlightBorder,
+              exitPalette.highlightBorder,
+              progress,
+            )!.withValues(alpha: 0.94)
+          : palette.highlightBorder.withValues(alpha: 0.94);
 
     for (final country in projectedCountries) {
       for (final path in country.paths) {
         canvas.drawPath(path, borderPaint);
-        if (country.code == selectedCode) {
+        if (country.code == selectedCode ||
+            (hasTransition && fromCode == toCode && country.code == fromCode)) {
           canvas.drawPath(path, selectedBorderPaint);
         }
       }
     }
 
     if (location != null) {
+      final markerLocation = hasTransition
+          ? _interpolateIpLocation(transitionFrom!, transitionTo!, progress)
+          : location!;
+      final markerColor = hasTransition
+          ? Color.lerp(sourcePalette.marker, exitPalette.marker, progress)!
+          : palette.marker;
       final point = projection.project(
-        Offset(location!.longitude, location!.latitude),
+        Offset(markerLocation.longitude, markerLocation.latitude),
       );
-      _drawLocationPulse(canvas, point, palette.marker, size);
+      _drawLocationPulse(canvas, point, markerColor, size);
     }
 
     canvas.restore();
@@ -496,7 +707,12 @@ class _CountryAtlasPainter extends CustomPainter {
   bool shouldRepaint(covariant _CountryAtlasPainter oldDelegate) =>
       !identical(countries, oldDelegate.countries) ||
       !identical(location, oldDelegate.location) ||
+      !identical(transitionFrom, oldDelegate.transitionFrom) ||
+      !identical(transitionTo, oldDelegate.transitionTo) ||
+      transitionProgress != oldDelegate.transitionProgress ||
       tunnelActive != oldDelegate.tunnelActive ||
+      destinationConfirmed != oldDelegate.destinationConfirmed ||
+      hideWorldWithoutLocation != oldDelegate.hideWorldWithoutLocation ||
       isDark != oldDelegate.isDark;
 }
 
@@ -592,6 +808,45 @@ class _MapProjection {
     );
   }
 
+  factory _MapProjection.transition({
+    required Size size,
+    required _MapProjection from,
+    required _MapProjection to,
+    required double progress,
+    required bool sameCountry,
+  }) {
+    final t = Curves.easeInOutCubic.transform(
+      progress.clamp(0.0, 1.0).toDouble(),
+    );
+    final leastDetailedFocus = math.min(from.scale, to.scale);
+    final worldScale = _MapProjection.world(size).scale;
+    final targetZoomOutScale = math.max(
+      worldScale * 1.18,
+      leastDetailedFocus * (sameCountry ? 0.62 : 0.24),
+    );
+    final zoomOutScale = math.min(leastDetailedFocus, targetZoomOutScale);
+    final interpolatedScale = from.scale + (to.scale - from.scale) * t;
+    final zoomOutAmount = math.sin(math.pi * t);
+    final destinationLongitude =
+        from.focusLongitude +
+        _wrappedLongitudeDelta(to.focusLongitude, from.focusLongitude);
+
+    return _MapProjection(
+      scale:
+          interpolatedScale -
+          (interpolatedScale - zoomOutScale) * zoomOutAmount,
+      centerX: from.centerX + (to.centerX - from.centerX) * t,
+      centerY: from.centerY + (to.centerY - from.centerY) * t,
+      focusLongitude:
+          from.focusLongitude +
+          (destinationLongitude - from.focusLongitude) * t,
+      centerMercatorY:
+          from.centerMercatorY +
+          (to.centerMercatorY - from.centerMercatorY) * t,
+      wrapLongitudes: true,
+    );
+  }
+
   Offset project(Offset longitudeLatitude) {
     var longitudeDelta = longitudeLatitude.dx - focusLongitude;
     if (wrapLongitudes) {
@@ -665,7 +920,8 @@ _CountryBounds? _countryBoundsNearLocation(
 
       final previousY = _mercatorLatitude(previous.dy);
       if ((previousY > focusY) != (y > focusY)) {
-        final edgeX = previousX +
+        final edgeX =
+            previousX +
             (x - previousX) * (focusY - previousY) / (y - previousY);
         if (edgeX > 0) containsLocation = !containsLocation;
       }

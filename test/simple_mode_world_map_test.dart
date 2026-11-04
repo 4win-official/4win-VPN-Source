@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -52,16 +53,19 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  test('the bundled boundaries contain the two representative countries', () async {
-    final decoded =
-        jsonDecode(
-              await rootBundle.loadString('assets/maps/world_countries.json'),
-            )
-            as List<dynamic>;
-    final countries = decoded.whereType<Map<String, dynamic>>();
-    expect(countries.any((country) => country['c'] == 'IR'), isTrue);
-    expect(countries.any((country) => country['c'] == 'DE'), isTrue);
-  });
+  test(
+    'the bundled boundaries contain the two representative countries',
+    () async {
+      final decoded =
+          jsonDecode(
+                await rootBundle.loadString('assets/maps/world_countries.json'),
+              )
+              as List<dynamic>;
+      final countries = decoded.whereType<Map<String, dynamic>>();
+      expect(countries.any((country) => country['c'] == 'IR'), isTrue);
+      expect(countries.any((country) => country['c'] == 'DE'), isTrue);
+    },
+  );
 
   testWidgets('disconnected state focuses the returned direct-IP country', (
     tester,
@@ -123,6 +127,105 @@ void main() {
     );
   });
 
+  testWidgets('keeps the verified source focused until the exit is measured', (
+    tester,
+  ) async {
+    final pendingExit = Completer<IpLocation?>();
+    await pumpMap(
+      tester,
+      status: VpnConnectionStatus.disconnected,
+      lookupSourceIpLocation: () async => directLocation,
+      lookupCurrentIpLocation: () async => exitLocation,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: const [AppLocalizationsDelegate()],
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 320,
+            child: SimpleModeWorldMap(
+              status: VpnConnectionStatus.connected,
+              connecting: false,
+              isDark: true,
+              lookupSourceIpLocation: () async => directLocation,
+              lookupCurrentIpLocation: () => pendingExit.future,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Direct IP · Iran'), findsOneWidget);
+    expect(find.textContaining('VPN exit'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('simple-world-map-location-IR')),
+      findsOneWidget,
+    );
+
+    pendingExit.complete(exitLocation);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('VPN exit · Germany'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('simple-world-map-location-DE')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('same-country source-to-exit transition completes cleanly', (
+    tester,
+  ) async {
+    const sameCountryExit = IpLocation(
+      countryCode: 'IR',
+      countryName: 'Iran',
+      latitude: 35.7,
+      longitude: 51.4,
+    );
+    final pendingExit = Completer<IpLocation?>();
+    await pumpMap(
+      tester,
+      status: VpnConnectionStatus.disconnected,
+      lookupSourceIpLocation: () async => directLocation,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: const [AppLocalizationsDelegate()],
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 320,
+            child: SimpleModeWorldMap(
+              status: VpnConnectionStatus.connected,
+              connecting: false,
+              isDark: true,
+              lookupSourceIpLocation: () async => directLocation,
+              lookupCurrentIpLocation: () => pendingExit.future,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    pendingExit.complete(sameCountryExit);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
+
+    expect(find.text('VPN exit · Iran'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('simple-world-map-location-IR')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('connected state never relabels a VPN exit as the direct IP', (
     tester,
   ) async {
@@ -145,14 +248,19 @@ void main() {
     );
   });
 
-  testWidgets('a failed location lookup leaves the map unmarked', (tester) async {
+  testWidgets('a failed location lookup leaves the map unmarked', (
+    tester,
+  ) async {
     await pumpMap(
       tester,
       status: VpnConnectionStatus.disconnected,
       lookupSourceIpLocation: () async => null,
     );
 
-    expect(find.byKey(const ValueKey('simple-world-map-canvas')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('simple-world-map-canvas')),
+      findsOneWidget,
+    );
     expect(find.textContaining('Direct IP'), findsNothing);
     expect(find.textContaining('VPN exit'), findsNothing);
     expect(
