@@ -329,6 +329,110 @@ void main() {
     );
   });
 
+  testWidgets('country name appears on the focused map after zoom settles', (
+    tester,
+  ) async {
+    final pendingExit = Completer<IpLocation?>();
+    await pumpMap(
+      tester,
+      status: VpnConnectionStatus.disconnected,
+      lookupSourceIpLocation: () async => directLocation,
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('simple-world-map-country-name-IR')),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: const [AppLocalizationsDelegate()],
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 320,
+            child: SimpleModeWorldMap(
+              status: VpnConnectionStatus.connected,
+              connecting: false,
+              isDark: true,
+              lookupSourceIpLocation: () async => directLocation,
+              lookupCurrentIpLocation: () => pendingExit.future,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('simple-world-map-country-name-IR')),
+      findsOneWidget,
+    );
+
+    pendingExit.complete(exitLocation);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(
+      find.byKey(const ValueKey('simple-world-map-country-name-IR')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('simple-world-map-country-name-DE')),
+      findsNothing,
+    );
+
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('simple-world-map-country-name-DE')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('full-screen country name stays clear of the center control', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 1920);
+    tester.view.devicePixelRatio = 2.5;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: const [AppLocalizationsDelegate()],
+        home: Scaffold(
+          body: SimpleModeWorldMap(
+            status: VpnConnectionStatus.disconnected,
+            connecting: false,
+            isDark: true,
+            lookupSourceIpLocation: () async => directLocation,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final label = find.byKey(
+      const ValueKey('simple-world-map-country-name-IR'),
+    );
+    expect(label, findsOneWidget);
+    final controlBounds = Rect.fromCenter(
+      center: const Offset(216, 768 * 0.42),
+      width: 168,
+      height: 168,
+    );
+    expect(tester.getRect(label).overlaps(controlBounds), isFalse);
+  });
+
   testWidgets('a failed location lookup leaves the map unmarked', (
     tester,
   ) async {

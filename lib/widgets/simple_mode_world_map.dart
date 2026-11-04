@@ -223,6 +223,13 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap>
       ? _vpnExitLocation ?? _directIpLocation
       : _directIpLocation;
 
+  _MapCountry? _mapCountryForCode(String code) {
+    for (final country in _countries) {
+      if (country.code == code) return country;
+    }
+    return null;
+  }
+
   Future<IpLocation?> _readDirectIpLocation() async {
     final explicitSourceLookup = widget.lookupSourceIpLocation;
     if (explicitSourceLookup != null) {
@@ -296,6 +303,39 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap>
             ),
           ),
         ),
+        if (location != null &&
+            _countries.isNotEmpty &&
+            _transitionFrom == null &&
+            _transitionTo == null)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final labelLocation =
+                  _cameraFrameLocation?.countryCode.toUpperCase() ==
+                      location.countryCode.toUpperCase()
+                  ? _cameraFrameLocation!
+                  : location;
+              final projection = _MapProjection.focused(
+                size: constraints.biggest,
+                location: labelLocation,
+                country: _mapCountryForCode(
+                  labelLocation.countryCode.toUpperCase(),
+                ),
+              );
+              final markerPoint = projection.project(
+                Offset(labelLocation.longitude, labelLocation.latitude),
+              );
+              return CustomSingleChildLayout(
+                delegate: _CountryNamePositionDelegate(markerPoint),
+                child: _MapCountryNameLabel(
+                  key: ValueKey(
+                    'simple-world-map-country-name-${location.countryCode}',
+                  ),
+                  label: location.countryName,
+                  isDark: widget.isDark,
+                ),
+              );
+            },
+          ),
         if (location != null)
           PositionedDirectional(
             top: widget.locationLabelTopInset,
@@ -411,6 +451,101 @@ IpLocation _interpolateIpLocation(
     latitude: latitude,
     longitude: longitude,
   );
+}
+
+class _MapCountryNameLabel extends StatelessWidget {
+  const _MapCountryNameLabel({
+    super.key,
+    required this.label,
+    required this.isDark,
+  });
+
+  final String label;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: isDark ? const Color(0xD91B1A21) : const Color(0xEFFFFFFF),
+      borderRadius: BorderRadius.circular(7),
+      border: Border.all(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.09)
+            : const Color(0xFF272933).withValues(alpha: 0.09),
+      ),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: isDark ? const Color(0xFFF2F1F4) : const Color(0xFF272832),
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.05,
+        ),
+      ),
+    ),
+  );
+}
+
+class _CountryNamePositionDelegate extends SingleChildLayoutDelegate {
+  const _CountryNamePositionDelegate(this.markerPoint);
+
+  final Offset markerPoint;
+
+  @override
+  Size getSize(BoxConstraints constraints) => constraints.biggest;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints(
+        maxWidth: math.min(200.0, constraints.maxWidth).toDouble(),
+        maxHeight: constraints.maxHeight,
+      );
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final maximumLeft = math.max(0.0, size.width - childSize.width);
+    final left = (markerPoint.dx - childSize.width / 2)
+        .clamp(0.0, maximumLeft)
+        .toDouble();
+    final belowMarker = markerPoint.dy + 18;
+    final preferredTop = belowMarker + childSize.height <= size.height
+        ? belowMarker
+        : markerPoint.dy - childSize.height - 18;
+    final maximumTop = math.max(0.0, size.height - childSize.height);
+    final top = preferredTop.clamp(0.0, maximumTop).toDouble();
+    if (size.height < 600) return Offset(left, top);
+
+    // The map fills the phone viewport; Simple mode overlays its central
+    // connect control around this height. Keep the country name outside its
+    // visible halo instead of hiding the new label underneath the control.
+    final controlRect = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height * 0.42),
+      width: 168,
+      height: 168,
+    );
+    final labelRect = Rect.fromLTWH(
+      left,
+      top,
+      childSize.width,
+      childSize.height,
+    );
+    if (!labelRect.overlaps(controlRect)) return Offset(left, top);
+
+    final aboveControl = controlRect.top - childSize.height - 8;
+    if (aboveControl >= 0) return Offset(left, aboveControl);
+
+    final belowControl = controlRect.bottom + 8;
+    return Offset(left, belowControl.clamp(0.0, maximumTop).toDouble());
+  }
+
+  @override
+  bool shouldRelayout(covariant _CountryNamePositionDelegate oldDelegate) =>
+      markerPoint != oldDelegate.markerPoint;
 }
 
 class _MapLocationLabel extends StatelessWidget {
