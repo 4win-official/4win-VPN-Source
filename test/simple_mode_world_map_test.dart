@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -66,6 +67,51 @@ void main() {
       expect(countries.any((country) => country['c'] == 'DE'), isTrue);
     },
   );
+
+  test('frames Ireland less tightly without changing Iran zoom', () async {
+    final decoded =
+        jsonDecode(
+              await rootBundle.loadString('assets/maps/world_countries.json'),
+            )
+            as List<dynamic>;
+    final countries = decoded.cast<Map<String, dynamic>>();
+    final ireland = countries.firstWhere((country) => country['c'] == 'IE');
+    final iran = countries.firstWhere((country) => country['c'] == 'IR');
+    const size = Size(400, 320);
+    const irelandLocation = IpLocation(
+      countryCode: 'IE',
+      countryName: 'Ireland',
+      latitude: 53.4,
+      longitude: -8.0,
+    );
+
+    final irelandFrame = simpleModeMapFocusedCameraFrameForTesting(
+      size: size,
+      location: irelandLocation,
+      countryData: ireland,
+    );
+    final iranFrame = simpleModeMapFocusedCameraFrameForTesting(
+      size: size,
+      location: directLocation,
+      countryData: iran,
+    );
+
+    expect(
+      irelandFrame.scale,
+      closeTo(size.width / (12 * math.pi / 180), 0.001),
+      reason: 'Ireland should keep surrounding geography in view.',
+    );
+    expect(
+      irelandFrame.scale,
+      lessThan(2588.89),
+      reason: 'The previous fit zoomed in too tightly on Ireland.',
+    );
+    expect(
+      iranFrame.scale,
+      closeTo(863.442, 0.01),
+      reason: 'Iran should retain its existing framing.',
+    );
+  });
 
   testWidgets('disconnected state focuses the returned direct-IP country', (
     tester,

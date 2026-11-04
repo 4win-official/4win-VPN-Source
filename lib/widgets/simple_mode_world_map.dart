@@ -865,7 +865,9 @@ class _MapProjection {
     final fitByHeight = countryHeight <= 0
         ? double.infinity
         : size.height * 0.82 / countryHeight;
-    final maximumDetail = size.width / (6 * math.pi / 180);
+    // Keep a little geographic context around small countries instead of
+    // letting them fill nearly the entire map viewport.
+    final maximumDetail = size.width / (12 * math.pi / 180);
     final scale = math.min(math.min(fitByWidth, fitByHeight), maximumDetail);
 
     return _MapProjection(
@@ -928,6 +930,27 @@ class _MapProjection {
       centerY - (_mercatorY(latitude) - centerMercatorY) * scale,
     );
   }
+}
+
+@visibleForTesting
+SimpleModeMapCameraFrame simpleModeMapFocusedCameraFrameForTesting({
+  required Size size,
+  required IpLocation location,
+  required Map<String, dynamic> countryData,
+}) {
+  final projection = _MapProjection.focused(
+    size: size,
+    location: location,
+    country: _MapCountry.fromJson(countryData),
+  );
+  return SimpleModeMapCameraFrame(
+    scale: projection.scale,
+    centerX: projection.centerX,
+    centerY: projection.centerY,
+    focusLongitude: projection.focusLongitude,
+    centerMercatorY: projection.centerMercatorY,
+    wrapLongitudes: projection.wrapLongitudes,
+  );
 }
 
 class _CountryBounds {
