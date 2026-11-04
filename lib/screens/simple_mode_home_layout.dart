@@ -187,12 +187,6 @@ class SimpleModeHomeLayout extends StatelessWidget {
                 },
               ),
             ),
-            _SimpleBottomNavigation(
-              isDark: isDark,
-              foreground: foreground,
-              accent: accent,
-              onSettings: onSettings,
-            ),
           ],
         ),
       ),
@@ -528,90 +522,6 @@ class _SimpleConnectionCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SimpleBottomNavigation extends StatelessWidget {
-  const _SimpleBottomNavigation({
-    required this.isDark,
-    required this.foreground,
-    required this.accent,
-    required this.onSettings,
-  });
-
-  final bool isDark;
-  final Color foreground;
-  final Color accent;
-  final VoidCallback onSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = isDark ? Colors.white70 : Colors.black54;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF24232F) : Colors.white,
-        border: Border(top: BorderSide(color: foreground.withValues(alpha: 0.07))),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _NavigationItem(icon: Icons.home_rounded, label: 'Home', active: true, color: accent, muted: muted),
-          _NavigationItem(icon: Icons.public_rounded, label: 'Servers', color: foreground, muted: muted),
-          _NavigationItem(icon: Icons.article_outlined, label: 'Profiles', color: foreground, muted: muted),
-          _NavigationItem(icon: Icons.settings_outlined, label: 'Settings', color: foreground, muted: muted, onTap: onSettings),
-        ],
-      ),
-    );
-  }
-}
-
-class _NavigationItem extends StatelessWidget {
-  const _NavigationItem({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.muted,
-    this.active = false,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final Color muted;
-  final bool active;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(26),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: active ? color.withValues(alpha: 0.18) : Colors.transparent,
-          borderRadius: BorderRadius.circular(26),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: active ? color : muted, size: 24),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                color: active ? color : muted,
-                fontSize: 11,
-                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
