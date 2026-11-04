@@ -125,7 +125,13 @@ class SimpleModeHomeLayout extends StatelessWidget {
                     builder: (context, constraints) {
                       final height = constraints.maxHeight;
                       final mapHeight =
+                          (height * 0.72).clamp(390.0, 720.0).toDouble();
+                      // Grow the lower map area without shifting the centered
+                      // power control from its previous on-screen position.
+                      final controlReferenceHeight =
                           (height * 0.64).clamp(390.0, 640.0).toDouble();
+                      final controlAlignmentY =
+                          (controlReferenceHeight * 0.55 / mapHeight) * 2 - 1;
                       return SingleChildScrollView(
                         physics: const BouncingScrollPhysics(),
                         child: Column(
@@ -136,7 +142,7 @@ class SimpleModeHomeLayout extends StatelessWidget {
                                 fit: StackFit.expand,
                                 children: [
                                   Align(
-                                    alignment: const Alignment(0, 0.10),
+                                    alignment: Alignment(0, controlAlignmentY),
                                     child: _SimpleMapControl(
                                       accent: accent,
                                       connected: connected,
