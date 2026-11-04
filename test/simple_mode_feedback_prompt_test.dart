@@ -17,6 +17,7 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   int refreshCalls = 0;
   int connectCalls = 0;
   int disconnectCalls = 0;
+  int cycleCalls = 0;
   VpnConnectionStatus currentStatus = VpnConnectionStatus.connected;
   int? ping = 42;
   String protocol = 'warp';
@@ -130,7 +131,10 @@ class _FakeVpnProvider extends ChangeNotifier implements VpnProvider {
   }
 
   @override
-  Future<bool> cycleSimpleConnection() async => true;
+  Future<bool> cycleSimpleConnection() async {
+    cycleCalls++;
+    return true;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
@@ -529,6 +533,11 @@ void main() {
       find.text('Are you satisfied with this connection?'),
       findsOneWidget,
     );
+    await tester.tap(find.text('Change server'));
+    await tester.pumpAndSettle();
+
+    expect(provider.cycleCalls, 1);
+    expect(find.text('Are you satisfied with this connection?'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

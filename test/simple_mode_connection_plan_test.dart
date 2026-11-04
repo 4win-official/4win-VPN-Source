@@ -166,6 +166,30 @@ void main() {
   );
 
   test(
+    'server cycling waits until native teardown has fully finished',
+    () async {
+      final states = <Map<String, dynamic>?>[
+        {'running': false, 'connected': false, 'reconnecting': true},
+        {'running': false, 'connected': false, 'reconnecting': false},
+      ];
+      var reads = 0;
+
+      final ready = await SimpleConnectionPlan.waitForReadiness(
+        () async => SimpleConnectionPlan.isNativeServiceStopped(
+          states[reads++],
+        ),
+        isCurrent: () => true,
+        timeout: const Duration(seconds: 1),
+        pollInterval: Duration.zero,
+      );
+
+      expect(ready, isTrue);
+      expect(reads, 2);
+      expect(SimpleConnectionPlan.isNativeServiceStopped(null), isFalse);
+    },
+  );
+
+  test(
     'native readiness times out and stops when the attempt is stale',
     () async {
       var reads = 0;

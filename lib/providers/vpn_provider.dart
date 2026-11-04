@@ -1434,9 +1434,7 @@ class VpnProvider with ChangeNotifier, WidgetsBindingObserver {
               'getState',
               {'protocol': 'xray'},
             );
-        return state?['running'] != true &&
-            state?['connected'] != true &&
-            state?['reconnecting'] != true;
+        return SimpleConnectionPlan.isNativeServiceStopped(state);
       },
       isCurrent: () => generation == _simpleConnectGeneration,
     );

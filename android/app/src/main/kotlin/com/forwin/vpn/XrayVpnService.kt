@@ -74,6 +74,10 @@ class XrayVpnService : VpnService() {
             private set
 
         @Volatile
+        var isStopping = false
+            private set
+
+        @Volatile
         var isMixModeRunning = false
             private set
 
@@ -456,6 +460,7 @@ class XrayVpnService : VpnService() {
     private fun invalidateConnectionLocked() {
         liveTraffic.stop()
         generation++
+        isStopping = true
         reconnectInProgress = false
         isReconnecting = false
         isMixModeReconnecting = false
@@ -492,6 +497,7 @@ class XrayVpnService : VpnService() {
         aetherGeneration=null
         runCatching { vpnInterface?.close() }; vpnInterface=null
         if (stopService) { runCatching { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true) }; stopSelf() }
+        isStopping = false
         return true
     }
     private fun requestShutdown(token: Long) {

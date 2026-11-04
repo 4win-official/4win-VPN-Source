@@ -1535,7 +1535,7 @@ class MainActivity: FlutterActivity() {
                 val serviceReconnecting = if (proxyMode) {
                     XrayProxyService.isReconnecting
                 } else {
-                    XrayVpnService.isReconnecting
+                    XrayVpnService.isReconnecting || XrayVpnService.isStopping
                 }
                 running = serviceRunning
                 reconnecting = serviceReconnecting

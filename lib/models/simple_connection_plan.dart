@@ -40,6 +40,14 @@ class SimpleConnectionPlan {
     return SimpleConnectionAttemptOutcome.failed;
   }
 
+  /// A missing state or a service still marked reconnecting/stopping is not
+  /// proof that native teardown has finished.
+  static bool isNativeServiceStopped(Map<String, dynamic>? state) =>
+      state != null &&
+      state['running'] == false &&
+      state['connected'] == false &&
+      state['reconnecting'] == false;
+
   /// Polls a native readiness check without accepting a stale attempt result.
   static Future<bool> waitForReadiness(
     Future<bool> Function() isReady, {
