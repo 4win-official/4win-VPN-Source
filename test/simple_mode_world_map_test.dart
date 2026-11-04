@@ -226,6 +226,41 @@ void main() {
     );
   });
 
+  test('same-country transitions preserve every source camera-frame value', () {
+    const sourceFrame = SimpleModeMapCameraFrame(
+      scale: 278.0,
+      centerX: 200.0,
+      centerY: 160.0,
+      focusLongitude: 53.0,
+      centerMercatorY: 0.56,
+      wrapLongitudes: true,
+    );
+    const destinationFrame = SimpleModeMapCameraFrame(
+      scale: 145.0,
+      centerX: 200.0,
+      centerY: 160.0,
+      focusLongitude: 51.4,
+      centerMercatorY: 0.64,
+      wrapLongitudes: true,
+    );
+
+    for (final progress in [0.0, 0.25, 0.5, 0.75, 1.0]) {
+      final frame = transitionSimpleModeMapCameraFrame(
+        size: const Size(400, 320),
+        from: sourceFrame,
+        to: destinationFrame,
+        progress: progress,
+        sameCountry: true,
+      );
+
+      expect(
+        identical(frame, sourceFrame),
+        isTrue,
+        reason: 'progress=$progress',
+      );
+    }
+  });
+
   testWidgets('connected state never relabels a VPN exit as the direct IP', (
     tester,
   ) async {

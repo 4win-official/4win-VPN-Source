@@ -46,6 +46,7 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap>
   IpLocation? _pendingVpnExitLocation;
   IpLocation? _transitionFrom;
   IpLocation? _transitionTo;
+  IpLocation? _cameraFrameLocation;
   int _directLookupGeneration = 0;
   int _exitLookupGeneration = 0;
   bool _directLookupInFlight = false;
@@ -77,6 +78,12 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap>
       return;
     }
     setState(() {
+      _cameraFrameLocation =
+          _transitionFrom != null &&
+              _transitionFrom!.countryCode.toUpperCase() ==
+                  _transitionTo!.countryCode.toUpperCase()
+          ? _transitionFrom
+          : null;
       _transitionFrom = null;
       _transitionTo = null;
     });
@@ -84,6 +91,7 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap>
 
   void _startCameraTransition(IpLocation? from, IpLocation to) {
     _cameraTransition.stop();
+    _cameraFrameLocation = null;
     if (from == null) {
       setState(() {
         _transitionFrom = null;
@@ -277,6 +285,7 @@ class _SimpleModeWorldMapState extends State<SimpleModeWorldMap>
             painter: _CountryAtlasPainter(
               countries: _countries,
               location: location,
+              cameraFrameLocation: _cameraFrameLocation,
               transitionFrom: _transitionFrom,
               transitionTo: _transitionTo,
               transitionProgress: _cameraTransition.value,
@@ -321,6 +330,64 @@ bool _sameIpLocation(IpLocation first, IpLocation second) =>
     first.countryCode.toUpperCase() == second.countryCode.toUpperCase() &&
     first.latitude == second.latitude &&
     first.longitude == second.longitude;
+
+@visibleForTesting
+class SimpleModeMapCameraFrame {
+  const SimpleModeMapCameraFrame({
+    required this.scale,
+    required this.centerX,
+    required this.centerY,
+    required this.focusLongitude,
+    required this.centerMercatorY,
+    required this.wrapLongitudes,
+  });
+
+  final double scale;
+  final double centerX;
+  final double centerY;
+  final double focusLongitude;
+  final double centerMercatorY;
+  final bool wrapLongitudes;
+}
+
+@visibleForTesting
+SimpleModeMapCameraFrame transitionSimpleModeMapCameraFrame({
+  required Size size,
+  required SimpleModeMapCameraFrame from,
+  required SimpleModeMapCameraFrame to,
+  required double progress,
+  required bool sameCountry,
+}) {
+  if (sameCountry) return from;
+
+  final t = Curves.easeInOutCubic.transform(
+    progress.clamp(0.0, 1.0).toDouble(),
+  );
+  final leastDetailedFocus = math.min(from.scale, to.scale);
+  final worldScale = _MapProjection.world(size).scale;
+  final targetZoomOutScale = math.max(
+    worldScale * 1.18,
+    leastDetailedFocus * 0.24,
+  );
+  final zoomOutScale = math.min(leastDetailedFocus, targetZoomOutScale);
+  final interpolatedScale = from.scale + (to.scale - from.scale) * t;
+  final zoomOutAmount = math.sin(math.pi * t);
+  final destinationLongitude =
+      from.focusLongitude +
+      _wrappedLongitudeDelta(to.focusLongitude, from.focusLongitude);
+
+  return SimpleModeMapCameraFrame(
+    scale:
+        interpolatedScale - (interpolatedScale - zoomOutScale) * zoomOutAmount,
+    centerX: from.centerX + (to.centerX - from.centerX) * t,
+    centerY: from.centerY + (to.centerY - from.centerY) * t,
+    focusLongitude:
+        from.focusLongitude + (destinationLongitude - from.focusLongitude) * t,
+    centerMercatorY:
+        from.centerMercatorY + (to.centerMercatorY - from.centerMercatorY) * t,
+    wrapLongitudes: true,
+  );
+}
 
 IpLocation _interpolateIpLocation(
   IpLocation from,
@@ -487,6 +554,7 @@ class _CountryAtlasPainter extends CustomPainter {
   const _CountryAtlasPainter({
     required this.countries,
     required this.location,
+    required this.cameraFrameLocation,
     required this.transitionFrom,
     required this.transitionTo,
     required this.transitionProgress,
@@ -498,6 +566,7 @@ class _CountryAtlasPainter extends CustomPainter {
 
   final List<_MapCountry> countries;
   final IpLocation? location;
+  final IpLocation? cameraFrameLocation;
   final IpLocation? transitionFrom;
   final IpLocation? transitionTo;
   final double transitionProgress;
@@ -518,9 +587,10 @@ class _CountryAtlasPainter extends CustomPainter {
     final sourcePalette = _MapPalette.direct(isDark: isDark);
     final exitPalette = _MapPalette.exit(isDark: isDark);
     final selectedCode = location?.countryCode.toUpperCase();
-    final selectedCountry = selectedCode == null
-        ? null
-        : _countryForCode(selectedCode);
+    final frameLocation =
+        cameraFrameLocation?.countryCode.toUpperCase() == selectedCode
+        ? cameraFrameLocation
+        : location;
     final hasTransition = transitionFrom != null && transitionTo != null;
     final progress = transitionProgress.clamp(0.0, 1.0).toDouble();
     final projection = hasTransition
@@ -547,8 +617,8 @@ class _CountryAtlasPainter extends CustomPainter {
         ? _MapProjection.world(size)
         : _MapProjection.focused(
             size: size,
-            location: location!,
-            country: selectedCountry,
+            location: frameLocation!,
+            country: _countryForCode(frameLocation.countryCode.toUpperCase()),
           );
 
     canvas.save();
@@ -707,6 +777,7 @@ class _CountryAtlasPainter extends CustomPainter {
   bool shouldRepaint(covariant _CountryAtlasPainter oldDelegate) =>
       !identical(countries, oldDelegate.countries) ||
       !identical(location, oldDelegate.location) ||
+      !identical(cameraFrameLocation, oldDelegate.cameraFrameLocation) ||
       !identical(transitionFrom, oldDelegate.transitionFrom) ||
       !identical(transitionTo, oldDelegate.transitionTo) ||
       transitionProgress != oldDelegate.transitionProgress ||
@@ -815,35 +886,34 @@ class _MapProjection {
     required double progress,
     required bool sameCountry,
   }) {
-    final t = Curves.easeInOutCubic.transform(
-      progress.clamp(0.0, 1.0).toDouble(),
+    final frame = transitionSimpleModeMapCameraFrame(
+      size: size,
+      from: SimpleModeMapCameraFrame(
+        scale: from.scale,
+        centerX: from.centerX,
+        centerY: from.centerY,
+        focusLongitude: from.focusLongitude,
+        centerMercatorY: from.centerMercatorY,
+        wrapLongitudes: from.wrapLongitudes,
+      ),
+      to: SimpleModeMapCameraFrame(
+        scale: to.scale,
+        centerX: to.centerX,
+        centerY: to.centerY,
+        focusLongitude: to.focusLongitude,
+        centerMercatorY: to.centerMercatorY,
+        wrapLongitudes: to.wrapLongitudes,
+      ),
+      progress: progress,
+      sameCountry: sameCountry,
     );
-    final leastDetailedFocus = math.min(from.scale, to.scale);
-    final worldScale = _MapProjection.world(size).scale;
-    final targetZoomOutScale = math.max(
-      worldScale * 1.18,
-      leastDetailedFocus * (sameCountry ? 0.62 : 0.24),
-    );
-    final zoomOutScale = math.min(leastDetailedFocus, targetZoomOutScale);
-    final interpolatedScale = from.scale + (to.scale - from.scale) * t;
-    final zoomOutAmount = math.sin(math.pi * t);
-    final destinationLongitude =
-        from.focusLongitude +
-        _wrappedLongitudeDelta(to.focusLongitude, from.focusLongitude);
-
     return _MapProjection(
-      scale:
-          interpolatedScale -
-          (interpolatedScale - zoomOutScale) * zoomOutAmount,
-      centerX: from.centerX + (to.centerX - from.centerX) * t,
-      centerY: from.centerY + (to.centerY - from.centerY) * t,
-      focusLongitude:
-          from.focusLongitude +
-          (destinationLongitude - from.focusLongitude) * t,
-      centerMercatorY:
-          from.centerMercatorY +
-          (to.centerMercatorY - from.centerMercatorY) * t,
-      wrapLongitudes: true,
+      scale: frame.scale,
+      centerX: frame.centerX,
+      centerY: frame.centerY,
+      focusLongitude: frame.focusLongitude,
+      centerMercatorY: frame.centerMercatorY,
+      wrapLongitudes: frame.wrapLongitudes,
     );
   }
 
